@@ -9,9 +9,6 @@ const sqlLoader = require("../../lib/sql/loader");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-const ID_LIMIT = 5000;
-// const ID_LIMIT = 5;
-
 module.exports = function(config, sql, domain) {
 	return sqlLoader(() => {
 		let m = mysql.createPool(Object.assign({
