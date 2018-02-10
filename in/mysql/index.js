@@ -1,53 +1,43 @@
-var spawn = require('child_process').spawn;
-var child = spawn(`/app/bin/maxwell`, [
-	'--user', 'root',
-	'--password=', 'a',
-	'--host', '10.0.75.1',
-	'--producer', 'stdout',
-	'--log_level', 'ERROR'
-]);
+"use strict";
 
-const leo = require("leo-sdk")({
-	"region": "us-west-2",
-	"kinesis": "Leo-KinesisStream-ATNV3XQO0YHV",
-	"s3": "leoplatform",
-	"firehose": "Leo-FirehoseStream-189A8WXE76MFS",
-	"resources": {
-		"LeoArchive": "Leo_archive",
-		"LeoCron": "Leo_cron",
-		"LeoEvent": "Leo_event",
-		"LeoSettings": "Leo_settings",
-		"LeoStream": "Leo_stream",
-		"LeoSystem": "Leo_system"
-	}
-});
+const mysql = require("mysql");
+const logger = require("leo-sdk/lib/logger")("connector.sql.mysql");
+
+
+const sqlLoader = require("../../lib/sql/loader");
+
+const leo = require("leo-sdk");
 const ls = leo.streams;
 
-let i = 0;
-child.stdout.pipe(ls.through((obj, done) => {
-	if (obj.toString().match(/^Using/)) {
-		done(null);
-	} else {
-		done(null, obj);
-	}
-})).pipe(ls.parse()).pipe(ls.through((obj, done) => {
-	i++;
-	if (i % 10000 == 0) {
-		console.log(i);
-	}
-	done(null, obj);
-})).pipe(leo.write("mysqlbinlog", {
-	useS3: true,
-	chunk: {
-		useS3Mode: true
-	}
-}));
+const ID_LIMIT = 5000;
+// const ID_LIMIT = 5;
 
-child.stderr.on('data', function(data) {
-	console.log('stderr: ' + data);
-	//Here is where the error output goes
-});
-child.on('close', function(code) {
-	console.log('closing code: ' + code);
-	//Here you can get the exit code of the script
-});
+module.exports = function(config, sql, domain) {
+	return sqlLoader(() => {
+		let m = mysql.createPool(Object.assign({
+			host: "localhost",
+			user: "root",
+			port: 3306,
+			database: "datawarehouse",
+			password: "a",
+			connectionLimit: 10
+		}));
+		let queryCount = 0;
+		return {
+			query: function(query, callback) {
+				let queryId = ++queryCount;
+				let log = logger.sub("query");
+				log.info(`SQL query #${queryId} is `, query);
+				log.time(`Ran Query #${queryId}`);
+				m.query(query, function(err, result, fields) {
+					log.timeEnd(`Ran Query #${queryId}`);
+					if (err) {
+						log.error("Had error", err);
+					}
+					callback(err, result, fields);
+				})
+			},
+			disconnect: m.end
+		};
+	}, sql, domain);
+};
