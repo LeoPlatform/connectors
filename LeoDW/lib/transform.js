@@ -3,7 +3,7 @@
 module.exports = {
 	parseTable: function(obj) {
 		if (obj.table) {
-			return table;
+			return obj.table;
 		} else if (obj.type) {
 			if (obj.type == "fact") {
 				return "f_" + obj.entity.toLowerCase().replace(/\s/g, '_');

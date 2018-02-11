@@ -16,25 +16,24 @@ module.exports = function(toStream) {
 	let mergeCount = 0;
 	let tableLoadCounts = {};
 
-	let fields = {};
-	return ls.write((obj, enc, done) => {
+	return ls.through((obj, done) => {
 		let payload = obj.payload;
 
 		let table = transform.parseTable(payload);
 		let values = transform.parseValues(payload.data);
-
-		Object.keys(values).forEach(f => fields[f] = 1);
 
 		let stream = streams[table];
 		if (!stream) {
 			let unsortedFile = `/tmp/leo_dw_${table}`;
 			stream = streams[table] = {
 				table: table,
+				fields: {},
 				unsortedFile: unsortedFile,
 				sortedFile: unsortedFile + "_sorted",
 				stream: fs.createWriteStream(unsortedFile)
 			};
 		}
+		Object.keys(values).forEach(f => stream.fields[f] = 1);
 		count++;
 		if (count % 10000 == 0) {
 			console.log(count);
@@ -47,7 +46,7 @@ module.exports = function(toStream) {
 			done(null);
 		}
 	}, function(done) {
-		tasks = [];
+		let tasks = [];
 		Object.keys(streams).forEach((t) => {
 			tasks.push((done) => {
 				let table = streams[t];
@@ -59,18 +58,25 @@ module.exports = function(toStream) {
 						tableLoadCounts[t]++;
 						mergeCount++;
 						done(null, obj);
-					}), toStream(table.table, Object.keys(fields)), (err) => {
-						console.log("done here");
-						done();
+					}), toStream(table.table, Object.keys(table.fields)), (err) => {
+						done(err);
 					});
 				});
 			});
 		});
 		async.parallelLimit(tasks, 4, err => {
-			console.log(err);
-			console.log("all done", done);
-			done();
-		})
+			if (!err) {
+				let tables = {};
+				Object.keys(streams).forEach(t => {
+					tables[t] = {
+						table: t,
+						fields: Object.keys(streams[t].fields)
+					};
+				})
+				this.push(tables);
+			}
+			done(err);
+		});
 	});
 };
 
@@ -89,7 +95,7 @@ function combine(file) {
 		}
 	}, function(error, stdout, stderr) {
 		if (error) {
-			pass.emit("err", error);
+			pass.emit("error", error);
 			pass.end();
 			return;
 		}
@@ -122,11 +128,10 @@ function combine(file) {
 			}
 		}), pass, (err) => {
 			if (err) {
-				console.log(err);
-				pass.emit('err', err);
+				pass.emit('error', err);
 			} else {
 				console.timeEnd("Merged File " + sortedFile);
-				// fs.unlinkSync(sortedFile);
+				fs.unlinkSync(sortedFile);
 			}
 		});
 	});

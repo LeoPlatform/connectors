@@ -16,16 +16,24 @@ exports.handler = function(event, context, callback) {
 		}),
 		combine((table, fieldList) => {
 			return ls.pipeline(ls.toCSV(fieldList, {
-				trim: true,
-				escape: '\\',
-				nullValue: "\\N",
-				delimiter: '|'
-			}), fs.createWriteStream("/tmp/new_cool" + table + ".csv"));
+				// trim: true,
+				// escape: '\\',
+				// nullValue: "\\N",
+				// delimiter: '|'
+			}), fs.createWriteStream("/tmp/new_cool_" + table + ".csv"));
+		}),
+		ls.through((obj, done) => {
+			console.log(obj);
+			done();
 		}),
 		(err) => {
+			console.log("in here");
 			console.log(err);
+			if (!err) {
+				//todo
+				// ??? manualCheckpoint.end();			
+			}
 		}
-
 	);
 
 };
