@@ -8,9 +8,14 @@ const connect = require("./lib/connect.js");
 module.exports = function(config) {
 	let client = connect(config);
 	console.log(client);
+
+
+
 	return {
 		fields: [],
 		init: function(obj, callback) {
+			console.log(obj);
+
 			client.query(`select ${obj.fields.join(', ')}
 				from "${obj.tableName}"
 				LIMIT 0`, (err, results, fields) => {

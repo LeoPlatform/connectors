@@ -56,7 +56,37 @@ describe('SQL', function() {
 			});
 		});
 
-
+		it.only('Should be able to init from SQL', function(done) {
+			postgres.init({
+				sql: `SELECT id, name, name||id, now()
+					from test 
+					where id < 10000
+					order by id asc`
+			}, () => {
+				postgres.fields.should.eql([{
+					column: 'id',
+					type_id: 23,
+					type: 'int4',
+					sql: 'coalesce(md5((id)::text), \' \')'
+				}, {
+					column: 'name',
+					type_id: 1043,
+					type: 'varchar',
+					sql: 'coalesce(md5((name)::text), \' \')'
+				}, {
+					column: 'name||id',
+					type_id: 25,
+					type: 'text',
+					sql: 'coalesce(md5((name||id)::text), \' \')'
+				}, {
+					column: "now()",
+					sql: "coalesce(md5(floor(date_part(epoch, (now())))::text), ' ')",
+					type: "timestamptz",
+					type_id: 1184
+				}]);
+				done();
+			});
+		});
 		it('should be able to batch compare', function(done) {
 			let config = {
 				fields: ['id', 'name', 'name||id', "to_timestamp('05 Dec 2000','DD Mon YYYY')"],
@@ -77,7 +107,6 @@ describe('SQL', function() {
 				});
 			});
 		});
-
 		it('should be able to individual compare', function(done) {
 			let config = {
 				fields: ['id', 'name', 'name||id', "to_timestamp('05 Dec 2000','DD Mon YYYY')"],
@@ -96,7 +125,6 @@ describe('SQL', function() {
 				});
 			});
 		});
-
 		it('should be able to sample', function(done) {
 			let config = {
 				fields: ['id', 'name', 'name||id as nameconcat', "to_timestamp('05 Dec 2000','DD Mon YYYY') as customdate"],
@@ -137,7 +165,6 @@ describe('SQL', function() {
 				});
 			});
 		});
-
 		it('should be able to range', function(done) {
 			let config = {
 				fields: ['id', 'name', 'name||id as nameconcat', "to_timestamp('05 Dec 2000','DD Mon YYYY') as customdate"],
