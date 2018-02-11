@@ -7,7 +7,7 @@ const ls = require("leo-sdk").streams;
 
 const loader = require("../");
 
-describe.only('SQL', function() {
+describe('SQL', function() {
 	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
 		this.timeout(1000 * 30);
 		let stream = new PassThrough({
