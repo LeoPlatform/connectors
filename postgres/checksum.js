@@ -9,11 +9,7 @@ module.exports = function(config) {
 	let client = connect(config);
 	console.log(client);
 
-
-	let session = {};
-
 	return {
-		fields: [],
 		init: function(obj, callback) {
 			if (!obj.sql) {
 				obj.sql = `select ${obj.fields.join(', ')}
