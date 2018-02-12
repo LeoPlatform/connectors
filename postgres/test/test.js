@@ -28,8 +28,6 @@ describe('SQL', function() {
 			stream.end();
 		});
 
-
-
 		let transform = loader({
 			user: 'root',
 			host: 'samplepostgressloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
@@ -42,9 +40,15 @@ describe('SQL', function() {
 			return {
 				sql: `select * from test where id in (${ids.join()})`,
 				id: "id",
-				hasMany: {
-					Customer2: {
-						on: "changed",
+				joins: {
+					Customer: {
+						type: 'one_to_many',
+						on: "id",
+						sql: `select * from test where id in (${ids.join()})`
+					},
+					Bob: {
+						type: 'one_to_one',
+						on: 'changed',
 						sql: `select * from test where id in (${ids.join()})`,
 						transform: row => {
 							return {
@@ -52,13 +56,6 @@ describe('SQL', function() {
 								combined: row.name + "-" + row.somethingelse
 							};
 						}
-					}
-				},
-				hasOne: {
-					Bob2: {
-						type: {},
-						on: "id",
-						sql: `select * from test where id in (${ids.join()})`
 					}
 				}
 			};

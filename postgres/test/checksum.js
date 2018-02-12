@@ -7,6 +7,10 @@ const ls = require("leo-sdk").streams;
 
 const checksum = require("../checksum.js");
 
+require("leo-sdk/lib/logger").configure(/.*/, {
+	all: true
+});
+
 describe('SQL', function() {
 	describe.only('Checksum', function() {
 
@@ -30,8 +34,8 @@ describe('SQL', function() {
 				fields: ['id', 'name', 'name||id', 'now()'],
 				tableName: 'test',
 				database: 'test'
-			}, () => {
-				postgres.fields.should.eql([{
+			}, (err, session) => {
+				session.fields.should.eql([{
 					column: 'id',
 					type_id: 23,
 					type: 'int4',
@@ -48,7 +52,7 @@ describe('SQL', function() {
 					sql: 'coalesce(md5((name||id)::text), \' \')'
 				}, {
 					column: "now()",
-					sql: "coalesce(md5(floor(date_part(epoch, (now())))::text), ' ')",
+					sql: "coalesce(md5(extract(date_part(epoch, (now())))::text), ' ')",
 					type: "timestamptz",
 					type_id: 1184
 				}]);
@@ -56,14 +60,16 @@ describe('SQL', function() {
 			});
 		});
 
-		it.only('Should be able to init from SQL', function(done) {
+		it.only('Should be able to run from SQL as well', function(done) {
 			postgres.init({
-				sql: `SELECT id, name, name||id, now()
+				sql: `SELECT id, name, name||id as nameconcat
 					from test 
-					where id < 10000
-					order by id asc`
-			}, () => {
-				postgres.fields.should.eql([{
+					where id __IDCOLUMNLIMIT__
+					order by id asc`,
+				id_column: 'id',
+				table_name: 'test'
+			}, (err, session) => {
+				session.fields.should.eql([{
 					column: 'id',
 					type_id: 23,
 					type: 'int4',
@@ -74,17 +80,88 @@ describe('SQL', function() {
 					type: 'varchar',
 					sql: 'coalesce(md5((name)::text), \' \')'
 				}, {
-					column: 'name||id',
+					column: 'nameconcat',
 					type_id: 25,
 					type: 'text',
-					sql: 'coalesce(md5((name||id)::text), \' \')'
-				}, {
-					column: "now()",
-					sql: "coalesce(md5(floor(date_part(epoch, (now())))::text), ' ')",
-					type: "timestamptz",
-					type_id: 1184
+					sql: 'coalesce(md5((nameconcat)::text), \' \')'
 				}]);
-				done();
+
+				postgres.range(session, {}, (err, result) => {
+					result[0].should.eql({
+						min: 1,
+						max: 262144,
+						total: 262144
+					});
+					session.min = result[0].min;
+					session.max = result[0].max;
+					session.total = result[0].total;
+
+					postgres.nibble(session, {
+						start: session.min,
+						limit: 10000
+					}, (err, result) => {
+						result.should.eql([{
+							id: 10000
+						}, {
+							id: 10001
+						}]);
+
+						let data = {
+							start: session.min,
+							end: result[0].id
+						};
+						postgres.batch(session, data, (err, result) => {
+							result[0].should.eql({
+								count: '1000',
+								"sum1": "2163986443231",
+								"sum2": "2124315090047",
+								"sum3": "2148943092525",
+								"sum4": "2164901531976",
+							});
+							postgres.individual(session, data, (err, result) => {
+								result[0].should.eql({
+									id: 1,
+									hash: '1f45ebfd04cdc7d75782b34300b7bb21'
+								});
+								result.length.should.eql(1000);
+								postgres.sample(session, {
+									ids: [1, 2, 3, 4, 5]
+								}, (err, result) => {
+									result.should.eql([{
+										id: 1,
+										name: 'steve1',
+										nameconcat: 'steve11',
+									}, {
+										id: 2,
+										name: 'steve2',
+										nameconcat: 'steve22',
+									}, {
+										id: 3,
+										name: 'steve3',
+										nameconcat: 'steve33',
+									}, {
+										id: 4,
+										name: 'steve3',
+										nameconcat: 'steve34',
+									}, {
+										id: 5,
+										name: 'steve4',
+										nameconcat: 'steve45',
+									}]);
+
+
+									postgres.nibble(session, {
+										start: session.max - 10,
+										limit: 10000
+									}, (err, result) => {
+										result.should.eql([]);
+										done();
+									});
+								});
+							});
+						});
+					});
+				});
 			});
 		});
 		it('should be able to batch compare', function(done) {

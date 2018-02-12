@@ -22,12 +22,17 @@ module.exports = function(config) {
 
 	let queryCount = 0;
 	return {
-		query: function(query, callback) {
+		query: function(query, params, callback) {
+			if (!callback) {
+				callback = params;
+				params = null;
+			}
+
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
 			log.info(`SQL query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
-			pool.query(query, function(err, result) {
+			pool.query(query, params, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.info("Had error", err);

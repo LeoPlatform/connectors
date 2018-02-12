@@ -10,29 +10,39 @@ module.exports = function(config) {
 	console.log(client);
 
 
+	let session = {};
 
 	return {
 		fields: [],
 		init: function(obj, callback) {
-			console.log(obj);
-
-			client.query(`select ${obj.fields.join(', ')}
+			if (!obj.sql) {
+				obj.sql = `select ${obj.fields.join(', ')}
 				from "${obj.tableName}"
-				LIMIT 0`, (err, results, fields) => {
+				WHERE ${obj.id_column} __IDCOLUMNLIMIT__
+				`;
+			}
+			client.query(`${obj.sql.replace('__IDCOLUMNLIMIT__', ' between 1 and 0')} LIMIT 0`, (err, results, fields) => {
+				let rFields = [];
+				console.log(fields);
 				fields.forEach((f, i) => {
 					let field = {
-						column: obj.fields[i],
+						column: obj.fields ? obj.fields[i] : f.name,
 						type_id: f.dataTypeID,
 						type: types[f.dataTypeID]
 					};
 					if (field.type.match(/date/) || field.type.match(/time/)) {
-						field.sql = `coalesce(md5(floor(date_part(epoch, (${field.column})))::text), ' ')`;
+						field.sql = `coalesce(md5(floor(extract(epoch from ${field.column}))::text), ' ')`;
 					} else {
 						field.sql = `coalesce(md5((${field.column})::text), ' ')`;
 					}
-					this.fields.push(field);
+					rFields.push(field);
 				});
-				callback();
+				callback(null, {
+					fields: rFields,
+					tableName: obj.table_name || obj.tableName,
+					idColumn: obj.id_column || obj.idColumn,
+					sql: obj.sql
+				});
 			});
 		},
 		destroy: function() {
@@ -41,71 +51,61 @@ module.exports = function(config) {
 		escape: function(val) {
 
 		},
-		batch: (tableName, idColumn, fields, where, callback) => {
+		batch: (session, data, callback) => {
 			client.query(`select count(*) as count,
 						sum(('x' || substring(hash, 1, 8))::bit(32)::bigint) as sum1,
-						sum(('x' || substring(hash, 9, 8))::bit(32)::bigint)  as sum2,
+						sum(('x' || substring(hash, 9, 8))::bit(32)::bigint) as sum2,
 						sum(('x' || substring(hash, 17, 8))::bit(32)::bigint) as sum3,
 						sum(('x' || substring(hash, 25, 8))::bit(32)::bigint) as sum4
 					FROM (
-				        select md5(${fields.join(' || ')}) as "hash"
-						from "${tableName}"
-						${where}
-						order by ${idColumn} asc limit 1000
+				        select md5(${session.fields.map(f=>f.sql).join(' || ')}) as "hash"
+						from (
+							${session.sql.replace('__IDCOLUMNLIMIT__', " between 0 and 1000")} 
+						 ) i 
 				) as t`, callback);
 		},
-		individual: (tableName, idColumn, fields, where, callback) => {
-			client.query(`select "${idColumn}" as id, md5(${fields.join(' || ')}) as "hash"
-							from "${tableName}"
-							${where}
-							order by ${idColumn} asc limit 1000`, callback);
+		individual: (session, data, callback) => {
+			client.query(`select "${session.idColumn}" as id, md5(${session.fields.map(f=>f.sql).join(' || ')}) as "hash"
+						  from (
+								${session.sql.replace('__IDCOLUMNLIMIT__', " between 0 and 1000")} 
+						   ) i `, callback);
 		},
-		sample: (tableName, idColumn, fields, ids, callback) => {
-			client.query(`select "${idColumn}" as id, ${fields.join(',')}
-							from "${tableName}"
-							where ${idColumn} in (${ids.join(',')})
-							order by ${idColumn} asc`, callback);
+		sample: (session, data, callback) => {
+			client.query(`select "${session.idColumn}" as id, ${session.fields.map(f=>f.column).join(',')}
+							from (
+							    ${session.sql.replace('__IDCOLUMNLIMIT__', " = ANY($1::int[])")} 
+						    ) i 
+							`, [data.ids], callback);
 		},
-		range: (tableName, idColumn, min, max, callback) => {
+		range: (session, data, callback) => {
 			let where = [];
-			if (min) {
-				where.push(`"${idColumn}" >= ${escape(min)}`);
+			if (data.min) {
+				where.push(`"${idColumn}" >= ${escape(data.min)}`);
 			}
-			if (max) {
-				where.push(`"${idColumn}" <= ${escape(max)}`);
+			if (data.max) {
+				where.push(`"${idColumn}" <= ${escape(data.max)}`);
 			}
 			var whereStatement = "";
 			if (where.length) {
 				whereStatement = ` where ${where.join(" and ")} `;
 			}
-			client.query(`select MIN("${idColumn}") as min, MAX("${idColumn}") as max, count("${idColumn}")::int total from "${tableName}" ${whereStatement}`, callback);
+			client.query(`select MIN("${session.idColumn}") as min, MAX("${session.idColumn}") as max, count("${session.idColumn}")::int total from "${session.tableName}" ${whereStatement}`, callback);
 		},
-		nibble: (tableName, idColumn, min, max, limit, callback) => {
+		nibble: (session, data, callback) => {
 			let where = [];
-			if (min) {
-				where.push(`"${idColumn}" >= ${escape(min)}`);
+			if (data.start) {
+				where.push(`"${session.idColumn}" >= ${escape(data.start)}`);
 			}
-			if (max) {
-				where.push(`"${idColumn}" <= ${escape(max)}`);
+			if (session.max) {
+				where.push(`"${session.idColumn}" <= ${escape(session.max)}`);
 			}
 			var whereStatement = "";
 			if (where.length) {
 				whereStatement = ` where ${where.join(" and ")} `;
 			}
-			// ${!data.reverse ? "asc":"desc"}
-			console.log(`select "${idColumn}" from "${tableName}" ${whereStatement} LIMIT 2 OFFSET ${limit-1}`);
-			client.query(`select "${idColumn}" from "${tableName}" ${whereStatement} LIMIT 2 OFFSET ${limit-1}`, callback);
-			/*
-					connection.end();
-		if (err) {
-			console.log("Nibble Error", err);
-			callback(err);
-		} else {
-			data.current = rows[0] ? rows[0].id : null;
-			data.next = rows[1] ? rows[1].id : null;
-			callback(null, data)
-		}
-		*/
+			client.query(`select "${session.idColumn}" from "${session.tableName}" ${whereStatement} 
+				ORDER BY ${session.idColumn} ${session.reverse?'desc':'asc'}
+				LIMIT 2 OFFSET ${data.limit-1}`, callback);
 		}
 	};
 };
