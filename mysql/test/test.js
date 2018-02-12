@@ -43,9 +43,15 @@ describe.only('SQL', function() {
 			return {
 				sql: `select * from test where id in (${ids.join()})`,
 				id: "id",
-				hasMany: {
-					Customer2: {
-						on: "changed",
+				joins: {
+					Customer: {
+						type: 'one_to_many',
+						on: "id",
+						sql: `select * from test where id in (${ids.join()})`
+					},
+					Bob: {
+						type: 'one_to_one',
+						on: 'changed',
 						sql: `select * from test where id in (${ids.join()})`,
 						transform: row => {
 							return {
@@ -53,13 +59,6 @@ describe.only('SQL', function() {
 								combined: row.name + "-" + row.somethingelse
 							};
 						}
-					}
-				},
-				hasOne: {
-					Bob2: {
-						type: {},
-						on: "id",
-						sql: `select * from test where id in (${ids.join()})`
 					}
 				}
 			};

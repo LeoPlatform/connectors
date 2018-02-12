@@ -30,7 +30,7 @@ module.exports = function(config) {
 			pool.query(query, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.error("Had error", err);
+					log.info("Had error", err);
 					callback(err);
 				} else {
 					callback(null, result.rows, result.fields);

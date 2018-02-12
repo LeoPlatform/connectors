@@ -48,7 +48,7 @@ module.exports = function(config) {
 				pool.request().query(query, function(err, result, fields) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
-						log.error("Had error", err);
+						log.info("Had error", err);
 						callback(err);
 					} else {
 						callback(null, result.recordset, fields);

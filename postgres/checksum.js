@@ -92,6 +92,7 @@ module.exports = function(config) {
 			if (where.length) {
 				whereStatement = ` where ${where.join(" and ")} `;
 			}
+			// ${!data.reverse ? "asc":"desc"}
 			console.log(`select "${idColumn}" from "${tableName}" ${whereStatement} LIMIT 2 OFFSET ${limit-1}`);
 			client.query(`select "${idColumn}" from "${tableName}" ${whereStatement} LIMIT 2 OFFSET ${limit-1}`, callback);
 			/*
