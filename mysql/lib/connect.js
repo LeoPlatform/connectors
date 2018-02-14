@@ -11,7 +11,8 @@ module.exports = function(config) {
 		port: 3306,
 		database: "datawarehouse",
 		password: "a",
-		connectionLimit: 10
+		connectionLimit: 10,
+		timezone: 'utc'
 	}, config));
 	let queryCount = 0;
 	return {
