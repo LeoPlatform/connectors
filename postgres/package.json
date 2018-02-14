@@ -1,0 +1,15 @@
+{
+  "name": "leo-postgress",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --recursive -w"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "leo-sdk": "^1.0.54",
+    "pg": "^7.4.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "leo-mysql",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --recursive -w"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "leo-sdk": "^1.0.54",
+    "mysql": "^2.15.0"
+  }
+}
