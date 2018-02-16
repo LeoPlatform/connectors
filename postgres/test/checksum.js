@@ -12,7 +12,7 @@ require("leo-sdk/lib/logger").configure(/.*/, {
 });
 
 describe('SQL', function() {
-	describe.only('Checksum', function() {
+	describe('Checksum', function() {
 
 		let postgres;
 

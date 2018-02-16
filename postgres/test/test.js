@@ -8,7 +8,7 @@ const ls = require("leo-sdk").streams;
 const loader = require("../");
 
 describe('SQL', function() {
-	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
+	it.only('Should be able to stream changed IDs in and receive full objects out', function(done) {
 		this.timeout(1000 * 30);
 		let stream = new PassThrough({
 			objectMode: true
@@ -18,7 +18,9 @@ describe('SQL', function() {
 		const MAX = 24531;
 		async.doWhilst((done) => {
 			if (!stream.write({
-					test: [++count, ++count, ++count]
+					payload: {
+						test: [++count, ++count, ++count]
+					}
 				})) {
 				stream.once('drain', done);
 			} else {

@@ -19,12 +19,11 @@ module.exports = function(config) {
 	let isConnected = false;
 
 	pool.connect(err => {
+		isConnected = true;
 		if (err) {
 			console.log(err);
 			process.exit();
 		} else if (buffer.length) {
-			console.log("connected");
-			isConnected = true;
 			buffer.forEach(i => {
 				client.query(i.query, i.callback);
 			});
