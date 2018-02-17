@@ -11,7 +11,7 @@
 	},
 	"config": {
 		"test": {
-			"watch": ["../../../lib", "../../../../mysql"]
+			"watch": ["../../../lib", "../../../../postgres"]
 		},
 		"leo": {
 			"type": "cron",

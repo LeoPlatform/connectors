@@ -9,7 +9,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "fast-csv": "^2.4.1",
     "leo-sdk": "^1.0.54",
-    "pg": "^7.4.1"
+    "pg": "^7.4.1",
+    "pg-copy-streams": "^1.2.0",
+    "pg-format": "^1.0.4"
   }
 }

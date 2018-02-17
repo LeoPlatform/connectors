@@ -10,17 +10,25 @@ const transform = require("./transform.js");
 const async = require("async");
 
 
-module.exports = function(toStream) {
+module.exports = function(toStream, opts) {
 	let streams = {};
 	let count = 0;
 	let mergeCount = 0;
 	let tableLoadCounts = {};
 
+
+	opts = Object.assign({
+		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' ')
+	});
+
+
+	let dateFormat = opts.dateFormat;
+
 	return ls.through((obj, done) => {
 		let payload = obj.payload;
 
 		let table = transform.parseTable(payload);
-		let values = transform.parseValues(payload.data);
+		let values = transform.parseValues(payload.data, dateFormat);
 
 		let stream = streams[table];
 		if (!stream) {
