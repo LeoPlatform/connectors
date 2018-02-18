@@ -42,7 +42,6 @@ module.exports = function(config) {
 			log.info(`SQL query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
 			pool.query(query, params, function(err, result) {
-				console.log(err, result);
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.info("Had error", err);
@@ -85,7 +84,7 @@ module.exports = function(config) {
 				records: opts.records
 			});
 		},
-		streamToTable: function(table, fields, opts) {
+		streamToTable: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
 			});
@@ -99,9 +98,6 @@ module.exports = function(config) {
 					myClient = c;
 
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN`));
-					stream.on('end', () => {
-						myClient.end();
-					});
 					if (pending) {
 						pending();
 					}
@@ -143,6 +139,10 @@ module.exports = function(config) {
 					done(null);
 				}
 			}, (done) => {
+				stream.on('end', () => {
+					myClient.end();
+					done();
+				});
 				stream.end();
 			}));
 		}

@@ -4,7 +4,7 @@ const client = require("../../postgres/lib/connect.js");
 describe("LeoDW", function() {
 	describe("dimensionize", function() {
 		it("Should be able to add dimensional data", function(done) {
-			this.timeout(6000);
+			this.timeout(60000);
 			dimensionalize.linkDimensions(client({
 				user: 'root',
 				host: 'samplepostgressloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
