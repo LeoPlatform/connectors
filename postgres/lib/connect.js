@@ -9,7 +9,6 @@ const format = require('pg-format');
 
 var copyFrom = require('pg-copy-streams').from;
 let csv = require('fast-csv');
-const PassThrough = require("stream").PassThrough;
 // var TIMESTAMP_OID = 1114;
 
 require('pg').types.setTypeParser(1114, (val) => {
@@ -43,6 +42,7 @@ module.exports = function(config) {
 			log.info(`SQL query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
 			pool.query(query, params, function(err, result) {
+				console.log(err, result);
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.info("Had error", err);
@@ -111,7 +111,6 @@ module.exports = function(config) {
 			});
 
 			let count = 0;
-			let pass = new PassThrough();
 
 			function nonNull(v) {
 				if (v === null || v === undefined) {
