@@ -71,31 +71,91 @@ module.exports = {
 					return callback(err);
 				}
 
-				let scd0 = Object.keys(scds).filter(f => scds[f] === 0);
-				let scd2 = Object.keys(scds).filter(f => scds[f] === 2);
-				let scd3 = Object.keys(scds).filter(f => scds[f] === 3);
+				let scd0 = scds[0] || [];
+				let scd2 = scds[2] || [];
+				let scd3 = scds[3] || [];
+				let scd6 = Object.keys(scds[6]);
+
+
+				let allColumns = result.map(r => r.column_name).filter(f => {
+					return !f.match(/^_/) && f !== 'd_id';
+				});
 
 				let scd1 = result.map(r => r.column_name).filter(f => {
 					return !f.match(/^_/) && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== 'd_id' && f !== 'id';
 				});
 
-				console.log(scd1, scd2, scd3);
 
-				//let's figure out which SCD2 and SCD3 needs to happen
+				let scdSQL = [];
+
+				if (scd1.length) {
+					scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD1`);
+				} else {
+					scdSQL.push(`0 as runSCD1`);
+				}
+				if (scd2.length) {
+					scdSQL.push(`CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 1 ELSE 1 END as runSCD2`);
+				} else {
+					scdSQL.push(`0 as runSCD2`);
+				}
+				if (scd3.length) {
+					scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD3`);
+				} else {
+					scdSQL.push(`0 as runSCD3`);
+				}
+				if (scd6.length) {
+					scdSQL.push(`CASE WHEN md5(${scd6.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd6.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD6`);
+				} else {
+					scdSQL.push(`0 as runSCD6`);
+				}
+
+
+				console.log(scd1, scd2, scd3, scd6);
+				//let's figure out which SCDs needs to happen
 				client.query(`create table staging_d_presenter_changes as 
-				select s.id, d.id is null as isNew, d._startdate, d._enddate, 
-					CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD1,
-					CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 ELSE 1 END as runSCD2, 
-					CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD3
-							FROM staging_d_presenter s
-							LEFT JOIN d_presenter d on d.id = s.id and d._current`, (err, result) => {
+				select s.id,
+					${scdSQL.join(',\n')}
+					FROM staging_d_presenter s
+					LEFT JOIN d_presenter d on d.id = s.id and d._current`, (err, result) => {
+					let tasks = [];
+					tasks.push(done => {
+						//RUN SCD1 / SCD6 columns  (where we update the old records)
+						let columns = scd1.map(f => `${f} = coalesce(staging.${f}, prev.${f})`).concat(scd6.map(f => `current_${f} = coalesce(staging.${f}, prev.${f})`));
+						columns.push(`_enddate = case when changes.runSCD2 =1 then now() else dm._enddate END`);
+						columns.push(`_current = case when changes.runSCD2 =1 then false else dm._current END`);
+						columns.push(`_auditdate = now()`);
+						client.query(`update d_presenter as dm
+										set  ${columns.join(', ')}
+										FROM staging_d_presenter_changes changes
+										JOIN staging_d_presenter staging on staging.id = changes.id
+										LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
+										where dm.id = changes.id
+											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
+										`, done);
+					});
 
-					client.query
+					tasks.push(done => {
+						let columns = scd2.concat(scd6.map(f => "current_" + f));
+						console.log(columns);
+						if (!columns.length) {
+							done();
+						} else {
+							client.query(`INSERT INTO d_presenter
+								SELECT row_number() over () + (select max(d_id) from d_presenter), ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, now() as _startdate, null as _enddate, true as _current
+								FROM staging_d_presenter_changes changes  
+								JOIN staging_d_presenter staging on staging.id = changes.id
+								LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
+								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
+								`, done);
+						}
+					});
 
-					console.log("stuffs", err);
-					console.log(result);
-					callback();
 
+
+					async.series(tasks, err => {
+						console.log("stuffs", err);
+						callback();
+					});
 				});
 			});
 		});
