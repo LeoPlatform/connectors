@@ -118,6 +118,37 @@ module.exports = {
 					FROM staging_d_presenter s
 					LEFT JOIN d_presenter d on d.id = s.id and d._current`, (err, result) => {
 					let tasks = [];
+					let rowId = null;
+					tasks.push(done => {
+						client.query(`select max(d_id) as maxid from d_presenter`, (err, results) => {
+							if (err) {
+								return done(err);
+							}
+							rowId = results[0].maxid;
+							done();
+						});
+					});
+
+					tasks.push(done => client.query(`Begin Transaction`, done));
+
+					tasks.push(done => {
+						let columns = scd2.concat(scd6.map(f => "current_" + f));
+						console.log(columns);
+						if (!columns.length) {
+							done();
+						} else {
+							client.query(`INSERT INTO d_presenter
+								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, now() as _startdate, null as _enddate, true as _current
+								FROM staging_d_presenter_changes changes  
+								JOIN staging_d_presenter staging on staging.id = changes.id
+								LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
+								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
+								`, done);
+						}
+					});
+
+
+					//This needs to be done last
 					tasks.push(done => {
 						//RUN SCD1 / SCD6 columns  (where we update the old records)
 						let columns = scd1.map(f => `${f} = coalesce(staging.${f}, prev.${f})`).concat(scd6.map(f => `current_${f} = coalesce(staging.${f}, prev.${f})`));
@@ -129,32 +160,21 @@ module.exports = {
 										FROM staging_d_presenter_changes changes
 										JOIN staging_d_presenter staging on staging.id = changes.id
 										LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
-										where dm.id = changes.id
+										where dm.id = changes.id and dm._startdate != now() /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
-					});
-
-					tasks.push(done => {
-						let columns = scd2.concat(scd6.map(f => "current_" + f));
-						console.log(columns);
-						if (!columns.length) {
-							done();
-						} else {
-							client.query(`INSERT INTO d_presenter
-								SELECT row_number() over () + (select max(d_id) from d_presenter), ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, now() as _startdate, null as _enddate, true as _current
-								FROM staging_d_presenter_changes changes  
-								JOIN staging_d_presenter staging on staging.id = changes.id
-								LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
-								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
-								`, done);
-						}
 					});
 
 
 
 					async.series(tasks, err => {
-						console.log("stuffs", err);
-						callback();
+						if (!err) {
+							client.query(`commit`, e => {
+								callback(e || err);
+							});
+						} else {
+							client.query(`rollback`, callback);
+						}
 					});
 				});
 			});
