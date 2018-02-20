@@ -49,23 +49,92 @@ module.exports = {
 				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
 			}
 			async.series(tasks, err => {
-
 				callback(err);
 			});
 		});
 	},
-	importDimensions: function(client, stream, table, scds, callback) {
+	importFact: function(client, stream, table, links, callback) {
 		let tasks = [];
-		tasks.push(done => client.query(`drop table if exists staging_d_presenter`, done));
-		tasks.push(done => client.query(`drop table if exists staging_d_presenter_changes`, done));
-		tasks.push(done => client.query(`create table staging_d_presenter (like d_presenter)`, done));
-		tasks.push(done => client.query(`alter table staging_d_presenter drop column d_id`, done));
-		tasks.push(done => client.query(`create index staging_d_presenter_id on staging_d_presenter using hash(id)`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable("staging_d_presenter"), ls.log(), ls.devnull(), done));
+		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
+		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} using hash(id)`, done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
+
+		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+			let columns = result.map(f => f.column_name).filter(f => !f.match(/^_/));
+
+			console.log(links);
+			async.series(tasks, err => {
+				if (err) {
+					return callback(err);
+				}
+
+				let tasks = [];
+				//The following code relies on the fact that now() will return the same time during all transaction events
+				tasks.push(done => client.query(`Begin Transaction`, done));
+
+				tasks.push(done => {
+					client.query(`Update ${table} dm
+								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, _auditdate = now()
+								FROM staging_${table} staging
+								JOIN ${table} as prev on prev.id = staging.id
+								where dm.id = staging.id 
+							`, done);
+				});
 
 
-		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", ["d_presenter"], (err, result) => {
-			console.log(err, result);
+				//Now insert any we were missing
+				tasks.push(done => {
+					client.query(`INSERT INTO ${table} (${columns.join(',')},_auditdate)
+								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate
+								FROM staging_${table} staging
+								LEFT JOIN ${table} as prev on prev.id = staging.id
+								WHERE prev.id is null	
+							`, done);
+				});
+
+
+
+				//Now we want to link any dimensions
+				tasks.push(done => {
+					let joinTables = Object.keys(links).map(f => {
+						return `LEFT JOIN ${links[f]} ${f}_join_table on ${f}_join_table.id = t.${f} and t.created >= ${f}_join_table._startdate and (t.created <= ${f}_join_table._enddate or ${f}_join_table._current)`;
+					});
+
+					client.query(`Update ${table} dm
+								SET  ${Object.keys(links).map(f=>`d_${f.replace(/_id$/, '')} = ${f}_join_table.d_id`)}
+								FROM ${table} t
+								${joinTables.join("\n")}
+								where dm.id = t.id 
+							`, done);
+				});
+
+
+
+				async.series(tasks, err => {
+					if (!err) {
+						client.query(`commit`, e => {
+							callback(e || err);
+						});
+					} else {
+						client.query(`rollback`, callback);
+					}
+				});
+			});
+		});
+
+	},
+	importDimension: function(client, stream, table, scds, callback) {
+		let tasks = [];
+		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
+		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`alter table staging_${table} drop column d_id`, done));
+		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} using hash(id)`, done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
+
+		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			async.series(tasks, err => {
 				if (err) {
 					return callback(err);
@@ -110,17 +179,16 @@ module.exports = {
 				}
 
 
-				console.log(scd1, scd2, scd3, scd6);
 				//let's figure out which SCDs needs to happen
-				client.query(`create table staging_d_presenter_changes as 
+				client.query(`create table staging_${table}_changes as 
 				select s.id,
 					${scdSQL.join(',\n')}
-					FROM staging_d_presenter s
-					LEFT JOIN d_presenter d on d.id = s.id and d._current`, (err, result) => {
+					FROM staging_${table} s
+					LEFT JOIN ${table} d on d.id = s.id and d._current`, (err, result) => {
 					let tasks = [];
 					let rowId = null;
 					tasks.push(done => {
-						client.query(`select max(d_id) as maxid from d_presenter`, (err, results) => {
+						client.query(`select max(d_id) as maxid from ${table}`, (err, results) => {
 							if (err) {
 								return done(err);
 							}
@@ -129,6 +197,8 @@ module.exports = {
 						});
 					});
 
+
+					//The following code relies on the fact that now() will return the same time during all transaction events
 					tasks.push(done => client.query(`Begin Transaction`, done));
 
 					tasks.push(done => {
@@ -137,16 +207,15 @@ module.exports = {
 						if (!columns.length) {
 							done();
 						} else {
-							client.query(`INSERT INTO d_presenter
+							client.query(`INSERT INTO ${table}
 								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, now() as _startdate, null as _enddate, true as _current
-								FROM staging_d_presenter_changes changes  
-								JOIN staging_d_presenter staging on staging.id = changes.id
-								LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
+								FROM staging_${table}_changes changes  
+								JOIN staging_${table} staging on staging.id = changes.id
+								LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
 						}
 					});
-
 
 					//This needs to be done last
 					tasks.push(done => {
@@ -155,17 +224,15 @@ module.exports = {
 						columns.push(`_enddate = case when changes.runSCD2 =1 then now() else dm._enddate END`);
 						columns.push(`_current = case when changes.runSCD2 =1 then false else dm._current END`);
 						columns.push(`_auditdate = now()`);
-						client.query(`update d_presenter as dm
+						client.query(`update ${table} as dm
 										set  ${columns.join(', ')}
-										FROM staging_d_presenter_changes changes
-										JOIN staging_d_presenter staging on staging.id = changes.id
-										LEFT JOIN d_presenter as prev on prev.id = changes.id and prev._current
+										FROM staging_${table}_changes changes
+										JOIN staging_${table} staging on staging.id = changes.id
+										LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current
 										where dm.id = changes.id and dm._startdate != now() /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 					});
-
-
 
 					async.series(tasks, err => {
 						if (!err) {
