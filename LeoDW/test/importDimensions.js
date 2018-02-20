@@ -57,7 +57,7 @@ describe("LeoDW", function() {
 
 		it("Should be able to import dimensions WITH SCD1", function(done) {
 			this.timeout(1000 * 5);
-			dimensionalize.importDimensions(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presentersSCD1"), ls.parse()), "d_presenter", {
+			dimensionalize.importDimension(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presentersSCD1"), ls.parse()), "d_presenter", {
 				0: [],
 				1: [],
 				2: ['scd2'],
@@ -70,7 +70,7 @@ describe("LeoDW", function() {
 
 		it("Should be able to import dimensions WITH SCD2", function(done) {
 			this.timeout(1000 * 5);
-			dimensionalize.importDimensions(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presenterSCD2"), ls.parse()), "d_presenter", {
+			dimensionalize.importDimension(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presenterSCD2"), ls.parse()), "d_presenter", {
 				0: [],
 				1: [],
 				2: ['scd2'],
@@ -81,9 +81,9 @@ describe("LeoDW", function() {
 			}, done);
 		});
 
-		it("Should be able to import dimensions WITH a mix of SCD123", function(done) {
+		it.only("Should be able to import dimensions WITH a mix of SCD123", function(done) {
 			this.timeout(1000 * 5);
-			dimensionalize.importDimensions(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presenterSCD1and2and3"), ls.parse()), "d_presenter", {
+			dimensionalize.importDimension(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presenterSCD1and2and3"), ls.parse()), "d_presenter", {
 				0: [],
 				1: [],
 				2: ['scd2'],

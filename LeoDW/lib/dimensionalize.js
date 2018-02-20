@@ -181,7 +181,7 @@ module.exports = {
 
 				//let's figure out which SCDs needs to happen
 				client.query(`create table staging_${table}_changes as 
-				select s.id,
+				select s.id, d.id is null as isNew,
 					${scdSQL.join(',\n')}
 					FROM staging_${table} s
 					LEFT JOIN ${table} d on d.id = s.id and d._current`, (err, result) => {
@@ -208,7 +208,7 @@ module.exports = {
 							done();
 						} else {
 							client.query(`INSERT INTO ${table}
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, now() as _startdate, null as _enddate, true as _current
+								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, case when changes.isNew then '1900-01-01 00:00:00' else now() END as _startdate, '9999-01-01 00:00:00' as _enddate, true as _current
 								FROM staging_${table}_changes changes  
 								JOIN staging_${table} staging on staging.id = changes.id
 								LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current

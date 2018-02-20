@@ -58,7 +58,7 @@ describe("LeoDW", function() {
 		});
 
 
-		it.only("Should be able to import facts and link to dimensions", function(done) {
+		it("Should be able to import facts and link to dimensions", function(done) {
 			this.timeout(1000 * 5);
 			dimensionalize.importFact(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/ordersupdated"), ls.parse()), "f_order", links, done);
 		});
