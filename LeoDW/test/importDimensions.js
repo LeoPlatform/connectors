@@ -51,6 +51,7 @@ describe("LeoDW", function() {
 			client.disconnect(() => {
 				console.log("disconnected");
 			});
+			done();
 		})
 
 

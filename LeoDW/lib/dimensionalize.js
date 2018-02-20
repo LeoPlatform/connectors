@@ -229,7 +229,7 @@ module.exports = {
 										FROM staging_${table}_changes changes
 										JOIN staging_${table} staging on staging.id = changes.id
 										LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current
-										where dm.id = changes.id and dm._startdate != now() /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
+										where dm.id = changes.id and dm._startdate != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 					});
