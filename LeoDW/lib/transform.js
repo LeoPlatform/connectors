@@ -14,22 +14,22 @@ module.exports = {
 			return null;
 		}
 	},
-	parseValues: function(obj) {
+	parseValues: function(obj, dateformat) {
 		let outObj = {};
 		let matches;
+
 		for (var key in obj) {
 			var value = obj[key];
-			let columnName = key.toLowerCase();
-
 			if (key.match(/^[A-Z]/)) {
-				if (matches = key.toLowerCase().match(/^ts(:.*|$)/)) {
-					columnName = key.replace(/^ts:?/i, '') + "_ts";
+				let columnName = key.toLowerCase().replace(/[^a-z0-9\:]/g, '_');
+				if (matches = columnName.match(/^ts(:.*|$)/)) {
+					columnName = columnName.replace(/^ts:?/i, '') + "_ts";
 					if (columnName == "_ts") {
 						columnName = "ts";
 					}
 					if (value) {
 						try {
-							outObj[columnName.toLowerCase()] = new Date(value).toISOString();
+							outObj[columnName] = dateformat(new Date(value));
 						} catch (err) {
 							//ignore this field
 						}
@@ -40,14 +40,15 @@ module.exports = {
 						outObj[subkey.toLowerCase()] = subvalue;
 					}
 				} else {
-					let l = key.replace(/^[^:]*:/i, '').toLowerCase() + "_id";
+					let l = columnName.replace(/^[^:]*:/i, '') + "_id";
 					outObj[l] = value;
 				}
 			} else {
+				let columnName = key.toLowerCase().replace(/[^a-z0-9]/g, '_');
 				if (typeof value == "string" && value.length > 100) {
-					outObj[key.toLowerCase()] = value.slice(0, 100);
+					outObj[columnName] = value.slice(0, 100);
 				} else {
-					outObj[key.toLowerCase()] = value;
+					outObj[columnName] = value;
 				}
 			}
 		}

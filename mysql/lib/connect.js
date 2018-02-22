@@ -15,13 +15,17 @@ module.exports = function(config) {
 		timezone: 'utc'
 	}, config));
 	let queryCount = 0;
-	return {
-		query: function(query, callback) {
+	let client = {
+		query: function(query, params, callback) {
+			if (!callback) {
+				callback = params;
+				params = null;
+			}
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
 			log.info(`SQL query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
-			m.query(query, function(err, result, fields) {
+			m.query(query, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.info("Had error", err);
@@ -29,24 +33,39 @@ module.exports = function(config) {
 				callback(err, result, fields);
 			})
 		},
-		disconnect: m.end,
+		disconnect: m.end.bind(m),
+		loadFromS3: function(table, fields, opts) {
+
+		},
 		streamToTable: function(table, fields, opts) {
+			opts = Object.assign({
+				records: 10000
+			});
+			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
+				lookups[f.toLowerCase()] = index;
+				return lookups;
+			}, {});
+			let columns = Object.keys(fieldColumnLookup);
 			return ls.bufferBackoff((obj, done) => {
 				done(null, obj, 1, 1);
 			}, (records, callback) => {
-				console.log(records.length);
-				return callback(null, []);
+				console.log("Inserting " + records.length + " records");
 				var values = records.map((r) => {
-					return [r.event, r.eid, r.gzip.toString('base64'), r.gzipSize, r.size, r.records];
+					return columns.map(f => r[f]);
 				});
-				m.query("INSERT delayed ignore INTO Leo_Stream (event, eid, payload, gzipsize, size, records) VALUES ?", [values], function(err) {
+				client.query("INSERT INTO ?? (??) VALUES ?", [table, fields, values], function(err) {
 					if (err) {
-						console.log(err);
+						callback(err);
+					} else {
+						callback(null, []);
 					}
-					callback(null, []);
 				})
-
+			}, {
+				failAfter: 2
+			}, {
+				records: opts.records
 			});
 		}
 	};
+	return client;
 };
