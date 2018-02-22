@@ -2,7 +2,7 @@ const mssql = require("mssql");
 const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
 
 
-module.exports = function(config) {
+module.exports = function (config) {
 	const pool = new mssql.ConnectionPool(Object.assign({
 		user: 'root',
 		password: 'test',
@@ -19,20 +19,24 @@ module.exports = function(config) {
 	let isConnected = false;
 
 	pool.connect(err => {
+		//console.log("Got a connection thing", err, buffer.length)
 		isConnected = true;
 		if (err) {
 			console.log(err);
 			process.exit();
 		} else if (buffer.length) {
 			buffer.forEach(i => {
-				client.query(i.query, i.callback);
+				client.query(i.query, (err, result) => {
+					err && console.log(i.query, err);
+					i.callback(err, result)
+				});
 			});
 		}
 	});
 
 	let queryCount = 0;
 	let client = {
-		query: function(query, callback) {
+		query: function (query, callback) {
 			if (!isConnected) {
 				console.log("buffering query");
 				buffer.push({
@@ -44,7 +48,7 @@ module.exports = function(config) {
 				let log = logger.sub("query");
 				log.info(`SQL query #${queryId} is `, query);
 				log.time(`Ran Query #${queryId}`);
-				pool.request().query(query, function(err, result, fields) {
+				pool.request().query(query, function (err, result, fields) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
 						log.info("Had error", err);
