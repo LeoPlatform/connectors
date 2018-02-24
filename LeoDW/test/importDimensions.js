@@ -82,7 +82,7 @@ describe("LeoDW", function() {
 			}, done);
 		});
 
-		it.only("Should be able to import dimensions WITH a mix of SCD123", function(done) {
+		it("Should be able to import dimensions WITH a mix of SCD123", function(done) {
 			this.timeout(1000 * 5);
 			dimensionalize.importDimension(client, ls.pipeline(fs.createReadStream(__dirname + "/fixtures/presenterSCD1and2and3"), ls.parse()), "d_presenter", {
 				0: [],

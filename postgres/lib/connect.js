@@ -52,7 +52,64 @@ module.exports = function(config) {
 			})
 		},
 		disconnect: pool.end.bind(pool),
-		loadFromS3: function(table, fields, opts) {
+		describeTable: function(table, callback) {
+			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+				callback(err, result);
+			});
+		},
+		createTable: function(table, definition, callback) {
+			let fields = [];
+
+
+			Object.keys(definition.structure).forEach(f => {
+				let field = definition.structure[f];
+				if (field == "sk") {
+					field = {
+						type: 'integer primary key'
+					};
+				} else if (typeof field == "string") {
+					field = {
+						type: field
+					};
+				}
+
+
+				if (field.dimension) {
+					fields.push(`d_${f.replace(/_id$/,'')} integer`)
+				}
+				fields.push(`${f} ${field.type}`);
+			});
+
+			let sql = `create table ${table} (
+				${fields.join(',\n')}
+			)`;
+			client.query(sql, (err, result) => {
+				console.log(err, result);
+			});
+		},
+		updateTable: function(table, definition, callback) {
+			let fields = [];
+
+			Object.keys(definition.structure).forEach(f => {
+				let field = definition.structure[f];
+				if (typeof field == "string") {
+					field = {
+						type: field
+					};
+				}
+				if (field.dimension) {
+					fields.push(`d_${f.replace(/_id$/,'')} integer`)
+				}
+				fields.push(`${f} ${field.dtype}`);
+			});
+			let sql = `alter table  ${table} 
+				add column ${fields.join(',\n add column ')}
+			`;
+			client.query(sql, (err, result) => {
+				console.log(err, result);
+			});
+		},
+		streamToTableFromS3: function(table, fields, opts) {
 
 		},
 		streamToTableBatch: function(table, fields, opts) {

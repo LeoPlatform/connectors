@@ -34,7 +34,7 @@ module.exports = function(config) {
 			})
 		},
 		disconnect: m.end.bind(m),
-		loadFromS3: function(table, fields, opts) {
+		streamToTableFromS3: function(table, fields, opts) {
 
 		},
 		streamToTable: function(table, fields, opts) {

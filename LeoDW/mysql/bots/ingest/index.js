@@ -20,10 +20,11 @@ exports.handler = function(event, context, callback) {
 	});
 
 	ls.pipe(
-		leo.read(ID, "dw.loadv2", {
-			limit: 1000,
+		leo.read(ID, "dw.loadV2", {
+			limit: 1,
+			start: 'z/2018/02/21',
 			stopTime: moment().add(240, "seconds")
-		}), stats, combine((table, fieldList) => {
+		}), ls.log(), stats, combine((table, fieldList) => {
 			return mysql.streamToTable(table, fieldList);
 		}),
 		ls.through((obj, done) => {

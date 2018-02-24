@@ -53,15 +53,26 @@ module.exports = {
 			});
 		});
 	},
-	importFact: function(client, stream, table, links, callback) {
+	importFact: function(client, stream, table, ids, links, callback) {
+		if (!Array.isArray(ids)) {
+			ids = [ids];
+		}
+
 		let tasks = [];
+		// tasks.push(done => client.query(`alter table ${table} add primary key (${ids.join(',')})`, done));
+
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
 		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
-		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} using hash(id)`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+			let lookup = {};
+			result.forEach(r => lookup[r.column_name] = 1);
+			if (!("_auditdate" in lookup)) {
+				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
+				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+			}
 			let columns = result.map(f => f.column_name).filter(f => !f.match(/^_/));
 
 			console.log(links);
@@ -78,8 +89,8 @@ module.exports = {
 					client.query(`Update ${table} dm
 								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, _auditdate = now()
 								FROM staging_${table} staging
-								JOIN ${table} as prev on prev.id = staging.id
-								where dm.id = staging.id 
+								JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
+								where ${ids.map(id=>`dm.${id} = staging.${id}`).join(' and ')}
 							`, done);
 				});
 
@@ -89,26 +100,26 @@ module.exports = {
 					client.query(`INSERT INTO ${table} (${columns.join(',')},_auditdate)
 								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate
 								FROM staging_${table} staging
-								LEFT JOIN ${table} as prev on prev.id = staging.id
-								WHERE prev.id is null	
+								LEFT JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
+								WHERE prev.${ids[0]} is null	
 							`, done);
 				});
 
 
 
 				//Now we want to link any dimensions
-				tasks.push(done => {
-					let joinTables = Object.keys(links).map(f => {
-						return `LEFT JOIN ${links[f]} ${f}_join_table on ${f}_join_table.id = t.${f} and t.created >= ${f}_join_table._startdate and (t.created <= ${f}_join_table._enddate or ${f}_join_table._current)`;
-					});
+				// tasks.push(done => {
+				// 	let joinTables = Object.keys(links).map(f => {
+				// 		return `LEFT JOIN ${links[f]} ${f}_join_table on ${f}_join_table.id = t.${f} and t.created >= ${f}_join_table._startdate and (t.created <= ${f}_join_table._enddate or ${f}_join_table._current)`;
+				// 	});
 
-					client.query(`Update ${table} dm
-								SET  ${Object.keys(links).map(f=>`d_${f.replace(/_id$/, '')} = ${f}_join_table.d_id`)}
-								FROM ${table} t
-								${joinTables.join("\n")}
-								where dm.id = t.id 
-							`, done);
-				});
+				// 	client.query(`Update ${table} dm
+				// 				SET  ${Object.keys(links).map(f=>`d_${f.replace(/_id$/, '')} = ${f}_join_table.d_id`)}
+				// 				FROM ${table} t
+				// 				${joinTables.join("\n")}
+				// 				where dm.id = t.id 
+				// 			`, done);
+				// });
 
 
 
@@ -125,16 +136,29 @@ module.exports = {
 		});
 
 	},
-	importDimension: function(client, stream, table, scds, callback) {
+	importDimension: function(client, stream, table, sk, nk, scds, callback) {
+		if (!Array.isArray(nk)) {
+			nk = [nk];
+		}
+
 		let tasks = [];
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
 		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
-		tasks.push(done => client.query(`alter table staging_${table} drop column d_id`, done));
-		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} using hash(id)`, done));
+		tasks.push(done => client.query(`alter table staging_${table} drop column ${sk}`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+			let lookup = {};
+			result.forEach(r => lookup[r.column_name] = 1);
+			if (!("_auditdate" in lookup)) {
+				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
+				tasks.push(done => client.query(`alter table ${table} add column _startdate timestamp`, done));
+				tasks.push(done => client.query(`alter table ${table} add column _enddate timestamp`, done));
+				tasks.push(done => client.query(`alter table ${table} add column _current boolean`, done));
+				// tasks.push(done => client.query(`create index ${table}_startenddate add column _enddate timestamp`, done));
+				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+			}
 			async.series(tasks, err => {
 				if (err) {
 					return callback(err);
@@ -143,37 +167,37 @@ module.exports = {
 				let scd0 = scds[0] || [];
 				let scd2 = scds[2] || [];
 				let scd3 = scds[3] || [];
-				let scd6 = Object.keys(scds[6]);
+				let scd6 = Object.keys(scds[6] || {});
 
 
 				let allColumns = result.map(r => r.column_name).filter(f => {
-					return !f.match(/^_/) && f !== 'd_id';
+					return !f.match(/^_/) && f !== sk;
 				});
 
 				let scd1 = result.map(r => r.column_name).filter(f => {
-					return !f.match(/^_/) && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== 'd_id' && f !== 'id';
+					return !f.match(/^_/) && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== sk && nk.indexOf(f) === -1;
 				});
 
 
 				let scdSQL = [];
 
 				if (scd1.length) {
-					scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD1`);
+					scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
 				} else {
 					scdSQL.push(`0 as runSCD1`);
 				}
 				if (scd2.length) {
-					scdSQL.push(`CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 1 ELSE 1 END as runSCD2`);
+					scdSQL.push(`CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 1 ELSE 1 END as runSCD2`);
 				} else {
 					scdSQL.push(`0 as runSCD2`);
 				}
 				if (scd3.length) {
-					scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD3`);
+					scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
 				} else {
 					scdSQL.push(`0 as runSCD3`);
 				}
 				if (scd6.length) {
-					scdSQL.push(`CASE WHEN md5(${scd6.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd6.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.id is null then 0 ELSE 1 END as runSCD6`);
+					scdSQL.push(`CASE WHEN md5(${scd6.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd6.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
 				} else {
 					scdSQL.push(`0 as runSCD6`);
 				}
@@ -181,18 +205,18 @@ module.exports = {
 
 				//let's figure out which SCDs needs to happen
 				client.query(`create table staging_${table}_changes as 
-				select s.id, d.id is null as isNew,
+				select ${nk.map(id=>`s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
 					FROM staging_${table} s
-					LEFT JOIN ${table} d on d.id = s.id and d._current`, (err, result) => {
+					LEFT JOIN ${table} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d._current`, (err, result) => {
 					let tasks = [];
 					let rowId = null;
 					tasks.push(done => {
-						client.query(`select max(d_id) as maxid from ${table}`, (err, results) => {
+						client.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
 							if (err) {
 								return done(err);
 							}
-							rowId = results[0].maxid;
+							rowId = results[0].maxid || 10000;
 							done();
 						});
 					});
@@ -210,8 +234,8 @@ module.exports = {
 							client.query(`INSERT INTO ${table}
 								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, case when changes.isNew then '1900-01-01 00:00:00' else now() END as _startdate, '9999-01-01 00:00:00' as _enddate, true as _current
 								FROM staging_${table}_changes changes  
-								JOIN staging_${table} staging on staging.id = changes.id
-								LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current
+								JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+								LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev._current
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
 						}
@@ -227,9 +251,9 @@ module.exports = {
 						client.query(`update ${table} as dm
 										set  ${columns.join(', ')}
 										FROM staging_${table}_changes changes
-										JOIN staging_${table} staging on staging.id = changes.id
-										LEFT JOIN ${table} as prev on prev.id = changes.id and prev._current
-										where dm.id = changes.id and dm._startdate != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
+										JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+										LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev._current
+										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm._startdate != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 					});
