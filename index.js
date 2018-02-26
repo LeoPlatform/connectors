@@ -1,3 +1,7 @@
+// require("leo-sdk/lib/logger").configure(/.*/, {
+// 	all: true
+// });
+
 module.exports = {
 	createChangeTrackingObject: function (tableIdentifer, primaryKey) {
 		let changeTracking = {};

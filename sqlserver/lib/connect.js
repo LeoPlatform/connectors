@@ -1,7 +1,9 @@
 const mssql = require("mssql");
 const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
 
-
+// require("leo-sdk/lib/logger").configure(/.*/, {
+// 	all: true
+// });
 module.exports = function (config) {
 	const pool = new mssql.ConnectionPool(Object.assign({
 		user: 'root',
@@ -54,7 +56,7 @@ module.exports = function (config) {
 						log.info("Had error", err);
 						callback(err);
 					} else {
-						callback(null, result.recordset, fields);
+						callback(null, result.recordset, Object.keys(result.recordset[0] || {}).map(k => ({name:k})));
 					}
 				})
 			}

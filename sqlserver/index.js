@@ -32,27 +32,24 @@ module.exports = {
 
 		let version = parseInt(parts[0]);
 		let offset = parts[1] || 0;
-		let limit = opts.limit || 10000;
 
 		let sqlTables = Object.keys(tables).map(t => {
 			obj.payload[t] = [];
-			let query = `SELECT '${t}' as tableName, ${tables[t]}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
+			let query = `SELECT '${t}' as tableName, ${tables[t]} as id, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
 					 FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT  
-					 where (SYS_CHANGE_VERSION <> ${version} OR ${tables[t]} > ${offset})
-					 order by SYS_CHANGE_VERSION asc, ${tables[t]} asc`;
+					 where (SYS_CHANGE_VERSION <> ${version} OR ${tables[t]} > ${offset})`;
 			logger.log(query);
 			return query;
 		});
-		client.query(sqlTables.join(" UNION "), (err, result) => {
+		client.query(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc', (err, result) => {
 			if (!err) {
-				let offset = 0;
 				result.forEach(r => {
-					let eid = `${r.__SYS_CHANGE_VERSION}.${r[tables[r.tableName]]}`;
+					let eid = `${r.__SYS_CHANGE_VERSION}.${r.id}`;
 					obj.correlation_id.units++;
 					obj.correlation_id.start = obj.correlation_id.start || eid;
 					obj.correlation_id.end = eid;
 					obj.eid = eid;
-					obj.payload[r.tableName].push(r[tables[r.tableName]]);
+					obj.payload[r.tableName].push(r.id);
 				});
 				//console.log(obj)
 				stream.write(obj);
