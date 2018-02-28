@@ -1,59 +1,14 @@
 "use strict";
-
-// require("leo-sdk/lib/logger").configure(true)
+const postgres = require("../../../postgres/lib/connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
 require("leo-sdk/lib/logger").configure(true);
 
 
-module.exports = {
-	linkDimensions: function(client, table, links, callback) {
-		console.log(links);
-		let dimColumns = [];
-		Object.keys(links).forEach(column => {
-			let link = links[column];
-			if (!link.id) {
-				link = {
-					table: link
-				};
-			}
-			link = Object.assign({
-				table: null,
-				id: 'id'
-			});
-			dimColumns["d_" + column.replace(/_id$/, '')] = link;
-		});
+module.exports = function(config) {
+	let client = postgres(config);
 
-
-		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-			let lookup = {};
-			result.forEach(r => lookup[r.column_name] = 1);
-
-
-			//Let's see if we are missing any columns we should have
-			let neededColumns = Object.keys(dimColumns).filter(f => !lookup[f]);
-
-			let tasks = [];
-			if (neededColumns.length) {
-				tasks.push(done => {
-					client.query(`alter table ${table} ` + neededColumns.map(c => `add column ${c} integer null`).join(', '), (err, result) => {
-						console.log("IN HERE");
-						console.log(err, result);
-						callback();
-					}, done);
-				})
-			}
-
-			if (!("_auditdate" in lookup)) {
-				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
-				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
-			}
-			async.series(tasks, err => {
-				callback(err);
-			});
-		});
-	},
-	importFact: function(client, stream, table, ids, links, callback) {
+	client.importFact = function(stream, table, ids, callback) {
 		if (!Array.isArray(ids)) {
 			ids = [ids];
 		}
@@ -75,7 +30,6 @@ module.exports = {
 			}
 			let columns = result.map(f => f.column_name).filter(f => !f.match(/^_/));
 
-			console.log(links);
 			async.series(tasks, err => {
 				if (err) {
 					return callback(err);
@@ -105,24 +59,6 @@ module.exports = {
 							`, done);
 				});
 
-
-
-				//Now we want to link any dimensions
-				// tasks.push(done => {
-				// 	let joinTables = Object.keys(links).map(f => {
-				// 		return `LEFT JOIN ${links[f]} ${f}_join_table on ${f}_join_table.id = t.${f} and t.created >= ${f}_join_table._startdate and (t.created <= ${f}_join_table._enddate or ${f}_join_table._current)`;
-				// 	});
-
-				// 	client.query(`Update ${table} dm
-				// 				SET  ${Object.keys(links).map(f=>`d_${f.replace(/_id$/, '')} = ${f}_join_table.d_id`)}
-				// 				FROM ${table} t
-				// 				${joinTables.join("\n")}
-				// 				where dm.id = t.id 
-				// 			`, done);
-				// });
-
-
-
 				async.series(tasks, err => {
 					if (!err) {
 						client.query(`commit`, e => {
@@ -134,9 +70,9 @@ module.exports = {
 				});
 			});
 		});
+	};
 
-	},
-	importDimension: function(client, stream, table, sk, nk, scds, callback) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback) {
 		if (!Array.isArray(nk)) {
 			nk = [nk];
 		}
@@ -270,5 +206,59 @@ module.exports = {
 				});
 			});
 		});
-	}
+	};
+
+	client.linkDimensions = function(table, config, callback) {
+		let links = [];
+		Object.keys(config).forEach(column => {
+			let link = config[column];
+			if (!link.id) {
+				link = {
+					table: link,
+					source: column
+				};
+			}
+			links.push(Object.assign({
+				table: null,
+				on: 'id',
+				destination: "d_" + column.replace(/_id$/, ''),
+				link_date: "_auditdate"
+			}, link));
+		});
+
+
+		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+			let lookup = {};
+			result.forEach(r => lookup[r.column_name] = 1);
+			//Let's see if we are missing any columns we should have
+			let neededColumns = links.filter(f => !lookup[f.destination]).map(f => f.destination);
+			let tasks = [];
+			if (neededColumns.length) {
+				tasks.push(done => {
+					client.query(`alter table ${table} ` + neededColumns.map(c => `add column ${c} integer null`).join(', '), done);
+				});
+			}
+
+			// Now we want to link any dimensions
+			tasks.push(done => {
+				let joinTables = links.map(link => {
+					return `LEFT JOIN ${link.table} ${link.source}_join_table 
+							on ${link.source}_join_table.${link.on} = t.${link.source} 
+								and t.${link.link_date} >= ${link.source}_join_table._startdate 
+								and (t.${link.link_date} <= ${link.source}_join_table._enddate or ${link.source}_join_table._current)
+					`;
+				});
+				client.query(`Update ${table} dm
+						SET  ${links.map(f=>`${f.destination} = coalesce(${f.source}_join_table.d_id, 1)`)}
+						FROM ${table} t
+						${joinTables.join("\n")}
+						where dm.id = t.id 
+					`, done);
+			});
+			async.series(tasks, err => {
+				callback(err);
+			});
+		});
+	};
+	return client;
 };

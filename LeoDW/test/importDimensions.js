@@ -1,6 +1,5 @@
 "use strict";
-const dimensionalize = require("../lib/dimensionalize");
-const postgres = require("../../postgres/lib/connect.js");
+const postgres = require("../postgres/lib/connect.js");
 const fs = require("fs");
 const ls = require("leo-sdk").streams;
 
