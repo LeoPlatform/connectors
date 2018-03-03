@@ -4,7 +4,6 @@ const leo = require("leo-sdk")('rentdynamics');
 const ls = leo.streams;
 const moment = require("moment");
 const combine = require("../../../lib/combine.js");
-const stream = require("stream");
 const async = require("async");
 
 
@@ -202,6 +201,9 @@ exports.handler = function(event, context, callback) {
 
 	//Let's make sure all the tables exist
 	client.changeTableStructure(tableConfig, (err) => {
+		if (err) {
+			return callback(err);
+		}
 		ls.pipe(
 			leo.read(ID, "Lead", {
 				stopTime: moment().add(240, "seconds"),
@@ -278,5 +280,4 @@ exports.handler = function(event, context, callback) {
 			}
 		);
 	});
-
 };
