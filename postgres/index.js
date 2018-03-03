@@ -60,33 +60,5 @@ module.exports = {
 		stream.getChanges(slot_name, null, function(err) {
 			console.log('Logical replication initialize error', err);
 		});
-	},
-	changeTableStructure: function(config, structures, callback) {
-		let client = connect(config);
-
-		console.log(client);
-		Object.keys(structures).forEach(table => {
-			client.describeTable(table, (err, fields) => {
-				if (!fields.length) {
-					client.createTable(table, structures[table]);
-				} else {
-					let fieldLookup = fields.reduce((acc, field) => {
-						acc[field.column_name] = field;
-						return acc;
-					}, {});
-					let missingFields = {};
-					Object.keys(structures[table].structure).forEach(f => {
-						if (!(f in fieldLookup)) {
-							missingFields[f] = structures[table][f];
-						}
-					})
-					console.log(missingFields);
-
-					if (Object.keys(missingFields).length) {
-						client.updateTable(table, missingFields);
-					}
-				}
-			})
-		});
 	}
 };

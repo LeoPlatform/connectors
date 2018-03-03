@@ -2,7 +2,6 @@
 const postgres = require("../../../postgres/lib/connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
-require("leo-sdk/lib/logger").configure(true);
 
 
 module.exports = function(config) {
@@ -58,6 +57,7 @@ module.exports = function(config) {
 								WHERE prev.${ids[0]} is null	
 							`, done);
 				});
+				tasks.push(done => client.query(`drop table staging_${table}`, done));
 
 				async.series(tasks, err => {
 					if (!err) {
@@ -125,7 +125,7 @@ module.exports = function(config) {
 				if (scd2.length) {
 					scdSQL.push(`CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 1 ELSE 1 END as runSCD2`);
 				} else {
-					scdSQL.push(`0 as runSCD2`);
+					scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
 				}
 				if (scd3.length) {
 					scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
@@ -162,19 +162,14 @@ module.exports = function(config) {
 					tasks.push(done => client.query(`Begin Transaction`, done));
 
 					tasks.push(done => {
-						let columns = scd2.concat(scd6.map(f => "current_" + f));
-						console.log(columns);
-						if (!columns.length) {
-							done();
-						} else {
-							client.query(`INSERT INTO ${table}
+						let fields = [sk].concat(allColumns).concat(['_auditdate', '_startdate', '_enddate', '_current']);
+						client.query(`INSERT INTO ${table} (${fields.join(',')})
 								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, case when changes.isNew then '1900-01-01 00:00:00' else now() END as _startdate, '9999-01-01 00:00:00' as _enddate, true as _current
 								FROM staging_${table}_changes changes  
 								JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
 								LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev._current
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
-						}
 					});
 
 					//This needs to be done last
@@ -193,6 +188,9 @@ module.exports = function(config) {
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 					});
+
+					tasks.push(done => client.query(`drop table staging_${table}_changes`, done));
+					tasks.push(done => client.query(`drop table staging_${table}`, done));
 
 					async.series(tasks, err => {
 						if (!err) {
@@ -226,7 +224,6 @@ module.exports = function(config) {
 			}, link));
 		});
 
-
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			let lookup = {};
 			result.forEach(r => lookup[r.column_name] = 1);
@@ -259,6 +256,88 @@ module.exports = function(config) {
 				callback(err);
 			});
 		});
+	};
+
+	client.changeTableStructure = function(structures, callback) {
+		let tasks = [];
+		Object.keys(structures).forEach(table => {
+			tasks.push(done => {
+				client.describeTable(table, (err, fields) => {
+					if (!fields.length) {
+						client.createTable(table, structures[table], done);
+					} else {
+						let fieldLookup = fields.reduce((acc, field) => {
+							acc[field.column_name] = field;
+							return acc;
+						}, {});
+						let missingFields = {};
+						Object.keys(structures[table].structure).forEach(f => {
+							if (!(f in fieldLookup)) {
+								missingFields[f] = structures[table].structure[f];
+							}
+						})
+						if (Object.keys(missingFields).length) {
+							client.updateTable(table, missingFields, done);
+						} else {
+							done();
+						}
+					}
+				});
+			});
+		});
+		async.parallelLimit(tasks, 20, callback);
+	}
+
+	client.createTable = function(table, definition, callback) {
+		let fields = [];
+
+
+		Object.keys(definition.structure).forEach(f => {
+			let field = definition.structure[f];
+			if (field == "sk") {
+				field = {
+					type: 'integer primary key'
+				};
+			} else if (typeof field == "string") {
+				field = {
+					type: field
+				};
+			}
+
+
+			if (field.dimension) {
+				fields.push(`d_${f.replace(/_id$/,'')} integer`)
+			}
+			fields.push(`${f} ${field.type}`);
+		});
+
+		let sql = `create table ${table} (
+				${fields.join(',\n')}
+			)`;
+		client.query(sql, callback);
+	};
+	client.updateTable = function(table, definition, callback) {
+		let fields = [];
+		Object.keys(definition).forEach(f => {
+			let field = definition[f];
+			if (field == "sk") {
+				field = {
+					type: 'integer primary key'
+				};
+			} else if (typeof field == "string") {
+				field = {
+					type: field
+				};
+			}
+			if (field.dimension) {
+				fields.push(`d_${f.replace(/_id$/,'')} integer`)
+			}
+			fields.push(`${f} ${field.type}`);
+		});
+		let sql = `alter table  ${table} 
+				add column ${fields.join(',\n add column ')}
+			`;
+		client.query(sql, callback);
 	};
 	return client;
 };

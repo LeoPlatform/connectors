@@ -6,6 +6,9 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 
 const format = require('pg-format');
 
+require("leo-sdk/lib/logger").configure(/.*/, {
+	all: true
+});
 
 var copyFrom = require('pg-copy-streams').from;
 let csv = require('fast-csv');
@@ -44,7 +47,7 @@ module.exports = function(config) {
 			pool.query(query, params, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.info("Had error", err);
+					log.info(`Had error #${queryId}`, err);
 					callback(err);
 				} else {
 					callback(null, result.rows, result.fields);
@@ -55,58 +58,6 @@ module.exports = function(config) {
 		describeTable: function(table, callback) {
 			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 				callback(err, result);
-			});
-		},
-		createTable: function(table, definition, callback) {
-			let fields = [];
-
-
-			Object.keys(definition.structure).forEach(f => {
-				let field = definition.structure[f];
-				if (field == "sk") {
-					field = {
-						type: 'integer primary key'
-					};
-				} else if (typeof field == "string") {
-					field = {
-						type: field
-					};
-				}
-
-
-				if (field.dimension) {
-					fields.push(`d_${f.replace(/_id$/,'')} integer`)
-				}
-				fields.push(`${f} ${field.type}`);
-			});
-
-			let sql = `create table ${table} (
-				${fields.join(',\n')}
-			)`;
-			client.query(sql, (err, result) => {
-				console.log(err, result);
-			});
-		},
-		updateTable: function(table, definition, callback) {
-			let fields = [];
-
-			Object.keys(definition.structure).forEach(f => {
-				let field = definition.structure[f];
-				if (typeof field == "string") {
-					field = {
-						type: field
-					};
-				}
-				if (field.dimension) {
-					fields.push(`d_${f.replace(/_id$/,'')} integer`)
-				}
-				fields.push(`${f} ${field.dtype}`);
-			});
-			let sql = `alter table  ${table} 
-				add column ${fields.join(',\n add column ')}
-			`;
-			client.query(sql, (err, result) => {
-				console.log(err, result);
 			});
 		},
 		streamToTableFromS3: function(table, fields, opts) {
