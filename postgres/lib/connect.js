@@ -1,9 +1,8 @@
 const {
-	Pool,
-	Client
-} = require('pg')
+	Pool
+} = require('pg');
 const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
-
+const moment = require("moment");
 const format = require('pg-format');
 
 require("leo-sdk/lib/logger").configure(/.*/, {
@@ -52,7 +51,7 @@ module.exports = function(config) {
 				} else {
 					callback(null, result.rows, result.fields);
 				}
-			})
+			});
 		},
 		disconnect: pool.end.bind(pool),
 		describeTable: function(table, callback) {
@@ -61,7 +60,7 @@ module.exports = function(config) {
 			});
 		},
 		streamToTableFromS3: function(table, fields, opts) {
-
+			opts = Object.assign({}, opts || {});
 		},
 		streamToTableBatch: function(table, fields, opts) {
 			opts = Object.assign({
@@ -85,7 +84,7 @@ module.exports = function(config) {
 					} else {
 						callback(null, []);
 					}
-				})
+				});
 			}, {
 				failAfter: 2
 			}, {
@@ -95,7 +94,7 @@ module.exports = function(config) {
 		streamToTable: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
-			});
+			}, opts || {});
 			let columns = [];
 			var stream;
 			let myClient = null;
@@ -131,7 +130,7 @@ module.exports = function(config) {
 					if (!myClient) {
 						pending = () => {
 							done(null, columns.map(f => nonNull(row[f])));
-						}
+						};
 					} else {
 						done(null, columns.map(f => nonNull(row[f])));
 					}

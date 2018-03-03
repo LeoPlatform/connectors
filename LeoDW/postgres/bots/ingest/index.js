@@ -3,10 +3,7 @@
 const leo = require("leo-sdk")('rentdynamics');
 const ls = leo.streams;
 const moment = require("moment");
-const combine = require("../../../lib/combine.js");
-const async = require("async");
-
-
+const load = require("../../../lib/load.js");
 
 exports.handler = function(event, context, callback) {
 	const ID = event.botId;
@@ -199,85 +196,16 @@ exports.handler = function(event, context, callback) {
 		done();
 	});
 
-	//Let's make sure all the tables exist
-	client.changeTableStructure(tableConfig, (err) => {
-		if (err) {
-			return callback(err);
+	load(client, tableConfig, ls.pipeline(leo.read(ID, "Lead", {
+		stopTime: moment().add(240, "seconds"),
+		start: 'z/2018/03/01'
+	}), stats, mapping), err => {
+		console.log(err);
+		client.disconnect();
+		if (!err) {
+			stats.checkpoint(callback);
+		} else {
+			callback(err);
 		}
-		ls.pipe(
-			leo.read(ID, "Lead", {
-				stopTime: moment().add(240, "seconds"),
-				start: 'z/2018/03/01'
-			}), stats, mapping, combine(), ls.through((obj, done) => {
-				let tasks = [];
-				Object.keys(obj).forEach(t => {
-					console.log("TABLE IS ", t);
-					if (t in tableConfig) {
-						tasks.push(done => {
-							let config = tableConfig[t];
-							let sk = null;
-							let nk = [];
-							let scds = {
-								0: [],
-								1: [],
-								2: [],
-								6: []
-							};
-							Object.keys(config.structure).forEach(f => {
-								let field = config.structure[f];
-
-								if (field == "sk" || field.sk) {
-									sk = f;
-								} else if (field.nk) {
-									nk.push(f);
-								} else if (field.scd !== undefined) {
-									scds[field.scd].push(f);
-								}
-							});
-							if (tableConfig[t].isDimension) {
-								client.importDimension(obj[t].stream, t, sk, nk, scds, done);
-							} else {
-								client.importFact(obj[t].stream, t, nk, done);
-							}
-						});
-					}
-				});
-
-				async.parallelLimit(tasks, 10, (err) => {
-					if (err) {
-						done(err);
-					} else {
-						let tasks = [];
-						Object.keys(obj).forEach(t => {
-							let config = tableConfig[t];
-							let links = {};
-							Object.keys(config.structure).forEach(f => {
-								let field = config.structure[f];
-								if (field.dimension) {
-									links[f] = field.dimension;
-								}
-							});
-							if (Object.keys(links).length) {
-								tasks.push(done => client.linkDimensions(t, links, done));
-							}
-						});
-
-						async.parallelLimit(tasks, 10, (err) => {
-							done(err);
-						});
-					}
-				});
-			}),
-			(err) => {
-				console.log("in here");
-				console.log(err);
-				client.disconnect();
-				if (!err) {
-					stats.checkpoint(callback);
-				} else {
-					callback(err);
-				}
-			}
-		);
 	});
 };
