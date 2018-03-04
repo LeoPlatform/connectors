@@ -18,7 +18,7 @@ module.exports = function(config) {
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
 		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			let lookup = {};
@@ -82,7 +82,7 @@ module.exports = function(config) {
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
 		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
 		tasks.push(done => client.query(`alter table staging_${table} drop column ${sk}`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), ls.log(), ls.devnull(), done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			let lookup = {};
