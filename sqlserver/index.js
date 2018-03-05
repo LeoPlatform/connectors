@@ -63,7 +63,7 @@ module.exports = {
 				});
 				stream.write(obj);
 			} else {
-				throw new Error(err);
+				console.log(err);
 			}
 
 			stream.end();
