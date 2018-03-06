@@ -100,7 +100,24 @@ describe('SQL', function() {
 				checkpoint: obj.ID,
 				event: event
 			});
-		}), ls.devnull(), (err) => {
+		}), ls.toS3GzipChunks(event, {
+			useS3Mode: true,
+			time: {
+				minutes: 1
+			},
+			prefix: "_snapshot/" + timestamp.format("YYYY/MM_DD_") + timestamp.valueOf()
+		}, function(done, push) {
+			push({
+				_cmd: 'registerSnapshot',
+				event: event,
+				start: timestamp.valueOf(),
+				next: timestamp.clone().startOf('day').valueOf()
+			});
+
+			done();
+		}), ls.toLeo(botId, {
+			snapshot: timestamp.valueOf()
+		}), (err) => {
 			console.log('all done');
 			console.log(err);
 			done(err);
