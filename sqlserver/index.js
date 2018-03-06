@@ -1,14 +1,14 @@
 "use strict";
 const connect = require("./lib/connect.js");
-const sqlLoader = require("../lib/sql/loader");
+const sqlLoader = require("leo-connector-common/sql/loader");
 const PassThrough = require("stream").PassThrough;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
 
 module.exports = {
-	load: function (config, sql, domain, opts) {
+	load: function(config, sql, domain, opts) {
 		return sqlLoader(() => connect(config), sql, domain, opts);
 	},
-	streamChanges: function (config, tables, opts = {}) {
+	streamChanges: function(config, tables, opts = {}) {
 		let client = connect(config);
 
 		let stream = new PassThrough({

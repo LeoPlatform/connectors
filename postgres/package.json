@@ -1,5 +1,5 @@
 {
-  "name": "leo-postgress",
+  "name": "leo-connector-postgres",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

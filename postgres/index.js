@@ -1,6 +1,6 @@
 "use strict";
 const connect = require("./lib/connect.js");
-const sqlLoader = require("leo-connector-common/lib/sql/loader");
+const sqlLoader = require("leo-connector-common/sql/loader");
 
 const LogicalReplication = require('pg-logical-replication')
 
