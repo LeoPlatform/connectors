@@ -58,8 +58,6 @@ module.exports = function (config) {
 				log.info(`SQL query #${queryId} is `, query);
 				log.time(`Ran Query #${queryId}`);
 
-				console.log(params);
-
 				if (params) {
 					for (let i in params) {
 						request.input(i, params[i]);

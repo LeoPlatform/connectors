@@ -74,7 +74,7 @@ describe('SQL', function () {
 				password: 'Leo1234TestPassword',
 				server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
 				database: 'rentdynamics'
-			}, 'Lead', 'ID', {limit: 50, maxLimit: 50}),
+			}, 'Lead', 'ID', {limit: 5000, maxLimit: 5000}),
 			// transform the data
 			transform = loader.load({
 				user: 'root',
@@ -90,7 +90,7 @@ describe('SQL', function () {
 				};
 			});
 
-		ls.pipe(stream, ls.log(), transform, ls.through((obj, done) => {
+		ls.pipe(stream, transform, ls.through((obj, done) => {
 			done(null, {
 				id: botId,
 				payload: obj,
