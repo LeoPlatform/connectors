@@ -5,7 +5,9 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver" }) {
+module.exports = function(connect, sql, domainObj, opts = {
+	source: "sqlserver"
+}) {
 	let sqlClient = connect();
 
 	let pass = new PassThrough({
@@ -90,6 +92,7 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 
 		let tasks = [];
 		let domains = {};
+		console.log("Processing " + ids.length);
 		ids.forEach(id => {
 			domains[id] = {};
 			Object.keys(obj.joins).forEach(name => {
@@ -181,7 +184,7 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 				callback(err);
 			} else {
 				let needsDrained = false;
-				let getEid = opts.getEid || ((id, obj, stats)=>stats.end);
+				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
 
 				for (let id in domains) {
 					// skip the domain if there is no data with it

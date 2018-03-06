@@ -10,8 +10,8 @@ const moment = require("moment");
 const loader = require("../");
 const streamer = require("../").streamChanges;
 
-describe('SQL', function () {
-	it('Should be able to stream changed IDs in and receive full objects out', function (done) {
+describe('SQL', function() {
+	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
 		this.timeout(1000 * 5);
 
 		let changes = streamer({
@@ -29,31 +29,31 @@ describe('SQL', function () {
 			database: 'test',
 			name: 'loader'
 		}, {
-				test: true
-			}, function (ids) {
-				return {
-					sql: `select * from test where id in (${ids.join()})`,
-					id: "id",
-					joins: {
-						Customer: {
-							type: 'one_to_many',
-							on: "id",
-							sql: `select * from test where id in (${ids.join()})`
-						},
-						Bob: {
-							type: 'one_to_one',
-							on: 'changed',
-							sql: `select * from test where id in (${ids.join()})`,
-							transform: row => {
-								return {
-									changed: row.id,
-									combined: row.name + "-" + row.somethingelse
-								};
-							}
+			test: true
+		}, function(ids) {
+			return {
+				sql: `select * from test where id in (${ids.join()})`,
+				id: "id",
+				joins: {
+					Customer: {
+						type: 'one_to_many',
+						on: "id",
+						sql: `select * from test where id in (${ids.join()})`
+					},
+					Bob: {
+						type: 'one_to_one',
+						on: 'changed',
+						sql: `select * from test where id in (${ids.join()})`,
+						transform: row => {
+							return {
+								changed: row.id,
+								combined: row.name + "-" + row.somethingelse
+							};
 						}
 					}
-				};
-			});
+				}
+			};
+		});
 
 		// this is good
 		ls.pipe(changes, transform, ls.log(), ls.devnull(), (err) => {
@@ -74,7 +74,10 @@ describe('SQL', function () {
 				password: 'Leo1234TestPassword',
 				server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
 				database: 'rentdynamics'
-			}, 'Lead', 'ID', {limit: 5000, maxLimit: 5000}),
+			}, 'Lead', 'ID', {
+				limit: 5000,
+				maxLimit: 5000
+			}),
 			// transform the data
 			transform = loader.load({
 				user: 'root',
@@ -97,24 +100,7 @@ describe('SQL', function () {
 				checkpoint: obj.ID,
 				event: event
 			});
-		}), ls.toS3GzipChunks(event, {
-			useS3Mode: true,
-			time: {
-				minutes: 1
-			},
-			prefix: "_snapshot/" + timestamp.format("YYYY/MM_DD_") + timestamp.valueOf()
-		}, function(done, push) {
-			push({
-				_cmd: 'registerSnapshot',
-				event: event,
-				start: timestamp.valueOf(),
-				next: timestamp.clone().startOf('day').valueOf()
-			});
-
-			done();
-		}), ls.toLeo(botId, {
-			snapshot: timestamp.valueOf()
-		}), (err) => {
+		}), ls.devnull(), (err) => {
 			console.log('all done');
 			console.log(err);
 			done(err);

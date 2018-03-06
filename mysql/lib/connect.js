@@ -103,6 +103,8 @@ module.exports = function(config) {
 			});
 		},
 		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			let sql;
+			let params;
 			if (reverse) {
 				sql = `select ?? as id from ??
 							where ?? <= ? and ?? >= ?
@@ -120,17 +122,16 @@ module.exports = function(config) {
 			client.query(sql, params, callback);
 		},
 		getIds: function(table, id, start, end, reverse, callback) {
+			let sql;
 			if (reverse) {
 				sql = `select ?? as id from ??  
                             where ?? <= ? and ?? >= ?
                             ORDER BY ?? desc
-                            LIMIT ${limit}
                         `;
 			} else {
 				sql = `select ?? as id from ??  
                             where ?? >= ? and ?? <= ?
                             ORDER BY ?? asc
-                            LIMIT ${limit}
                         `;
 			}
 			client.query(sql, [id, table, id, start, id, end, id], callback);

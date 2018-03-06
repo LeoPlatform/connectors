@@ -81,7 +81,6 @@ module.exports = function(client, table, id, opts) {
 					}
 
 					client.getIds(table, id, nibble.start, nibble.end, opts.reverse, (err, result) => {
-
 						if (err) {
 							return done(err);
 						}
