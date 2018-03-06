@@ -101,7 +101,41 @@ module.exports = function(config) {
 					total: result[0].total
 				});
 			});
+		},
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			if (reverse) {
+				sql = `select ?? as id from ??
+							where ?? <= ? and ?? >= ?
+							ORDER BY ?? desc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, min, id];
+			} else {
+				sql = `select ?? as id from ??
+							where ?? >= ? and ?? <= ?
+							ORDER BY ?? asc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, max, id];
+			}
+
+			client.query(sql, params, callback);
+		},
+		getIds: function(table, id, start, end, reverse, callback) {
+			if (reverse) {
+				sql = `select ?? as id from ??  
+                            where ?? <= ? and ?? >= ?
+                            ORDER BY ?? desc
+                            LIMIT ${limit}
+                        `;
+			} else {
+				sql = `select ?? as id from ??  
+                            where ?? >= ? and ?? <= ?
+                            ORDER BY ?? asc
+                            LIMIT ${limit}
+                        `;
+			}
+			client.query(sql, [id, table, id, start, id, end, id], callback);
 		}
 	};
+
 	return client;
 };

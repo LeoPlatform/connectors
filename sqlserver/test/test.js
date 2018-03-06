@@ -7,7 +7,7 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const moment = require("moment");
 
-const loader = require("../").load;
+const loader = require("../");
 const streamer = require("../").streamChanges;
 
 describe('SQL', function () {
@@ -90,7 +90,7 @@ describe('SQL', function () {
 				};
 			});
 
-		ls.pipe(stream, transform, ls.through((obj, done) => {
+		ls.pipe(stream, ls.log(), transform, ls.through((obj, done) => {
 			done(null, {
 				id: botId,
 				payload: obj,

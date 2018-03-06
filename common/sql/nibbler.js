@@ -49,13 +49,13 @@ module.exports = function(client, table, id, opts) {
 	client.range(table, id, null, (err, result) => {
 		//Now let's nibble our way through it.
 		nibble = {
-			start: opts.reverse ? result[0].max : result[0].min,
-			end: opts.reverse ? result[0].min : result[0].max,
+			start: opts.reverse ? result.max : result.min,
+			end: opts.reverse ? result.min : result.max,
 			limit: opts.limit,
 			next: null,
-			max: result[0].max,
-			min: result[0].min,
-			total: result[0].total,
+			max: result.max,
+			min: result.min,
+			total: result.total,
 			progress: 0,
 			reverse: opts.reverse
 		};
@@ -65,21 +65,7 @@ module.exports = function(client, table, id, opts) {
 		async.doWhilst(done => {
 				let sql;
 				let params;
-				if (opts.reverse) {
-					sql = `select ?? as id from ??  
-					where ?? <= ? and ?? >= ?
-					ORDER BY ?? desc
-					LIMIT ${nibble.limit-1},2`;
-					params = [id, table, id, nibble.start, id, nibble.min, id]
-				} else {
-					sql = `select ?? as id from ??  
-					where ?? >= ? and ?? <= ?
-					ORDER BY ?? asc
-					LIMIT ${nibble.limit-1},2`;
-					params = [id, table, id, nibble.start, id, nibble.max, id];
-				}
-
-				client.query(sql, params, (err, result) => {
+				client.nibble(table, id, nibble.start, nibble.min, nibble.max, nibble.limit, opts.reverse, (err, result) => {
 					if (err) {
 						return done(err);
 					}
@@ -94,20 +80,8 @@ module.exports = function(client, table, id, opts) {
 						nibble.next = result[1].id;
 					}
 
-					if (opts.reverse) {
-						sql = `select ?? as id from ??  
-							where ?? <= ? and ?? >= ?
-							ORDER BY ?? desc
-							LIMIT ${nibble.limit}
-						`;
-					} else {
-						sql = `select ?? as id from ??  
-							where ?? >= ? and ?? <= ?
-							ORDER BY ?? asc
-							LIMIT ${nibble.limit}
-						`;
-					}
-					client.query(sql, [id, table, id, nibble.start, id, nibble.end, id], (err, result) => {
+					client.getIds(table, id, nibble.start, nibble.end, opts.reverse, (err, result) => {
+
 						if (err) {
 							return done(err);
 						}
