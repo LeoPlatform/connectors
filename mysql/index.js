@@ -7,7 +7,7 @@ module.exports = {
 	load: function(config, sql, domain) {
 		return sqlLoader(() => connect(config), sql, domain);
 	},
-	nibble: function(config, table, id) {
-		return sqlNibbler(connect(config), table, id);
+	nibble: function(config, table, id, opts) {
+		return sqlNibbler(connect(config), table, id, opts);
 	}
 };
