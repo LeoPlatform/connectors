@@ -186,7 +186,7 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 				for (let id in domains) {
 					// skip the domain if there is no data with it
 					if (Object.keys(domains[id]).length === 0) {
-						logger.log('#######Skipping #: ' + id);
+						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						continue;
 					}
 

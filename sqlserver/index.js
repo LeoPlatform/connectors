@@ -1,6 +1,7 @@
 "use strict";
 const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
+const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const PassThrough = require("stream").PassThrough;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
 
@@ -17,7 +18,10 @@ module.exports = {
 		// getEid: (id, obj, stats)=>stats.end.replace(/\..*/, "." + id)
 		// }, opts));
 	},
-	streamChanges: function(config, tables, opts = {}) {
+	nibble: function(config, table, id, opts) {
+		return sqlNibbler(connect(config), table, id, opts);
+	},
+	streamChanges: function (config, tables, opts = {}) {
 		let client = connect(config);
 
 		let stream = new PassThrough({
