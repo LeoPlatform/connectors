@@ -7,8 +7,8 @@ const ls = require("leo-sdk").streams;
 const loader = require("../").load;
 const streamer = require("../").streamChanges;
 
-describe.only('SQL', function() {
-	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
+describe('SQL', function () {
+	it('Should be able to stream changed IDs in and receive full objects out', function (done) {
 		this.timeout(1000 * 5);
 
 
@@ -27,31 +27,31 @@ describe.only('SQL', function() {
 			database: 'test',
 			name: 'loader'
 		}, {
-			test: true
-		}, function(ids) {
-			return {
-				sql: `select * from test where id in (${ids.join()})`,
-				id: "id",
-				joins: {
-					Customer: {
-						type: 'one_to_many',
-						on: "id",
-						sql: `select * from test where id in (${ids.join()})`
-					},
-					Bob: {
-						type: 'one_to_one',
-						on: 'changed',
-						sql: `select * from test where id in (${ids.join()})`,
-						transform: row => {
-							return {
-								changed: row.id,
-								combined: row.name + "-" + row.somethingelse
-							};
+				test: true
+			}, function (ids) {
+				return {
+					sql: `select * from test where id in (${ids.join()})`,
+					id: "id",
+					joins: {
+						Customer: {
+							type: 'one_to_many',
+							on: "id",
+							sql: `select * from test where id in (${ids.join()})`
+						},
+						Bob: {
+							type: 'one_to_one',
+							on: 'changed',
+							sql: `select * from test where id in (${ids.join()})`,
+							transform: row => {
+								return {
+									changed: row.id,
+									combined: row.name + "-" + row.somethingelse
+								};
+							}
 						}
 					}
-				}
-			};
-		});
+				};
+			});
 		ls.pipe(changes, transform, ls.log(), ls.devnull(), (err) => {
 			console.log("all done");
 			console.log(err);
