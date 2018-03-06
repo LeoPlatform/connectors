@@ -75,6 +75,16 @@ describe.only('SQL', function() {
 		this.timeout(1000 * 60 * 4);
 
 
+
+		ls.pipe(leo.read("TEST", "Community", {
+			// start: 'z/',
+			start: "_snapshot/z/2018/03/06/05/11/1520313154185-0267168"
+		}), ls.devnull(), err => {
+			console.log(err);
+			done();
+		});
+		return;
+
 		//These variables shoud persist between lambda invocations
 		let event = "Community";
 		let botId = "Community_snapshotter";
