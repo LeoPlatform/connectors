@@ -1,6 +1,6 @@
 "use strict";
 const connect = require("./lib/connect.js");
-const sqlLoader = require("../lib/sql/loader");
+const sqlLoader = require("leo-connector-common/lib/sql/loader");
 
 const LogicalReplication = require('pg-logical-replication')
 
@@ -16,8 +16,6 @@ module.exports = {
 		var PluginTestDecoding = LogicalReplication.LoadPlugin('output/test_decoding');
 
 		let lastLsn = null;
-
-
 
 		let thr = ls.through((obj, done) => {
 			if (!('data' in obj)) {
@@ -39,8 +37,6 @@ module.exports = {
 				console.log(e);
 			}
 		});
-
-
 		stream.on("data", (msg) => {
 			lastLsn = msg.lsn || lastLsn;
 			var log = (msg.log || '').toString('utf8');
@@ -57,7 +53,7 @@ module.exports = {
 			console.log(err);
 		});
 
-		stream.getChanges(slot_name, null, function(err) {
+		stream.getChanges(slot_name, null, null, function(err) {
 			console.log('Logical replication initialize error', err);
 		});
 	}

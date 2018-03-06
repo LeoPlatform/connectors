@@ -1,11 +1,9 @@
 {
-  "name": "leo-connector",
+  "name": "leo-connector-common",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "directories": {
-    "lib": "lib"
-  },
+  "directories": {},
   "scripts": {
     "test": "mocha --recursive -w"
   },
