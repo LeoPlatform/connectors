@@ -91,6 +91,16 @@ module.exports = function(config) {
 				records: 10000
 			});
 			return this.streamToTableBatch(table, opts);
+		},
+		range: function(table, id, opts, callback) {
+			client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
+				if (err) return callback(err);
+				callback(null, {
+					min: result[0].min,
+					max: result[0].max,
+					total: result[0].total
+				});
+			});
 		}
 	};
 	return client;

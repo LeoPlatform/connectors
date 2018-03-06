@@ -1,7 +1,7 @@
 "use strict";
 const connect = require("./lib/connect.js");
-const sqlLoader = require("../lib/sql/loader");
-const sqlNibbler = require("../lib/sql/nibbler");
+const sqlLoader = require("leo-connector-common/sql/loader");
+const sqlNibbler = require("leo-connector-common/sql/nibbler");
 
 module.exports = {
 	load: function(config, sql, domain) {

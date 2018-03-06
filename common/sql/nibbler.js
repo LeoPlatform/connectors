@@ -46,7 +46,7 @@ module.exports = function(client, table, id, opts) {
 	let pass = new PassThrough({
 		objectMode: true
 	});
-	client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
+	client.range(table, id, null, (err, result) => {
 		//Now let's nibble our way through it.
 		nibble = {
 			start: opts.reverse ? result[0].max : result[0].min,
