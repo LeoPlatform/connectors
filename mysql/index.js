@@ -2,7 +2,7 @@
 const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
-const checksum = require("../lib/checksum");
+const checksum = require("./lib/checksum");
 
 module.exports = {
 	load: function(config, sql, domain) {

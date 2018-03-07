@@ -2,7 +2,7 @@
 var aws = require("aws-sdk");
 const crypto = require('crypto');
 var uuid = require("uuid");
-var base = require("leo-connector-common/checksum/handler/index.js");
+var base = require("leo-connector-common/checksum/lib/handler.js");
 var moment = require("moment");
 
 let fieldTypes = {
@@ -79,7 +79,6 @@ module.exports = function(connection) {
 			select md5(concat(${fieldCalcs.join(', ')})) as hash
 			from (
         ${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}
-        order by ${settings.id_column} asc
       ) i
 		) as t
 		`;
@@ -118,7 +117,6 @@ module.exports = function(connection) {
       select ${settings.id_column} as id, md5(concat(${fieldCalcs.join(', ')})) as hash
       from (
         ${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}
-        order by ${settings.id_column} asc
       ) i
 		`;
 			console.log("Individual Query", individualQuery);
@@ -187,7 +185,7 @@ module.exports = function(connection) {
 
 		getFields(connection, event).then((table) => {
 			var fields = table.fields;
-			var sampleQuery = table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings)) + ` order by ${settings.id_column} asc`;
+			var sampleQuery = table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings));
 			console.log("Sample Query", sampleQuery);
 			connection.query(sampleQuery, (err, rows) => {
 				if (err) {
