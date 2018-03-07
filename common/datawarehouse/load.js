@@ -1,6 +1,6 @@
 "use strict";
 
-const leo = require("leo-sdk")('rentdynamics');
+const leo = require("leo-sdk");
 const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");

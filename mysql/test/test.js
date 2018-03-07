@@ -74,16 +74,20 @@ describe.only('SQL', function() {
 	it.only("Should be able to stream the entire table", function(done) {
 		this.timeout(1000 * 60 * 4);
 
+		// ls.pipe(leo.read("TEST", "Community", {
+		// 	// start: 'z/',
+		// 	start: "_snapshot/z/2018/03/06/05/11/1520313154185-0267168"
+		// }), ls.devnull(), err => {
+		// 	console.log(err);
+		// 	done();
+		// });
+		// return;
 
 		//These variables shoud persist between lambda invocations
 		let event = "Community";
-
 		let botId = "Community_snapshotter";
 		let timestamp = moment();
-		let streamContinuation = 'z/' + timestamp.format("YYYY/MM/DD");
-		let batch = timestamp.format("YYYY/MM/DD_") + timestamp.valueOf();
 		//END
-
 
 		let stream = mysqlLoader.nibble({
 			host: "localhost",
@@ -118,22 +122,20 @@ describe.only('SQL', function() {
 			});
 		}), ls.toS3GzipChunks(event, {
 			useS3Mode: true,
-			snapShot: true,
 			time: {
 				minutes: 1
 			},
-			prefix: batch
+			prefix: "_snapshot/" + timestamp.format("YYYY/MM_DD_") + timestamp.valueOf()
 		}, function(done, push) {
 			push({
 				_cmd: 'registerSnapshot',
 				event: event,
-				start: batch,
-				end: batch + "0",
-				continueFrom: streamContinuation
+				start: timestamp.valueOf(),
+				next: timestamp.clone().startOf('day').valueOf()
 			});
 			done();
 		}), ls.toLeo(botId, {
-			snapshot: "z/" + batch
+			snapshot: timestamp.valueOf()
 		}), (err) => {
 			console.log("all done");
 			console.log(err);

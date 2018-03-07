@@ -91,7 +91,52 @@ module.exports = function(config) {
 				records: 10000
 			});
 			return this.streamToTableBatch(table, opts);
+		},
+		range: function(table, id, opts, callback) {
+			client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
+				if (err) return callback(err);
+				callback(null, {
+					min: result[0].min,
+					max: result[0].max,
+					total: result[0].total
+				});
+			});
+		},
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			let sql;
+			let params;
+			if (reverse) {
+				sql = `select ?? as id from ??
+							where ?? <= ? and ?? >= ?
+							ORDER BY ?? desc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, min, id];
+			} else {
+				sql = `select ?? as id from ??
+							where ?? >= ? and ?? <= ?
+							ORDER BY ?? asc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, max, id];
+			}
+
+			client.query(sql, params, callback);
+		},
+		getIds: function(table, id, start, end, reverse, callback) {
+			let sql;
+			if (reverse) {
+				sql = `select ?? as id from ??  
+                            where ?? <= ? and ?? >= ?
+                            ORDER BY ?? desc
+                        `;
+			} else {
+				sql = `select ?? as id from ??  
+                            where ?? >= ? and ?? <= ?
+                            ORDER BY ?? asc
+                        `;
+			}
+			client.query(sql, [id, table, id, start, id, end, id], callback);
 		}
 	};
+
 	return client;
 };

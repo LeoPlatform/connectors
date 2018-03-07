@@ -1,5 +1,5 @@
 "use strict";
-const mysql = require("../../../mysql/lib/connect.js");
+const mysql = require("./connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
 

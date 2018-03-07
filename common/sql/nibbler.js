@@ -2,11 +2,11 @@ let PassThrough = require("stream").PassThrough;
 const async = require('async');
 
 module.exports = function(client, table, id, opts) {
-	var opts = Object.assign({
+	opts = Object.assign({
 		time: 1,
 		limit: 20000,
 		maxLimit: 1000000,
-		reverse: false
+		reverse: true
 	}, opts || {});
 
 	var nibble = {};
@@ -46,42 +46,31 @@ module.exports = function(client, table, id, opts) {
 	let pass = new PassThrough({
 		objectMode: true
 	});
-	client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
-		console.log(err, result);
+	client.range(table, id, null, (err, result) => {
 		//Now let's nibble our way through it.
 		nibble = {
-			start: result[0].min,
-			end: result[0].max,
+			start: opts.reverse ? result.max : result.min,
+			end: opts.reverse ? result.min : result.max,
 			limit: opts.limit,
 			next: null,
-			max: result[0].max,
-			min: result[0].min,
-			total: result[0].total,
+			max: result.max,
+			min: result.min,
+			total: result.total,
 			progress: 0,
-			reverse: opts.reverse,
-			move: function() {
-				if (!this.reverse)
-					this.start = this.next;
-				else
-					this.end = this.next;
-			}
+			reverse: opts.reverse
 		};
 
 		log(`Starting.  Total: ${nibble.total}`);
 		//var hadRecentErrors = 0;
 		async.doWhilst(done => {
-				console.log(nibble);
-				client.query(`select ?? as id from ??  
-					where ?? >= ? and ?? <= ?
-					ORDER BY ?? ${opts.reverse?'desc':'asc'}
-					LIMIT ${nibble.limit-1},2
-					`, [id, table, id, nibble.start, id, nibble.max, id], (err, result) => {
+				let sql;
+				let params;
+				client.nibble(table, id, nibble.start, nibble.min, nibble.max, nibble.limit, opts.reverse, (err, result) => {
 					if (err) {
 						return done(err);
 					}
-					console.log(result);
 					if (!result[0]) {
-						nibble.end = nibble.max;
+						nibble.end = opts.reverse ? nibble.min : nibble.max;
 						nibble.next = null;
 					} else if (!result[1]) {
 						nibble.end = result[0].id;
@@ -91,18 +80,12 @@ module.exports = function(client, table, id, opts) {
 						nibble.next = result[1].id;
 					}
 
-					client.query(`select ?? as id from ??  
-					where ?? >= ? and ?? <= ?
-					ORDER BY ?? ${opts.reverse?'desc':'asc'}
-					LIMIT ${nibble.limit}
-					`, [id, table, id, nibble.start, id, nibble.end, id], (err, result) => {
+					client.getIds(table, id, nibble.start, nibble.end, opts.reverse, (err, result) => {
 						if (err) {
 							return done(err);
 						}
 						nibble.start = nibble.next;
-
 						let ids = result.map(r => r.id);
-
 						if (!pass.write({
 								payload: {
 									[table]: ids
@@ -116,7 +99,7 @@ module.exports = function(client, table, id, opts) {
 				});
 			},
 			() => {
-				return !nibble.reverse ? nibble.start != null : nibble.end != null;
+				return nibble.start != null;
 			},
 			(err, data) => {
 				console.log(err);

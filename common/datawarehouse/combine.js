@@ -12,14 +12,10 @@ const async = require("async");
 module.exports = function(opts) {
 	let streams = {};
 	let count = 0;
-	let tableLoadCounts = {};
-
 
 	opts = Object.assign({
 		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' ')
 	});
-
-
 	let dateFormat = opts.dateFormat;
 
 	return ls.through((obj, done) => {

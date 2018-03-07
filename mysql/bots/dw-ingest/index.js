@@ -1,20 +1,20 @@
 "use strict";
 
-const leo = require("leo-sdk")('rentdynamics');
+const leo = require("leo-sdk");
 const ls = leo.streams;
 const moment = require("moment");
-const load = require("../../../lib/load.js");
+const load = require("leo-connector-common/datawarehouse/load.js");
 
 exports.handler = function(event, context, callback) {
 	const ID = event.botId;
 	let stats = ls.stats(event.botId, "Lead");
-
-	let client = require("../../lib/connect.js")({
-		user: 'root',
-		host: 'samplepostgressloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-		database: 'sourcedata',
-		password: 'Leo1234TestPassword',
-		port: 5432,
+	let client = require("../../lib/dwconnect.js")({
+		host: "localhost",
+		user: "root",
+		port: 3306,
+		database: "datawarehouse",
+		password: "a",
+		connectionLimit: 10
 	});
 
 	let tableConfig = {
@@ -38,8 +38,8 @@ exports.handler = function(event, context, callback) {
 				min_rent: 'int',
 				max_rent: 'int',
 				occupants: 'int',
-				desired_start: 'timestamp',
-				desired_end: 'timestamp'
+				desired_start: 'datetime',
+				desired_end: 'datetime'
 			}
 		},
 		d_client: {
@@ -71,7 +71,7 @@ exports.handler = function(event, context, callback) {
 				state: 'varchar(70)',
 				country: 'varchar(70)',
 				units: 'int',
-				year_built: 'timestamp',
+				year_built: 'datetime',
 				floors: 'int'
 			}
 		},
@@ -139,7 +139,7 @@ exports.handler = function(event, context, callback) {
 					state: payload.Community.State,
 					country: payload.Community.Country,
 					units: payload.Community.Units,
-					year_built: payload.Community.YearBuilt,
+					year_built: payload.Community.YearBuilt ? moment(payload.Community.YearBuilt).format("YYYY-MM-DD HH:mm:ss") : null,
 					floors: payload.Community.floors
 				}
 			}
@@ -188,8 +188,8 @@ exports.handler = function(event, context, callback) {
 					min_rent: payload.TargetHome.UnitMinRent,
 					max_rent: payload.TargetHome.UnitMaxRent,
 					occupants: payload.TargetHome.occupants,
-					desired_start: payload.TargetHome.StartDate,
-					desired_end: payload.TargetHome.EndDate
+					desired_start: payload.TargetHome.StartDate ? moment(payload.TargetHome.StartDate).format("YYYY-MM-DD HH:mm:ss") : null,
+					desired_end: payload.TargetHome.EndDate ? moment(payload.TargetHome.EndDate).format("YYYY-MM-DD HH:mm:ss") : null
 				}
 			}
 		});

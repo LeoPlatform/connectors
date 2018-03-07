@@ -5,16 +5,16 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-module.exports = function(connect, sql, domainObj) {
+module.exports = function(connect, sql, domainObj, opts = {
+	source: "sqlserver"
+}) {
 	let sqlClient = connect();
 
 	let pass = new PassThrough({
 		objectMode: true
 	});
-	let count = 0;
 	const MAX = 5000;
 	let ids = [];
-
 
 	function submit(done) {
 		async.doWhilst((done) => {
@@ -29,9 +29,16 @@ module.exports = function(connect, sql, domainObj) {
 		});
 	}
 
+	let eids = {
+		start: null,
+		end: null
+	};
 	return ls.pipeline(ls.through((obj, done) => {
+		eids.start = eids.start || obj.eid;
+		eids.end = obj.eid;
 		let tasks = [];
 		let findIds = [];
+
 		Object.keys(sql).forEach(key => {
 			if (sql[key] === true && key in obj.payload) {
 				findIds = findIds.concat(obj.payload[key]);
@@ -75,23 +82,21 @@ module.exports = function(connect, sql, domainObj) {
 		}
 	}), pass);
 
-
 	function buildEntities(ids, callback) {
-		console.log("processing " + ids.length + " entities");
 		let obj = Object.assign({
 			id: "id",
 			sql: "select * from dual limit 1",
 			joins: {}
 		}, domainObj(ids));
 
-
 		let tasks = [];
 		let domains = {};
+		console.log("Processing " + ids.length);
 		ids.forEach(id => {
 			domains[id] = {};
 			Object.keys(obj.joins).forEach(name => {
 				let t = obj.joins[name];
-				if (t.type == "one_to_many") {
+				if (t.type === "one_to_many") {
 					domains[id][name] = [];
 				} else {
 					domains[id][name] = {};
@@ -102,16 +107,31 @@ module.exports = function(connect, sql, domainObj) {
 		tasks.push(done => {
 			sqlClient.query(obj.sql, (err, results) => {
 				if (!err) {
-					for (var i = 0; i < results.length; i++) {
-						let row;
+					let row;
+					for (let i in results) {
 						if (obj.transform) {
 							row = obj.transform(results[i]);
 						} else {
 							row = results[i];
 						}
-						Object.assign(domains[row[obj.id]], row);
+
+						try {
+							Object.assign(domains[row[obj.id]], row);
+						} catch (err) {
+							if (!obj.id) {
+								logger.log('[FATAL ERROR]: No ID specified');
+							} else if (!row[obj.id]) {
+								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" not found in object:');
+								logger.log(row);
+							} else if (!domains[row[obj.id]]) {
+								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+							}
+
+							throw new Error(err);
+						}
 					}
 				}
+
 				done(err);
 			});
 		});
@@ -119,13 +139,13 @@ module.exports = function(connect, sql, domainObj) {
 
 		Object.keys(obj.joins).forEach(name => {
 			let t = obj.joins[name];
-			if (t.type == "one_to_many") {
+			if (t.type === "one_to_many") {
 				tasks.push(done => {
 					sqlClient.query(t.sql, (err, results) => {
 						if (err) {
 							return done(err);
 						}
-						for (var i = 0; i < results.length; i++) {
+						for (let i = 0; i < results.length; i++) {
 							let row;
 							if (t.transform) {
 								row = t.transform(results[i]);
@@ -143,13 +163,14 @@ module.exports = function(connect, sql, domainObj) {
 						if (err) {
 							return done(err);
 						}
-						for (var i = 0; i < results.length; i++) {
+						for (let i = 0; i < results.length; i++) {
 							let row;
 							if (t.transform) {
 								row = t.transform(results[i]);
 							} else {
 								row = results[i];
 							}
+							//console.log(t.on, name, row)
 							domains[row[t.on]][name] = row;
 						}
 						done();
@@ -162,11 +183,33 @@ module.exports = function(connect, sql, domainObj) {
 				callback(err);
 			} else {
 				let needsDrained = false;
-				for (var id in domains) {
-					if (!pass.write(domains[id])) {
+				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
+
+				for (let id in domains) {
+					// skip the domain if there is no data with it
+					if (Object.keys(domains[id]).length === 0) {
+						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+						continue;
+					}
+
+					let eid = getEid(id, domains[id], eids);
+					let event = {
+						event: opts.queue,
+						id: opts.id,
+						eid: eid,
+						payload: domains[id],
+						correlation_id: {
+							source: opts.source,
+							start: eid,
+							units: 1
+						}
+					};
+
+					if (!pass.write(event)) {
 						needsDrained = true;
 					}
 				}
+
 				if (needsDrained) {
 					pass.once('drain', callback);
 				} else {
