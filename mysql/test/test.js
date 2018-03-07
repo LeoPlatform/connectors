@@ -1,6 +1,5 @@
 require("chai").should();
 
-const logger = require("leo-sdk/lib/logger")("connector.sql");
 const PassThrough = require("stream").PassThrough;
 const async = require("async");
 const leo = require("leo-sdk");
@@ -8,6 +7,11 @@ const ls = leo.streams;
 const moment = require("moment");
 
 const mysqlLoader = require("../");
+
+const configure = require("leo-sdk/leoConfigure.js");
+console.log(configure.steve);
+
+
 
 describe.only('SQL', function() {
 	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
@@ -32,14 +36,7 @@ describe.only('SQL', function() {
 
 
 
-		let transform = mysqlLoader({
-			host: "localhost",
-			user: "root",
-			port: 3306,
-			database: "datawarehouse",
-			password: "a",
-			connectionLimit: 10
-		}, {
+		let transform = mysqlLoader(configure.mysql, {
 			test: true
 		}, function(ids) {
 			return {

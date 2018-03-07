@@ -1,8 +1,7 @@
-module.exports = function (checksumlib) {
+module.exports = function(checksumlib) {
 	return {
-		handler: function (event, context, callback) {
+		handler: function(event, context, callback) {
 			context.callbackWaitsForEmptyEventLoop = false;
-			var idColumn = event.id_column;
 			var method = event.params.querystring.method;
 
 			if (method == "batch") {
@@ -70,7 +69,7 @@ module.exports = function (checksumlib) {
 					});
 				});
 			} else {
-				callback("Invalid Method: " + method)
+				callback("Invalid Method: " + method);
 			}
 		}
 	};

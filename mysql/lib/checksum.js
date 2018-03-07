@@ -2,11 +2,8 @@
 var aws = require("aws-sdk");
 const crypto = require('crypto');
 var uuid = require("uuid");
-var base = require("../checksum/index.js");
-var mysql = require('mysql');
+var base = require("leo-connector-common/checksum/handler/index.js");
 var moment = require("moment");
-
-
 
 let fieldTypes = {
 	BIT: 16,
@@ -42,7 +39,7 @@ Object.keys(fieldTypes).forEach(key => {
 	fieldIds[fieldTypes[key]] = key;
 });
 
-module.exports = function (connection) {
+module.exports = function(connection) {
 	if (!connection.end && connection.disconnect) {
 		connection.end = connection.disconnect;
 	}
@@ -401,7 +398,7 @@ module.exports = function (connection) {
 		if (where) {
 			var w = [];
 			if (typeof where == "object" && where.length) {
-				where.forEach(function (e) {
+				where.forEach(function(e) {
 					if (typeof e != "object") {
 						w.push(e);
 					} else if ("_" in e) {
@@ -420,7 +417,7 @@ module.exports = function (connection) {
 					var val = "";
 					var op = "="
 
-					if (typeof (entry) != "object") {
+					if (typeof(entry) != "object") {
 						val = entry;
 					} else if ("or" in entry) {
 						w.push(buildWhere(entry.or, "or"));
@@ -443,5 +440,4 @@ module.exports = function (connection) {
 		}
 		return ""
 	}
-
 };
