@@ -3,13 +3,13 @@
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const moment = require("moment");
-const load = require("../../../lib/load.js");
+const load = require("leo-connector-common/datawarehouse/load.js");
 
 exports.handler = function(event, context, callback) {
 	const ID = event.botId;
 	let stats = ls.stats(event.botId, "Lead");
 
-	let client = require("../../lib/connect.js")({
+	let client = require("../../lib/dwconnect.js")({
 		user: 'root',
 		host: 'samplepostgressloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
 		database: 'sourcedata',

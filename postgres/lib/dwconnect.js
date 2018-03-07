@@ -1,5 +1,5 @@
 "use strict";
-const postgres = require("../../../postgres/lib/connect.js");
+const postgres = require("./connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
 
