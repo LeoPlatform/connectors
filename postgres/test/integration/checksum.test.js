@@ -231,7 +231,7 @@ describe('SQL', function() {
 						name: 'steve4',
 						nameconcat: 'steve45',
 						customdate: "2000-12-05T00:00:00.000Z"
-					}])
+					}]);
 					done();
 				});
 			});

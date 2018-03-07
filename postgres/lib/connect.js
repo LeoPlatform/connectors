@@ -59,8 +59,8 @@ module.exports = function(config) {
 				callback(err, result);
 			});
 		},
-		streamToTableFromS3: function(table, fields, opts) {
-			opts = Object.assign({}, opts || {});
+		streamToTableFromS3: function(/*table, fields, opts*/) {
+			//opts = Object.assign({}, opts || {});
 		},
 		streamToTableBatch: function(table, fields, opts) {
 			opts = Object.assign({
@@ -91,10 +91,10 @@ module.exports = function(config) {
 				records: opts.records
 			});
 		},
-		streamToTable: function(table, opts) {
-			opts = Object.assign({
-				records: 10000
-			}, opts || {});
+		streamToTable: function(table/*, opts*/) {
+			// opts = Object.assign({
+			// 	records: 10000
+			// }, opts || {});
 			let columns = [];
 			var stream;
 			let myClient = null;

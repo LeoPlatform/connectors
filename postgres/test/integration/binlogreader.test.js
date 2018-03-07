@@ -1,5 +1,5 @@
 require("chai").should();
-const loader = require("../");
+// const loader = require("../");
 
 describe('SQL', function() {
 	it('Should be binlog read from postgres', function(done) {
