@@ -2,7 +2,6 @@ const exec = require('child_process').exec;
 const fs = require("fs");
 const path = require("path");
 const merge = require("lodash/merge");
-const readline = require('readline');
 const PassThrough = require("stream").PassThrough;
 const leo = require("leo-sdk");
 const ls = leo.streams;
@@ -10,10 +9,9 @@ const transform = require("./transform.js");
 const async = require("async");
 
 
-module.exports = function(toStream, opts) {
+module.exports = function(opts) {
 	let streams = {};
 	let count = 0;
-	let mergeCount = 0;
 	let tableLoadCounts = {};
 
 
@@ -55,6 +53,8 @@ module.exports = function(toStream, opts) {
 		}
 	}, function(done) {
 		let tasks = [];
+		let tables = {};
+
 		Object.keys(streams).forEach((t) => {
 			tasks.push((done) => {
 				let table = streams[t];
@@ -62,25 +62,17 @@ module.exports = function(toStream, opts) {
 					if (err) {
 						return done(err);
 					}
-					ls.pipe(combine(table.unsortedFile), ls.through((obj, done) => {
-						tableLoadCounts[t]++;
-						mergeCount++;
-						done(null, obj);
-					}), toStream(table.table, Object.keys(table.fields)), (err) => {
-						done(err);
-					});
+					tables[t] = {
+						table: t,
+						fields: Object.keys(streams[t].fields),
+						stream: combine(table.unsortedFile)
+					};
+					done();
 				});
 			});
 		});
 		async.parallelLimit(tasks, 4, err => {
 			if (!err) {
-				let tables = {};
-				Object.keys(streams).forEach(t => {
-					tables[t] = {
-						table: t,
-						fields: Object.keys(streams[t].fields)
-					};
-				})
 				this.push(tables);
 			}
 			done(err);
@@ -101,7 +93,7 @@ function combine(file) {
 		env: {
 			LC_ALL: 'C'
 		}
-	}, function(error, stdout, stderr) {
+	}, function(error) {
 		if (error) {
 			pass.emit("error", error);
 			pass.end();

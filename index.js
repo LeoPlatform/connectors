@@ -8,7 +8,7 @@ module.exports = {
 		let idMap = {};
 		let builder = {
 			mapToDomainId: function (tableIdentifer, primaryKeyToTargetPrimaryKeyQuery) {
-				idMap[tableIdentifer] = primaryKeyToTargetPrimaryKeyQuery == undefined ? true : primaryKeyToTargetPrimaryKeyQuery;
+				idMap[tableIdentifer] = primaryKeyToTargetPrimaryKeyQuery === undefined ? true : primaryKeyToTargetPrimaryKeyQuery;
 				return this;
 			},
 			trackTable: function (tableIdentifer, primaryKey) {
@@ -18,18 +18,19 @@ module.exports = {
 			},
 			getDomainIdMappings: () => idMap,
 			getTrackedTables: () => changeTracking
-		}
+		};
 
 		if (tableIdentifer && primaryKey) {
 			builder.trackTable(tableIdentifer, primaryKey);
 		}
 		return builder;
 	},
-	createLoader: function (id, query) {
+	createLoader: function (id, query, transform) {
 		let obj = {
 			id: id,
 			sql: query,
-			joins: {}
+			joins: {},
+			transform: transform
 		};
 		return {
 			get: () => obj,
@@ -55,4 +56,4 @@ module.exports = {
 			}
 		};
 	}
-}
+};

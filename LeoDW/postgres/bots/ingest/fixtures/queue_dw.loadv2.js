@@ -1,10 +1,10 @@
 let data = [];
 
-const MAX = 100000;
+const MAX = 100;
 for (i = 0; i < MAX; i++) {
 
 	data.push({
-		table: 'orders',
+		table: 'f_order',
 		data: {
 			id: i,
 			Order: i,
@@ -43,7 +43,7 @@ for (i = 0; i < MAX; i++) {
 		}
 	});
 	data.push({
-		table: 'order_items',
+		table: 'f_order_item',
 		data: {
 			id: i + 100000000,
 			Order: i + 100000000,
@@ -81,13 +81,29 @@ for (i = 0; i < MAX; i++) {
 			gti_status: null
 		}
 	});
+	data.push({
+		table: 'dim_order',
+		data: {
+			id: i + 100000000,
+			attributes: 'taerasrf',
+			attributes1: 'taerasrf',
+			attributes2: 'taerasrf',
+			attributes3: 'taerasrf'
+		}
+	});
 }
 
 module.exports = data;
 
 /*
-
-create table order_items(
+create table dim_orders(
+	id integer primary key,
+	attributes varchar(30),
+	attributes1 varchar(30),
+	attributes2 varchar(30),
+	attributes3 varchar(30)
+);
+create table f_order_item(
 	id integer primary key,
 	order_id  integer,
 	presenter_id integer,
@@ -122,11 +138,7 @@ create table order_items(
 	secondary_status varchar(20),
 	gti_status varchar(20)
 );
-
-
-
-
-  create table orders (
+  create table f_order (
   id integer  primary key,  
   order_id integer, 
   presenter_id integer, 

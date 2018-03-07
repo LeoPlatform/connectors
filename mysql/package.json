@@ -9,6 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "chai": "^4.1.2",
+    "leo-connector-common": "^1.0.0",
     "leo-sdk": "^1.0.54",
     "mysql": "^2.15.0"
   }

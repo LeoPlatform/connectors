@@ -5,7 +5,9 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver" }) {
+module.exports = function(connect, sql, domainObj, opts = {
+	source: "sqlserver"
+}) {
 	let sqlClient = connect();
 
 	let pass = new PassThrough({
@@ -23,7 +25,6 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 			if (err) {
 				done(err);
 			} else {
-				eids = {};
 				done();
 			}
 		});
@@ -38,6 +39,7 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 		eids.end = obj.eid;
 		let tasks = [];
 		let findIds = [];
+
 		Object.keys(sql).forEach(key => {
 			if (sql[key] === true && key in obj.payload) {
 				findIds = findIds.concat(obj.payload[key]);
@@ -82,7 +84,6 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 	}), pass);
 
 	function buildEntities(ids, callback) {
-		console.log("processing " + ids.length + " entities");
 		let obj = Object.assign({
 			id: "id",
 			sql: "select * from dual limit 1",
@@ -91,6 +92,7 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 
 		let tasks = [];
 		let domains = {};
+		console.log("Processing " + ids.length);
 		ids.forEach(id => {
 			domains[id] = {};
 			Object.keys(obj.joins).forEach(name => {
@@ -105,18 +107,32 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 
 		tasks.push(done => {
 			sqlClient.query(obj.sql, (err, results) => {
-				let row;
-
 				if (!err) {
+					let row;
 					for (let i in results) {
 						if (obj.transform) {
 							row = obj.transform(results[i]);
 						} else {
 							row = results[i];
 						}
-						Object.assign(domains[row[obj.id]], row);
+
+						try {
+							Object.assign(domains[row[obj.id]], row);
+						} catch (err) {
+							if (!obj.id) {
+								logger.log('[FATAL ERROR]: No ID specified');
+							} else if (!row[obj.id]) {
+								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" not found in object:');
+								logger.log(row);
+							} else if (!domains[row[obj.id]]) {
+								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+							}
+
+							throw new Error(err);
+						}
 					}
 				}
+
 				done(err);
 			});
 		});
@@ -168,21 +184,24 @@ module.exports = function (connect, sql, domainObj, opts = { source: "sqlserver"
 				callback(err);
 			} else {
 				let needsDrained = false;
+				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
+
 				for (let id in domains) {
 					// skip the domain if there is no data with it
 					if (Object.keys(domains[id]).length === 0) {
+						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						continue;
 					}
 
+					let eid = getEid(id, domains[id], eids);
 					let event = {
 						event: opts.queue,
 						id: opts.id,
-						eid: eids.end,
+						eid: eid,
 						payload: domains[id],
 						correlation_id: {
 							source: opts.source,
-							start: eids.start,
-							end: eids.end,
+							start: eid,
 							units: 1
 						}
 					};

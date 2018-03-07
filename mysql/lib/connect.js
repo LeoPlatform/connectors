@@ -28,44 +28,115 @@ module.exports = function(config) {
 			m.query(query, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.info("Had error", err);
+					log.info("Had error #${queryId}", err);
 				}
 				callback(err, result, fields);
-			})
+			});
 		},
 		disconnect: m.end.bind(m),
-		loadFromS3: function(table, fields, opts) {
+		describeTable: function(table, callback) {
+			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
+				FROM information_schema.columns
+				WHERE table_name = ? order by ordinal_position asc`, [table], (err, result) => {
+				callback(err, result);
+			});
+		},
+		streamToTableFromS3: function(table, opts) {
 
 		},
-		streamToTable: function(table, fields, opts) {
+		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
 			});
-			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
-				lookups[f.toLowerCase()] = index;
-				return lookups;
-			}, {});
-			let columns = Object.keys(fieldColumnLookup);
+			let pending = null;
+			let columns = [];
+			let ready = false;
+			client.query(`SELECT column_name 
+					FROM information_schema.columns 
+					WHERE table_name = ? order by ordinal_position asc`, [table], (err, results) => {
+				columns = results.map(r => r.column_name);
+				ready = true;
+				if (pending) {
+					pending();
+				}
+			});
 			return ls.bufferBackoff((obj, done) => {
-				done(null, obj, 1, 1);
+				if (!ready) {
+					pending = () => {
+						done(null, obj, 1, 1);
+					};
+				} else {
+					done(null, obj, 1, 1);
+				}
 			}, (records, callback) => {
 				console.log("Inserting " + records.length + " records");
 				var values = records.map((r) => {
 					return columns.map(f => r[f]);
 				});
-				client.query("INSERT INTO ?? (??) VALUES ?", [table, fields, values], function(err) {
+				client.query("INSERT INTO ?? (??) VALUES ?", [table, columns, values], function(err) {
 					if (err) {
 						callback(err);
 					} else {
 						callback(null, []);
 					}
-				})
+				});
 			}, {
 				failAfter: 2
 			}, {
 				records: opts.records
 			});
+		},
+		streamToTable: function(table, opts) {
+			opts = Object.assign({
+				records: 10000
+			});
+			return this.streamToTableBatch(table, opts);
+		},
+		range: function(table, id, opts, callback) {
+			client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
+				if (err) return callback(err);
+				callback(null, {
+					min: result[0].min,
+					max: result[0].max,
+					total: result[0].total
+				});
+			});
+		},
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			let sql;
+			let params;
+			if (reverse) {
+				sql = `select ?? as id from ??
+							where ?? <= ? and ?? >= ?
+							ORDER BY ?? desc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, min, id];
+			} else {
+				sql = `select ?? as id from ??
+							where ?? >= ? and ?? <= ?
+							ORDER BY ?? asc
+							LIMIT ${limit-1},2`;
+				params = [id, table, id, start, id, max, id];
+			}
+
+			client.query(sql, params, callback);
+		},
+		getIds: function(table, id, start, end, reverse, callback) {
+			let sql;
+			if (reverse) {
+				sql = `select ?? as id from ??  
+                            where ?? <= ? and ?? >= ?
+                            ORDER BY ?? desc
+                        `;
+			} else {
+				sql = `select ?? as id from ??  
+                            where ?? >= ? and ?? <= ?
+                            ORDER BY ?? asc
+                        `;
+			}
+			client.query(sql, [id, table, id, start, id, end, id], callback);
 		}
 	};
+
 	return client;
 };

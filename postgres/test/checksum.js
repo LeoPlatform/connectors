@@ -60,7 +60,7 @@ describe('SQL', function() {
 			});
 		});
 
-		it.only('Should be able to run from SQL as well', function(done) {
+		it('Should be able to run from SQL as well', function(done) {
 			postgres.init({
 				sql: `SELECT id, name, name||id as nameconcat
 					from test 
