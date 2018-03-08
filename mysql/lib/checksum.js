@@ -134,7 +134,6 @@ module.exports = function(connection) {
 						checksums: []
 					};
 					rows.forEach((row) => {
-						console.log(row)
 						results.checksums.push({
 							id: row.id,
 							hash: row.hash
