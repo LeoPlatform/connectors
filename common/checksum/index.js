@@ -153,7 +153,7 @@ module.exports = {
 						loopStart = Date.now();
 						var neededTime = lastLoopDuration * 1.33;
 
-						console.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
+						//console.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
 						if (loopStart + neededTime >= opts.stop_at) {
 							return "Out Of Time";
 						} else {
