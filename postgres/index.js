@@ -12,11 +12,9 @@ module.exports = {
 	load: function(config, sql, domain) {
 		return sqlLoader(() => connect(config), sql, domain);
 	},
-	binlogReader: function(connection, slot_name = 'bus_replication') {
+	binlogReader: function(connection, slot_name = 'bus_replication', lastLsn = null) {
 		var stream = new LogicalReplication(connection);
 		var PluginTestDecoding = LogicalReplication.LoadPlugin('output/test_decoding');
-
-		let lastLsn = null;
 
 		let thr = ls.through((obj, done) => {
 			if (!('data' in obj)) {
@@ -56,7 +54,7 @@ module.exports = {
 			stream.stop();
 		});
 
-		stream.getChanges(slot_name, null, null, function(err) {
+		stream.getChanges(slot_name, lastLsn, null, function(err) {
 			console.log('getChanges done');
 			thr.end();
 			thr.emit("error", err);
