@@ -145,6 +145,10 @@ module.exports = function(config) {
 					${scdSQL.join(',\n')}
 					FROM staging_${table} s
 					LEFT JOIN ${table} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d._current`, (err, result) => {
+					if (err) {
+						console.log(err);
+						process.exit();
+					}
 					let tasks = [];
 					let rowId = null;
 					tasks.push(done => {
@@ -191,7 +195,6 @@ module.exports = function(config) {
 
 					tasks.push(done => client.query(`drop table staging_${table}_changes`, done));
 					tasks.push(done => client.query(`drop table staging_${table}`, done));
-
 					async.series(tasks, err => {
 						if (!err) {
 							client.query(`commit`, e => {
@@ -353,5 +356,6 @@ module.exports = function(config) {
 			`;
 		client.query(sql, callback);
 	};
+
 	return client;
 };

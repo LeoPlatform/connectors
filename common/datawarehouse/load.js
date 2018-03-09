@@ -41,7 +41,6 @@ module.exports = function(client, tableConfig, stream, callback) {
 		});
 
 		async.parallelLimit(tasks, 10, (err) => {
-			console.log(err);
 			if (err) {
 				done(err);
 			} else {
@@ -68,6 +67,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 			}
 		});
 	}), err => {
-		callback(err);
+		console.log("IN HERE!!!!!!!");
+		callback(err, "ALL DONE");
 	});
 };
