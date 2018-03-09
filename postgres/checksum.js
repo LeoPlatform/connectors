@@ -1,6 +1,6 @@
 "use strict";
-var aws = require("aws-sdk");
-const connect = require("./lib/connect.js");
+// var aws = require("aws-sdk");
+const connect = require("./lib/connect");
 // require("leo-sdk/lib/logger").configure(/.*/, {
 // 	all: true
 // });
@@ -44,7 +44,7 @@ module.exports = function(config) {
 		destroy: function() {
 			client.end();
 		},
-		escape: function(val) {
+		escape: function(/*val*/) {
 
 		},
 		batch: (session, data, callback) => {
@@ -76,10 +76,10 @@ module.exports = function(config) {
 		range: (session, data, callback) => {
 			let where = [];
 			if (data.min) {
-				where.push(`"${idColumn}" >= ${escape(data.min)}`);
+				where.push(`"${session.idColumn}" >= ${escape(data.min)}`);
 			}
 			if (data.max) {
-				where.push(`"${idColumn}" <= ${escape(data.max)}`);
+				where.push(`"${session.idColumn}" <= ${escape(data.max)}`);
 			}
 			var whereStatement = "";
 			if (where.length) {
