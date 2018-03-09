@@ -49,7 +49,7 @@ module.exports = function(client, table, id, opts) {
 	client.range(table, id, null, (err, result) => {
 		//Now let's nibble our way through it.
 		nibble = {
-			start: opts.reverse ? result.max : result.min,
+			start: (opts.start && (opts.start < result.max || opts.start > result.min)) || opts.reverse ? result.max : result.min,
 			end: opts.reverse ? result.min : result.max,
 			limit: opts.limit,
 			next: null,
@@ -87,7 +87,8 @@ module.exports = function(client, table, id, opts) {
 						if (!pass.write({
 								payload: {
 									[table]: ids
-								}
+								},
+								nibble
 							})) {
 							pass.once('drain', done);
 						} else {
