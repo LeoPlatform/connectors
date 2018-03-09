@@ -4,6 +4,7 @@ const sqlLoader = require("leo-connector-common/sql/loader");
 
 const LogicalReplication = require('pg-logical-replication');
 
+
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
@@ -62,7 +63,7 @@ module.exports = {
 			if (err)
 				console.log('Logical replication initialize error', err);
 		});
-		
+
 		return thr;
 	}
 };

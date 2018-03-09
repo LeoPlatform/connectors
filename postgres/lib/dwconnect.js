@@ -225,28 +225,29 @@ module.exports = function(config) {
 		});
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-			let lookup = {};
-			result.forEach(r => lookup[r.column_name] = 1);
-			//Let's see if we are missing any columns we should have
-			let neededColumns = links.filter(f => !lookup[f.destination]).map(f => f.destination);
 			let tasks = [];
-			if (neededColumns.length) {
-				tasks.push(done => {
-					client.query(`alter table ${table} ` + neededColumns.map(c => `add column ${c} integer null`).join(', '), done);
-				});
-			}
+			let sets = [];
 
-			// Now we want to link any dimensions
 			tasks.push(done => {
 				let joinTables = links.map(link => {
-					return `LEFT JOIN ${link.table} ${link.source}_join_table 
+					if (link.table == "datetime") {
+						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+					} else if (link.table == "d_date") {
+						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
+					} else if (link.table == "d_time") {
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+					} else {
+						sets.push(`${link.destination} = coalesce(${link.source}_join_table.d_id, 1)`);
+						return `LEFT JOIN ${link.table} ${link.source}_join_table 
 							on ${link.source}_join_table.${link.on} = t.${link.source} 
 								and t.${link.link_date} >= ${link.source}_join_table._startdate 
 								and (t.${link.link_date} <= ${link.source}_join_table._enddate or ${link.source}_join_table._current)
 					`;
+					}
 				});
 				client.query(`Update ${table} dm
-						SET  ${links.map(f=>`${f.destination} = coalesce(${f.source}_join_table.d_id, 1)`)}
+						SET  ${sets.join(', ')}
 						FROM ${table} t
 						${joinTables.join("\n")}
 						where dm.id = t.id 
@@ -275,7 +276,7 @@ module.exports = function(config) {
 							if (!(f in fieldLookup)) {
 								missingFields[f] = structures[table].structure[f];
 							}
-						})
+						});
 						if (Object.keys(missingFields).length) {
 							client.updateTable(table, missingFields, done);
 						} else {
@@ -286,11 +287,10 @@ module.exports = function(config) {
 			});
 		});
 		async.parallelLimit(tasks, 20, callback);
-	}
+	};
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
-
 
 		Object.keys(definition.structure).forEach(f => {
 			let field = definition.structure[f];
@@ -304,9 +304,15 @@ module.exports = function(config) {
 				};
 			}
 
-
-			if (field.dimension) {
-				fields.push(`d_${f.replace(/_id$/,'')} integer`)
+			if (field.dimension == "datetime") {
+				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+			} else if (field.dimension == "date") {
+				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+			} else if (field.dimension == "time") {
+				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+			} else if (field.dimension) {
+				fields.push(`d_${f.replace(/_id$/,'')} integer`);
 			}
 			fields.push(`${f} ${field.type}`);
 		});
@@ -329,8 +335,16 @@ module.exports = function(config) {
 					type: field
 				};
 			}
-			if (field.dimension) {
-				fields.push(`d_${f.replace(/_id$/,'')} integer`)
+
+			if (field.dimension == "datetime") {
+				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+			} else if (field.dimension == "date") {
+				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+			} else if (field.dimension == "time") {
+				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+			} else if (field.dimension) {
+				fields.push(`d_${f.replace(/_id$/,'')} integer`);
 			}
 			fields.push(`${f} ${field.type}`);
 		});
