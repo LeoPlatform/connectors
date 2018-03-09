@@ -59,13 +59,13 @@ module.exports = function(config) {
 				callback(err, result);
 			});
 		},
-		streamToTableFromS3: function(table, fields, opts) {
-			opts = Object.assign({}, opts || {});
+		streamToTableFromS3: function( /*table, fields, opts*/ ) {
+			//opts = Object.assign({}, opts || {});
 		},
 		streamToTableBatch: function(table, fields, opts) {
 			opts = Object.assign({
 				records: 10000
-			});
+			}, opts || {});
 			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
 				lookups[f.toLowerCase()] = index;
 				return lookups;
@@ -91,10 +91,10 @@ module.exports = function(config) {
 				records: opts.records
 			});
 		},
-		streamToTable: function(table, opts) {
-			opts = Object.assign({
-				records: 10000
-			}, opts || {});
+		streamToTable: function(table /*, opts*/ ) {
+			// opts = Object.assign({
+			// 	records: 10000
+			// }, opts || {});
 			let columns = [];
 			var stream;
 			let myClient = null;
@@ -104,7 +104,11 @@ module.exports = function(config) {
 					columns = result.map(f => f.column_name);
 					myClient = c;
 
-					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN`));
+					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
+					stream.on("error", function(err) {
+						console.log(err);
+						process.exit();
+					});
 					if (pending) {
 						pending();
 					}
@@ -125,7 +129,6 @@ module.exports = function(config) {
 
 			return ls.pipeline(csv.createWriteStream({
 				headers: false,
-				delimiter: '\t',
 				transform: (row, done) => {
 					if (!myClient) {
 						pending = () => {

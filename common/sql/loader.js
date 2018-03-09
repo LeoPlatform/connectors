@@ -13,7 +13,6 @@ module.exports = function(connect, sql, domainObj, opts = {
 	let pass = new PassThrough({
 		objectMode: true
 	});
-	let count = 0;
 	const MAX = 5000;
 	let ids = [];
 

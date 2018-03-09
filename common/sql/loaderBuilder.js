@@ -3,15 +3,15 @@
 // });
 
 module.exports = {
-	createChangeTrackingObject: function (tableIdentifer, primaryKey) {
+	createChangeTrackingObject: function(tableIdentifer, primaryKey) {
 		let changeTracking = {};
 		let idMap = {};
 		let builder = {
-			mapToDomainId: function (tableIdentifer, primaryKeyToTargetPrimaryKeyQuery) {
+			mapToDomainId: function(tableIdentifer, primaryKeyToTargetPrimaryKeyQuery) {
 				idMap[tableIdentifer] = primaryKeyToTargetPrimaryKeyQuery === undefined ? true : primaryKeyToTargetPrimaryKeyQuery;
 				return this;
 			},
-			trackTable: function (tableIdentifer, primaryKey) {
+			trackTable: function(tableIdentifer, primaryKey) {
 				changeTracking[tableIdentifer] = primaryKey;
 				this.mapToDomainId(tableIdentifer);
 				return this;
@@ -25,7 +25,7 @@ module.exports = {
 		}
 		return builder;
 	},
-	createLoader: function (id, query, transform) {
+	createLoader: function(id, query, transform) {
 		let obj = {
 			id: id,
 			sql: query,
@@ -34,7 +34,7 @@ module.exports = {
 		};
 		return {
 			get: () => obj,
-			join: function (name, joinOnId, joinQuery, transform) {
+			join: function(name, joinOnId, joinQuery, transform) {
 				obj.joins[name] = {
 					type: "one_to_one",
 					on: joinOnId,
@@ -44,7 +44,7 @@ module.exports = {
 
 				return this;
 			},
-			joinOneToMany: function (name, joinOnId, joinQuery, transform) {
+			joinOneToMany: function(name, joinOnId, joinQuery, transform) {
 				obj.joins[name] = {
 					type: "one_to_many",
 					on: joinOnId,

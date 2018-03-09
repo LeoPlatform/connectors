@@ -2,7 +2,7 @@ var spawn = require('child_process').spawn;
 var child = spawn(`/app/bin/maxwell`, [
 	'--user', 'root',
 	'--password=', 'a',
-	'--host', '10.0.75.1',
+	'--host', 'localhost',
 	'--producer', 'stdout',
 	'--log_level', 'ERROR'
 ]);

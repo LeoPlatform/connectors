@@ -1,10 +1,4 @@
 require("chai").should();
-
-const logger = require("leo-sdk/lib/logger")("connector.sql");
-const PassThrough = require("stream").PassThrough;
-const async = require("async");
-const ls = require("leo-sdk").streams;
-
 const checksum = require("../checksum.js");
 
 require("leo-sdk/lib/logger").configure(/.*/, {
@@ -18,11 +12,11 @@ describe('SQL', function() {
 
 		before(function() {
 			postgres = checksum({
-				user: 'root',
-				host: 'samplepostgressloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-				database: 'sourcedata',
-				password: 'Leo1234TestPassword',
-				port: 5432,
+				user: process.env.user,
+				host: process.env.host,
+				database: process.env.database,
+				password: process.env.password,
+				port: process.env.port
 			});
 		});
 		after(function() {
@@ -237,7 +231,7 @@ describe('SQL', function() {
 						name: 'steve4',
 						nameconcat: 'steve45',
 						customdate: "2000-12-05T00:00:00.000Z"
-					}])
+					}]);
 					done();
 				});
 			});

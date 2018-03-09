@@ -14,6 +14,8 @@ const moment = require("moment");
 const uuid = require("uuid");
 const ls = leo.streams;
 
+const async = require("async");
+
 const tableName = leo.configuration.resources.LeoCron;
 
 function saveProgress(systemId, botId, data) {
@@ -120,9 +122,7 @@ module.exports = {
 					tasks.push(Promise.all([
 						master.init({}),
 						slave.init({})
-					]).then((result) => {
-						resolve(result);
-					}, logError));
+					]).catch(logError));
 				}
 				Promise.all(tasks).then((result) => {
 					if (session.min || session.max) {
@@ -153,7 +153,7 @@ module.exports = {
 						loopStart = Date.now();
 						var neededTime = lastLoopDuration * 1.33;
 
-						console.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
+						//console.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
 						if (loopStart + neededTime >= opts.stop_at) {
 							return "Out Of Time";
 						} else {
@@ -251,13 +251,21 @@ module.exports = {
 							done();
 						}
 					}, function(err, data, stopReason) {
-						console.log("All Done");
-						console.log(data);
-						console.log(stopReason);
 						var status = err ? ("error") : (stopReason == "Out Of Time" ? "running" : "complete");
-						var tasks = (status == "complete") ? [master, slave] : [];
+						var tasks = [];
 
-						if (status == "running") {
+						if (status == "complete") {
+							tasks.push(done => {
+								master.destroy({
+									status: status
+								}).then(result => done(), done);
+							});
+							tasks.push(done => {
+								slave.destroy({
+									status: status
+								}).then(result => done(), done);
+							});
+						} else if (status == "running") {
 							cron.runAgain();
 						}
 
@@ -268,15 +276,17 @@ module.exports = {
 									lastUpdate: moment.now(),
 									status: status,
 									statusReason: err ? err.toString() : stopReason
-								}), (err, result) => {
-									async.each(tasks, (connector, done) => {
-										connector.destroy({
-											status: status
-										}, done);
-									}, (err, data) => {
+								})).then(result => {
+								async.parallel(tasks, (err, data) => {
+									if (err) {
+										reject(err);
+									} else {
 										resolve();
-									});
+									}
 								});
+							}, err => {
+								reject(err);
+							});
 						});
 					});
 				}, logError);

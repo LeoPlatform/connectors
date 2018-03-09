@@ -9,17 +9,17 @@ module.exports = function(client, table, id, opts) {
 		reverse: true
 	}, opts || {});
 
-	let nibble = {};
-	let logTimeout = null;
+	var nibble = {};
+	var logTimeout = null;
 	//@todo: Update all this to use the log-update node module
 	function clearLog() {
 		process.stdout.write("\r\x1b[K");
 		if (logTimeout) clearInterval(logTimeout);
 	}
-	let log = function() {
+	var log = function() {
 		clearLog();
-		let percent = (nibble.progress / nibble.total) * 100;
-		let fixed = percent.toFixed(2);
+		var percent = (nibble.progress / nibble.total) * 100;
+		var fixed = percent.toFixed(2);
 		if (fixed == "100.00" && percent < 100) {
 			fixed = "99.99";
 		}
@@ -28,7 +28,7 @@ module.exports = function(client, table, id, opts) {
 
 	function timeLog(message) {
 		clearLog();
-		let time = new Date();
+		var time = new Date();
 
 		function writeMessage() {
 			process.stdout.write("\r\x1b[K");
@@ -61,8 +61,10 @@ module.exports = function(client, table, id, opts) {
 		};
 
 		log(`Starting.  Total: ${nibble.total}`);
-		//let hadRecentErrors = 0;
+		//var hadRecentErrors = 0;
 		async.doWhilst(done => {
+				let sql;
+				let params;
 				client.nibble(table, id, nibble.start, nibble.min, nibble.max, nibble.limit, opts.reverse, (err, result) => {
 					if (err) {
 						return done(err);

@@ -2,7 +2,8 @@
 const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
 
-const LogicalReplication = require('pg-logical-replication')
+const LogicalReplication = require('pg-logical-replication');
+
 
 const leo = require("leo-sdk");
 const ls = leo.streams;
@@ -11,11 +12,9 @@ module.exports = {
 	load: function(config, sql, domain) {
 		return sqlLoader(() => connect(config), sql, domain);
 	},
-	binlogReader: function(connection, slot_name = 'bus_replication') {
+	binlogReader: function(connection, slot_name = 'bus_replication', lastLsn = null) {
 		var stream = new LogicalReplication(connection);
 		var PluginTestDecoding = LogicalReplication.LoadPlugin('output/test_decoding');
-
-		let lastLsn = null;
 
 		let thr = ls.through((obj, done) => {
 			if (!('data' in obj)) {
@@ -32,29 +31,37 @@ module.exports = {
 						acc[e.name] = e.value;
 						return acc;
 					}, {})
-				})
+				});
 			} catch (e) {
-				console.log(e);
+				console.log("simplify transformation error", e);
+				done(e);
 			}
 		});
 		stream.on("data", (msg) => {
 			lastLsn = msg.lsn || lastLsn;
 			var log = (msg.log || '').toString('utf8');
 			try {
-				thr.write(PluginTestDecoding.parse(log));
+				thr.write(PluginTestDecoding.parse(log.replace(/integer\[\]/g, "integer")));
 			} catch (e) {
-				console.trace(log, e);
+				console.trace("Error writing data through", e);
+				stream.stop();
+				thr.end();
+				thr.emit("error", e);
+				throw e;
 			}
 		}).on("error", (err) => {
-			console.log(err);
+			console.log("EventEmmitter Error", err);
+			stream.stop();
 		});
 
-		ls.pipe(thr, ls.stringify(), require("fs").createWriteStream("/tmp/changes"), (err) => {
-			console.log(err);
+		stream.getChanges(slot_name, lastLsn, null, function(err) {
+			console.log('getChanges done');
+			thr.end();
+			thr.emit("error", err);
+			if (err)
+				console.log('Logical replication initialize error', err);
 		});
 
-		stream.getChanges(slot_name, null, null, function(err) {
-			console.log('Logical replication initialize error', err);
-		});
+		return thr;
 	}
 };
