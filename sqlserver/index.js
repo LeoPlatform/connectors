@@ -10,7 +10,7 @@ const logger = require("leo-sdk/lib/logger")("sqlserver");
 // });
 module.exports = {
 	load: function(config, sql, domain, opts) {
-		return sqlLoader(() => connect(config), sql, domain, opts);
+		return sqlLoader(connect(config), sql, domain, opts);
 
 		// Possible solution if the above doesn't work correctly. I didn't find the below to work correctly, but don't
 		// want to destroy it we have a change to test another 5k+ records
@@ -21,7 +21,7 @@ module.exports = {
 	nibble: function(config, table, id, opts) {
 		return sqlNibbler(connect(config), table, id, opts);
 	},
-	streamChanges: function (config, tables, opts = {}) {
+	streamChanges: function(config, tables, opts = {}) {
 		let client = connect(config);
 
 		let stream = new PassThrough({

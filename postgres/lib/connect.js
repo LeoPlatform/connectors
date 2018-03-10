@@ -5,9 +5,9 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
 
-require("leo-sdk/lib/logger").configure(/.*/, {
-	all: true
-});
+// require("leo-sdk/lib/logger").configure(/.*/, {
+// 	all: true
+// });
 
 var copyFrom = require('pg-copy-streams').from;
 let csv = require('fast-csv');

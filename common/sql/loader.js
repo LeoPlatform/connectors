@@ -5,11 +5,9 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-module.exports = function(connect, sql, domainObj, opts = {
-	source: "sqlserver"
+module.exports = function(sqlClient, sql, domainObj, opts = {
+	source: "loader"
 }) {
-	let sqlClient = connect();
-
 	let pass = new PassThrough({
 		objectMode: true
 	});
