@@ -17,31 +17,43 @@ module.exports = {
 		var PluginTestDecoding = LogicalReplication.LoadPlugin('output/test_decoding');
 
 		let thr = ls.through((obj, done) => {
-			if (!('data' in obj)) {
+			const {log} = obj;
+			if (!('data' in log)) {
+				//rejecting BEGIN and COMMIT
+				//TODO: Can the messages be buffered in order to get the COMMIT timestamp and apply it to all rows in the commit? 
+				//      Accepting the data after a commit makes more sense anyway. There may be buffer size issues for large transactions however
 				return done();
-			} else if (obj.action == "DELETE") {
+			} else if (log.action === "DELETE") {
 				return done();
 			}
 			try {
 				done(null, {
-					s: obj.schema,
-					t: obj.table,
-					a: obj.action,
-					d: obj.data.reduce((acc, e) => {
-						acc[e.name] = e.value;
-						return acc;
-					}, {})
+					lsn: obj.lsn,
+					log: {
+						s: log.schema,
+						t: log.table,
+						a: log.action,
+						d: log.data.reduce((acc, e) => {
+							acc[e.name] = e.value;
+							return acc;
+						}, {})
+					}
 				});
 			} catch (e) {
 				console.log("simplify transformation error", e);
 				done(e);
 			}
 		});
+
 		stream.on("data", (msg) => {
 			lastLsn = msg.lsn || lastLsn;
-			var log = (msg.log || '').toString('utf8');
+			var logStr = (msg.log || '').toString('utf8');
+			var log = PluginTestDecoding.parse(logStr.replace(/integer\[\]/g, "integer"));
 			try {
-				thr.write(PluginTestDecoding.parse(log.replace(/integer\[\]/g, "integer")));
+				thr.write({
+					lsn: msg.lsn,
+					log
+				});
 			} catch (e) {
 				console.trace("Error writing data through", e);
 				stream.stop();
@@ -54,12 +66,12 @@ module.exports = {
 			stream.stop();
 		});
 
-		stream.getChanges(slot_name, lastLsn, null, function(err) {
-			console.log('getChanges done');
+		stream.getChanges(slot_name, lastLsn, {
+			includeXids: true,
+			includeTimestamp: true
+		}, function(err) {
 			thr.end();
 			thr.emit("error", err);
-			if (err)
-				console.log('Logical replication initialize error', err);
 		});
 
 		return thr;
