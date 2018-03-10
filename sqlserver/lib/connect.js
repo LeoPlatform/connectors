@@ -4,7 +4,7 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
 // require("leo-sdk/lib/logger").configure(/.*/, {
 // 	all: true
 // });
-module.exports = function (config) {
+module.exports = function(config) {
 	const pool = new mssql.ConnectionPool(Object.assign({
 		user: 'root',
 		password: 'test',
@@ -38,7 +38,7 @@ module.exports = function (config) {
 
 	let queryCount = 0;
 	let client = {
-		query: function (query, params, callback) {
+		query: function(query, params, callback) {
 			if (!callback) {
 				callback = params;
 				params = null;
@@ -64,13 +64,15 @@ module.exports = function (config) {
 					}
 				}
 
-				request.query(query, function (err, result, fields) {
+				request.query(query, function(err, result, fields) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
 						log.info("Had error", err);
 						callback(err);
 					} else {
-						callback(null, result.recordset, Object.keys(result.recordset[0] || {}).map(k => ({name:k})));
+						callback(null, result.recordset, Object.keys(result.recordset[0] || {}).map(k => ({
+							name: k
+						})));
 					}
 				})
 			}
@@ -86,6 +88,7 @@ module.exports = function (config) {
 			});
 		},
 		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			let sql;
 			if (reverse) {
 				sql = `select ${id} as id from ${table}  
 							where ${id} <= ${start} and ${id} >= ${min}

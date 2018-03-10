@@ -54,6 +54,7 @@ module.exports = function(config) {
 			});
 		},
 		disconnect: pool.end.bind(pool),
+		end: pool.end.bind(pool),
 		describeTable: function(table, callback) {
 			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 				callback(err, result);
@@ -155,6 +156,44 @@ module.exports = function(config) {
 				});
 				stream.end();
 			}));
+		},
+		range: function(table, id, opts, callback) {
+			client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
+				if (err) return callback(err);
+				callback(null, {
+					min: result[0].min,
+					max: result[0].max,
+					total: result[0].total
+				});
+			});
+		},
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			if (reverse) {
+				sql = `select ${id} as id from ${table}  
+							where ${id} <= ${start} and ${id} >= ${min}
+							ORDER BY ${id} desc
+							LIMIT 2 OFFSET ${limit-1}`;
+			} else {
+				sql = `select ${id} as id from ${table}  
+							where ${id} >= ${start} and ${id} <= ${max}
+							ORDER BY ${id} asc
+							LIMIT 2 OFFSET ${limit-1}`;
+			}
+
+			client.query(sql, callback);
+		},
+		getIds: function(table, id, start, end, reverse, callback) {
+			if (reverse) {
+				sql = `select ${id} as id from ${table}  
+					where ${id} <= ${start} and ${id} >= ${end}
+					ORDER BY ${id} desc`;
+			} else {
+				sql = `select ${id} as id from ${table}  
+					where ${id} >= ${start} and ${id} <= ${end}
+					ORDER BY ${id} asc`;
+			}
+
+			client.query(sql, callback);
 		}
 	};
 	return client;
