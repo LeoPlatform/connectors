@@ -84,7 +84,6 @@ module.exports = {
 						lastLsn = result[0].confirmed_flush_lsn;
 					}
 					async.series(tasks, (err) => {
-						console.log("HOWDY");
 						if (err) return dieError(err);
 
 						client.query(`START_REPLICATION SLOT leo_replication LOGICAL ${lastLsn}`, (err, result) => {
