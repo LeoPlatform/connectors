@@ -9,7 +9,7 @@
 
  start = table / trx
 
- table = "table" space s:schema "." t:tablename ":" space a:action ":" d:data {return {schema:s, table:t, action:a, data:d};}
+ table = "table" space s:schema "." t:tablename ":" space a:action ":" d:data {return {s:s, t:t, a:a, d:d};}
  trx = trx_begin / trx_commit
 
  trx_begin = "BEGIN" id:trx_id? {return {trx:"BEGIN", xid:id};}
@@ -36,7 +36,7 @@
  braket_end_terminated_string = t:[^\]]+ {return t.join('');}
 
  action = t:("INSERT" / "UPDATE" / "DELETE") {return t;}
- datum = space f:fieldname t:datatype ":" v:value {return {name:f, type:t, value:v};}
+ datum = space f:fieldname t:datatype ":" v:value {return {n:f, t:t, v:v};}
  data = space "(" t:[^))]+ ")" {return {type:"null", name:"message", value:t.join('')};} / datum+
 
  */
@@ -205,10 +205,10 @@ module.exports =
         peg$c5 = peg$literalExpectation(":", false),
         peg$c6 = function(s, t, a, d) {
           return {
-            schema: s,
-            table: t,
-            action: a,
-            data: d
+            s: s,
+            t: t,
+            a: a,
+            d: d
           };
         },
         peg$c7 = "BEGIN",
@@ -297,9 +297,9 @@ module.exports =
         peg$c65 = peg$literalExpectation("DELETE", false),
         peg$c66 = function(f, t, v) {
           return {
-            name: f,
-            type: t,
-            value: v
+            n: f,
+            t: t,
+            v: v
           };
         },
         peg$c67 = "(",

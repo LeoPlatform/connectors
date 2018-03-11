@@ -6,7 +6,7 @@ const connect = require("./connect.js");
 const test_decoding = require("./test_decoding.js");
 var backoff = require("backoff");
 
-let count = 1;
+const logger = require("leo-sdk/lib/logger")("leo-stream");
 
 module.exports = {
 	stream: function(config, opts) {
@@ -23,15 +23,15 @@ module.exports = {
 
 		var retry = backoff.fibonacci({
 			randomisationFactor: 0,
-			initialDelay: 2000,
+			initialDelay: 1000,
 			maxDelay: 60000
 		});
 		retry.failAfter(100);
 		retry.on('backoff', function(number, delay) {
-			console.log(`Going to try to connect again in ${delay} ms`);
+			logger.error(`Going to try to connect again in ${delay} ms`);
 		});
 		retry.once('fail', (err) => {
-			console.log(err);
+			logger.error(err);
 			pass.emit(err);
 			pass.destroy();
 		});
@@ -43,18 +43,19 @@ module.exports = {
 				replication: 'database'
 			}));
 			let dieError = function(err) {
+				logger.error(err);
 				clearTimeout(reportBackTimeout);
 				if (client) {
 					client.removeAllListeners();
 					try {
 						wrapperClient.end(err => {});
 					} catch (e) {
-						console.log("Cannot end WrapperClient");
+						logger.debug("Cannot end WrapperClient");
 					}
 					try {
 						client.end(err => {});
 					} catch (e) {
-						console.log("Cannot end client");
+						logger.debug("Cannot end client");
 					}
 					client = null;
 					wrapperClient = null;
@@ -63,14 +64,14 @@ module.exports = {
 			};
 			client.on('error', dieError);
 			client.connect(function(err) {
-				console.log("Trying to connect ");
+				logger.debug("Trying to connect ");
 				if (err) return dieError(err);
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 					if (err) return dieError(err);
 					let tasks = [];
 					if (!result.length) {
 						lastLsn = '0/00000000';
-						tasks.push(done => query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
+						tasks.push(done => wrapperClient.query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
 							if (err) return dieError(err);
 							wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 								if (err) return dieError(err);
@@ -89,46 +90,74 @@ module.exports = {
 						client.query(`START_REPLICATION SLOT leo_replication LOGICAL ${lastLsn}`, (err, result) => {
 							if (err) return dieError(err);
 						});
+						let [upper, lower] = lastLsn.split('/');
+						lastLsn = {
+							upper: parseInt(upper, 16),
+							lower: parseInt(lower, 16)
+						};
 						client.connection.once('replicationStart', function() {
+							console.log(`Successfully listening for Changes on ${config.host}`);
 							retry.reset();
 							let e = function() {
 								if (reportBackTimeout) {
 									clearTimeout(reportBackTimeout);
 								}
-								standbyStatusUpdate(client, lastLsn);
+								checkpoint(client, lastLsn);
 								reportBackTimeout = setTimeout(e, opts.keepalive);
 							};
 							e();
+							pass.acknowledge = function(lsn) {
+								if (typeof lsn == "string") {
+									let [upper, lower] = lsn.split('/');
+									lsn = {
+										upper: parseInt(upper, 16),
+										lower: parseInt(lower, 16)
+									};
+								}
+								console.log(lsn);
+								lastLsn = lsn;
+								e();
+							};
+							let count = 0;
 							client.connection.on('error', dieError);
 							client.connection.on('copyData', function(msg) {
-
 								if (msg.chunk[0] == 0x77) { // XLogData
 									count++;
-									if (count == 10000) {
-										standbyStatusUpdate(client, lastLsn);
-										count = 1;
+									if (count === 10000) {
+										e();
+										count = 0;
 									}
+									let lsn = {
+										upper: msg.chunk.readUInt32BE(1),
+										lower: msg.chunk.readUInt32BE(5),
+									};
+									lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
 
-									let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
-									lastLsn = lsn;
-									pass.write({
-										lsn,
-										log: test_decoding.parse(msg.chunk.slice(25).toString('utf8'))
-									});
+									if (lsn.upper > lastLsn.upper || lsn.lower > lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
+										let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+										log.lsn = lsn;
+										if (log.d) {
+											log.d = log.d.reduce((acc, field) => {
+												acc[field.n] = field.v;
+												return acc;
+											}, {});
+										}
+										pass.write(log);
+									}
 								} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
 									let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
 									var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
 									var shouldRespond = msg.chunk.readInt8(17);
-									console.log({
+									logger.info({
 										lsn,
 										timestamp,
 										shouldRespond
 									});
 									if (shouldRespond) {
-										standbyStatusUpdate(client, lastLsn);
+										e();
 									}
 								} else {
-									console.log('Unknown message', msg.chunk[0]);
+									logger.error('Unknown message', msg.chunk[0]);
 								}
 
 							});
@@ -138,41 +167,39 @@ module.exports = {
 			});
 		});
 		retry.backoff();
+
+
 		return pass;
 	}
 };
 
-function standbyStatusUpdate(client, lastLsn) {
-	let [upperWAL, lowerWAL] = lastLsn.split('/');
-	upperWAL = parseInt(upperWAL, 16);
-	lowerWAL = parseInt(lowerWAL, 16);
-
+function checkpoint(client, lsn) {
 	// Timestamp as microseconds since midnight 2000-01-01
 	var now = (Date.now() - 946080000000);
 	var upperTimestamp = Math.floor(now / 4294967.296);
 	var lowerTimestamp = Math.floor((now - upperTimestamp * 4294967.296));
 
-	if (lowerWAL === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
-		upperWAL = upperWAL + 1;
-		lowerWAL = 0;
+	if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
+		lsn.upper = lsn.upper + 1;
+		lsn.lower = 0;
 	} else {
-		lowerWAL = lowerWAL + 1;
+		lsn.lower = lsn.lower + 1;
 	}
 
 	var response = Buffer.alloc(34);
 	response.fill(0x72); // 'r'
 
 	// Last WAL Byte + 1 received and written to disk locally
-	response.writeUInt32BE(upperWAL, 1);
-	response.writeUInt32BE(lowerWAL, 5);
+	response.writeUInt32BE(lsn.upper, 1);
+	response.writeUInt32BE(lsn.lower, 5);
 
 	// Last WAL Byte + 1 flushed to disk in the standby
-	response.writeUInt32BE(upperWAL, 9);
-	response.writeUInt32BE(lowerWAL, 13);
+	response.writeUInt32BE(lsn.upper, 9);
+	response.writeUInt32BE(lsn.lower, 13);
 
 	// Last WAL Byte + 1 applied in the standby
-	response.writeUInt32BE(upperWAL, 17);
-	response.writeUInt32BE(lowerWAL, 21);
+	response.writeUInt32BE(lsn.upper, 17);
+	response.writeUInt32BE(lsn.lower, 21);
 
 	// Timestamp as microseconds since midnight 2000-01-01
 	response.writeUInt32BE(upperTimestamp, 25);
@@ -180,7 +207,8 @@ function standbyStatusUpdate(client, lastLsn) {
 
 	// If 1, requests server to respond immediately - can be used to verify connectivity
 	response.writeInt8(0, 33);
-	console.log("sending response", lastLsn, count);
+	logger.debug("sending response", lsn);
 
 	client.connection.sendCopyFromChunk(response);
+
 }
