@@ -1,15 +1,16 @@
 const {
-	Pool,
-	Client
-} = require('pg')
+	Pool
+} = require('pg');
 const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
-
+const moment = require("moment");
 const format = require('pg-format');
 
+// require("leo-sdk/lib/logger").configure(/.*/, {
+// 	all: true
+// });
 
 var copyFrom = require('pg-copy-streams').from;
 let csv = require('fast-csv');
-const PassThrough = require("stream").PassThrough;
 // var TIMESTAMP_OID = 1114;
 
 require('pg').types.setTypeParser(1114, (val) => {
@@ -45,21 +46,27 @@ module.exports = function(config) {
 			pool.query(query, params, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.info("Had error", err);
+					log.info(`Had error #${queryId}`, err);
 					callback(err);
 				} else {
 					callback(null, result.rows, result.fields);
 				}
-			})
+			});
 		},
 		disconnect: pool.end.bind(pool),
-		loadFromS3: function(table, fields, opts) {
-
+		end: pool.end.bind(pool),
+		describeTable: function(table, callback) {
+			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+				callback(err, result);
+			});
+		},
+		streamToTableFromS3: function( /*table, fields, opts*/ ) {
+			//opts = Object.assign({}, opts || {});
 		},
 		streamToTableBatch: function(table, fields, opts) {
 			opts = Object.assign({
 				records: 10000
-			});
+			}, opts || {});
 			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
 				lookups[f.toLowerCase()] = index;
 				return lookups;
@@ -78,17 +85,17 @@ module.exports = function(config) {
 					} else {
 						callback(null, []);
 					}
-				})
+				});
 			}, {
 				failAfter: 2
 			}, {
 				records: opts.records
 			});
 		},
-		streamToTable: function(table, fields, opts) {
-			opts = Object.assign({
-				records: 10000
-			});
+		streamToTable: function(table /*, opts*/ ) {
+			// opts = Object.assign({
+			// 	records: 10000
+			// }, opts || {});
 			let columns = [];
 			var stream;
 			let myClient = null;
@@ -98,9 +105,10 @@ module.exports = function(config) {
 					columns = result.map(f => f.column_name);
 					myClient = c;
 
-					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN`));
-					stream.on('end', () => {
-						myClient.end();
+					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
+					stream.on("error", function(err) {
+						console.log(err);
+						process.exit();
 					});
 					if (pending) {
 						pending();
@@ -111,7 +119,6 @@ module.exports = function(config) {
 			});
 
 			let count = 0;
-			let pass = new PassThrough();
 
 			function nonNull(v) {
 				if (v === null || v === undefined) {
@@ -123,12 +130,11 @@ module.exports = function(config) {
 
 			return ls.pipeline(csv.createWriteStream({
 				headers: false,
-				delimiter: '\t',
 				transform: (row, done) => {
 					if (!myClient) {
 						pending = () => {
 							done(null, columns.map(f => nonNull(row[f])));
-						}
+						};
 					} else {
 						done(null, columns.map(f => nonNull(row[f])));
 					}
@@ -144,8 +150,50 @@ module.exports = function(config) {
 					done(null);
 				}
 			}, (done) => {
+				stream.on('end', () => {
+					myClient.end();
+					done();
+				});
 				stream.end();
 			}));
+		},
+		range: function(table, id, opts, callback) {
+			client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
+				if (err) return callback(err);
+				callback(null, {
+					min: result[0].min,
+					max: result[0].max,
+					total: result[0].total
+				});
+			});
+		},
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+			if (reverse) {
+				sql = `select ${id} as id from ${table}  
+							where ${id} <= ${start} and ${id} >= ${min}
+							ORDER BY ${id} desc
+							LIMIT 2 OFFSET ${limit-1}`;
+			} else {
+				sql = `select ${id} as id from ${table}  
+							where ${id} >= ${start} and ${id} <= ${max}
+							ORDER BY ${id} asc
+							LIMIT 2 OFFSET ${limit-1}`;
+			}
+
+			client.query(sql, callback);
+		},
+		getIds: function(table, id, start, end, reverse, callback) {
+			if (reverse) {
+				sql = `select ${id} as id from ${table}  
+					where ${id} <= ${start} and ${id} >= ${end}
+					ORDER BY ${id} desc`;
+			} else {
+				sql = `select ${id} as id from ${table}  
+					where ${id} >= ${start} and ${id} <= ${end}
+					ORDER BY ${id} asc`;
+			}
+
+			client.query(sql, callback);
 		}
 	};
 	return client;
