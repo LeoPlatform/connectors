@@ -21,9 +21,6 @@ module.exports = {
 	nibble: function(config, table, id, opts) {
 		return sqlNibbler(connect(config), table, id, opts);
 	},
-	nibble: function(config, table, id, opts) {
-		return sqlNibbler(connect(config), table, id, opts);
-	},
 	streamChanges: function (config, tables, opts = {}) {
 		let client = connect(config);
 
