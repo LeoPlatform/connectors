@@ -9,10 +9,11 @@ var backoff = require("backoff");
 const logger = require("leo-sdk/lib/logger")("leo-stream");
 
 module.exports = {
-	stream: function(config, opts) {
+	stream: function(ID, config, opts) {
 		opts = Object.assign({
 			slot_name: 'leo_replication',
-			keepalive: 1000 * 3
+			keepalive: 1000 * 3,
+			event: 'logical_replication'
 		}, opts || {});
 		let lastLsn;
 
@@ -114,7 +115,13 @@ module.exports = {
 										lower: parseInt(lower, 16)
 									};
 								}
-								console.log(lsn);
+
+								if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
+									lsn.upper = lsn.upper + 1;
+									lsn.lower = 0;
+								} else {
+									lsn.lower = lsn.lower + 1;
+								}
 								lastLsn = lsn;
 								e();
 							};
@@ -125,6 +132,7 @@ module.exports = {
 									count++;
 									if (count === 10000) {
 										e();
+										console.log(count);
 										count = 0;
 									}
 									let lsn = {
@@ -132,18 +140,28 @@ module.exports = {
 										lower: msg.chunk.readUInt32BE(5),
 									};
 									lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
-
-									if (lsn.upper > lastLsn.upper || lsn.lower > lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
-										let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
-										log.lsn = lsn;
-										if (log.d) {
-											log.d = log.d.reduce((acc, field) => {
-												acc[field.n] = field.v;
-												return acc;
-											}, {});
-										}
-										pass.write(log);
+									//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
+									// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
+									let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+									log.lsn = lsn;
+									if (log.d) {
+										log.d = log.d.reduce((acc, field) => {
+											acc[field.n] = field.v;
+											return acc;
+										}, {});
 									}
+									let c = {
+										source: 'postgres',
+										start: log.lsn.string
+									};
+									delete log.lsn;
+									pass.write({
+										id: ID,
+										event: opts.event,
+										payload: log,
+										correlation_id: c
+									});
+									// }
 								} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
 									let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
 									var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
@@ -179,13 +197,6 @@ function checkpoint(client, lsn) {
 	var upperTimestamp = Math.floor(now / 4294967.296);
 	var lowerTimestamp = Math.floor((now - upperTimestamp * 4294967.296));
 
-	if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
-		lsn.upper = lsn.upper + 1;
-		lsn.lower = 0;
-	} else {
-		lsn.lower = lsn.lower + 1;
-	}
-
 	var response = Buffer.alloc(34);
 	response.fill(0x72); // 'r'
 
@@ -210,5 +221,4 @@ function checkpoint(client, lsn) {
 	logger.debug("sending response", lsn);
 
 	client.connection.sendCopyFromChunk(response);
-
 }
