@@ -209,7 +209,7 @@ module.exports = function(config) {
 		});
 	};
 
-	client.linkDimensions = function(table, config, callback) {
+	client.linkDimensions = function(table, config, nk, callback) {
 		let links = [];
 		Object.keys(config).forEach(column => {
 			let link = config[column];
@@ -253,7 +253,7 @@ module.exports = function(config) {
 						SET  ${sets.join(', ')}
 						FROM ${table} t
 						${joinTables.join("\n")}
-						where dm.id = t.id 
+						where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
 					`, done);
 			});
 			async.series(tasks, err => {

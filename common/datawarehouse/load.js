@@ -47,15 +47,31 @@ module.exports = function(client, tableConfig, stream, callback) {
 				let tasks = [];
 				Object.keys(obj).forEach(t => {
 					let config = tableConfig[t];
+					let sk = null;
+					let nk = [];
+					let scds = {
+						0: [],
+						1: [],
+						2: [],
+						6: []
+					};
 					let links = {};
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
+
+						if (field == "sk" || field.sk) {
+							sk = f;
+						} else if (field.nk) {
+							nk.push(f);
+						} else if (field.scd !== undefined) {
+							scds[field.scd].push(f);
+						}
 						if (field.dimension) {
 							links[f] = field.dimension;
 						}
 					});
 					if (Object.keys(links).length) {
-						tasks.push(done => client.linkDimensions(t, links, done));
+						tasks.push(done => client.linkDimensions(t, links, nk, done));
 					}
 				});
 
