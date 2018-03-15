@@ -21,12 +21,6 @@ module.exports = function(config) {
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-			let lookup = {};
-			result.forEach(r => lookup[r.column_name] = 1);
-			if (!("_auditdate" in lookup)) {
-				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
-				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
-			}
 			let columns = result.map(f => f.column_name).filter(f => !f.match(/^_/));
 
 			async.series(tasks, err => {
@@ -85,16 +79,6 @@ module.exports = function(config) {
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-			let lookup = {};
-			result.forEach(r => lookup[r.column_name] = 1);
-			if (!("_auditdate" in lookup)) {
-				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
-				tasks.push(done => client.query(`alter table ${table} add column _startdate timestamp`, done));
-				tasks.push(done => client.query(`alter table ${table} add column _enddate timestamp`, done));
-				tasks.push(done => client.query(`alter table ${table} add column _current boolean`, done));
-				// tasks.push(done => client.query(`create index ${table}_startenddate add column _enddate timestamp`, done));
-				tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
-			}
 			async.series(tasks, err => {
 				if (err) {
 					return callback(err);
@@ -123,7 +107,7 @@ module.exports = function(config) {
 					scdSQL.push(`0 as runSCD1`);
 				}
 				if (scd2.length) {
-					scdSQL.push(`CASE WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 1 ELSE 1 END as runSCD2`);
+					scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
 				} else {
 					scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
 				}
@@ -137,7 +121,6 @@ module.exports = function(config) {
 				} else {
 					scdSQL.push(`0 as runSCD6`);
 				}
-
 
 				//let's figure out which SCDs needs to happen
 				client.query(`create table staging_${table}_changes as 
@@ -209,39 +192,22 @@ module.exports = function(config) {
 		});
 	};
 
-	client.linkDimensions = function(table, config, nk, callback) {
-		let links = [];
-		Object.keys(config).forEach(column => {
-			let link = config[column];
-			if (!link.id) {
-				link = {
-					table: link,
-					source: column
-				};
-			}
-			links.push(Object.assign({
-				table: null,
-				on: 'id',
-				destination: "d_" + column.replace(/_id$/, ''),
-				link_date: "_auditdate"
-			}, link));
-		});
-
+	client.linkDimensions = function(table, links, nk, callback) {
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			let tasks = [];
 			let sets = [];
 
 			tasks.push(done => {
 				let joinTables = links.map(link => {
-					if (link.table == "datetime") {
+					if (link.table == "datetime" || link.table == "dim_datetime") {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
 						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
-					} else if (link.table == "d_date") {
+					} else if (link.table == "d_date" || link.table == "dim_date") {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
-					} else if (link.table == "d_time") {
+					} else if (link.table == "d_time" || link.table == "dim_time") {
 						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 					} else {
-						sets.push(`${link.destination} = coalesce(${link.source}_join_table.d_id, 1)`);
+						sets.push(`${link.destination} = coalesce(${link.source}_join_table.${link.sk}, 1)`);
 						return `LEFT JOIN ${link.table} ${link.source}_join_table 
 							on ${link.source}_join_table.${link.on} = t.${link.source} 
 								and t.${link.link_date} >= ${link.source}_join_table._startdate 
@@ -267,6 +233,7 @@ module.exports = function(config) {
 		Object.keys(structures).forEach(table => {
 			tasks.push(done => {
 				client.describeTable(table, (err, fields) => {
+					if (err) return done(err);
 					if (!fields.length) {
 						client.createTable(table, structures[table], done);
 					} else {
@@ -307,23 +274,37 @@ module.exports = function(config) {
 				};
 			}
 
-			if (field.dimension == "datetime") {
+			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
 				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
-			} else if (field.dimension == "date") {
+			} else if (field.dimension == "date" || field.dimension == "dim_date") {
 				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
-			} else if (field.dimension == "time") {
+			} else if (field.dimension == "time" || field.dimension == "dim_time") {
 				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
 			} else if (field.dimension) {
 				fields.push(`d_${f.replace(/_id$/,'')} integer`);
 			}
-			fields.push(`${f} ${field.type}`);
+			fields.push(`"${f}" ${field.type}`);
 		});
 
 		let sql = `create table ${table} (
 				${fields.join(',\n')}
 			)`;
-		client.query(sql, callback);
+
+		let tasks = [];
+		tasks.push(done => client.query(sql, done));
+		if (definition.isDimension) {
+			tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column _startdate timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column _enddate timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column _current boolean`, done));
+			// tasks.push(done => client.query(`create index ${table}_startenddate on ${table} (id, _startdate, _enddate)`, done));
+			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+		} else {
+			tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
+			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+		}
+		async.series(tasks, callback);
 	};
 	client.updateTable = function(table, definition, callback) {
 		let fields = [];
@@ -339,17 +320,17 @@ module.exports = function(config) {
 				};
 			}
 
-			if (field.dimension == "datetime") {
+			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
 				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
-			} else if (field.dimension == "date") {
+			} else if (field.dimension == "date" || field.dimension == "dim_date") {
 				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
-			} else if (field.dimension == "time") {
+			} else if (field.dimension == "time" || field.dimension == "dim_date") {
 				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
 			} else if (field.dimension) {
 				fields.push(`d_${f.replace(/_id$/,'')} integer`);
 			}
-			fields.push(`${f} ${field.type}`);
+			fields.push(`"${f}" ${field.type}`);
 		});
 		let sql = `alter table  ${table} 
 				add column ${fields.join(',\n add column ')}

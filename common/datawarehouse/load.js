@@ -8,7 +8,6 @@ module.exports = function(client, tableConfig, stream, callback) {
 	ls.pipe(stream, combine(), ls.through((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
-			console.log("TABLE IS ", t);
 			if (t in tableConfig) {
 				tasks.push(done => {
 					let config = tableConfig[t];
@@ -45,6 +44,17 @@ module.exports = function(client, tableConfig, stream, callback) {
 				done(err);
 			} else {
 				let tasks = [];
+
+				let tableSks = {};
+				Object.keys(tableConfig).forEach(t => {
+					let config = tableConfig[t];
+					Object.keys(config.structure).forEach(f => {
+						let field = config.structure[f];
+						if (field == "sk" || field.sk) {
+							tableSks[t] = f;
+						}
+					});
+				});
 				Object.keys(obj).forEach(t => {
 					let config = tableConfig[t];
 					let sk = null;
@@ -55,7 +65,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 						2: [],
 						6: []
 					};
-					let links = {};
+					let links = [];
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 
@@ -67,16 +77,29 @@ module.exports = function(client, tableConfig, stream, callback) {
 							scds[field.scd].push(f);
 						}
 						if (field.dimension) {
-							links[f] = field.dimension;
+							let link = {};
+							if (typeof field.dimension == "string") {
+								link = {
+									table: field.dimension,
+									source: f
+								};
+							}
+							links.push(Object.assign({
+								table: null,
+								on: f,
+								destination: "d_" + f.replace(/_id$/, ''),
+								link_date: "_auditdate",
+								sk: tableSks[link.table]
+							}, link));
 						}
 					});
-					if (Object.keys(links).length) {
+					if (links.length) {
 						tasks.push(done => client.linkDimensions(t, links, nk, done));
 					}
 				});
 
 				async.parallelLimit(tasks, 10, (err) => {
-					console.log("HERE------------------------------");
+					console.log("HERE------------------------------", err);
 
 					done(err);
 				});
