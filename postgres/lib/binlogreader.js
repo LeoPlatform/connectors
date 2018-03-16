@@ -87,7 +87,7 @@ module.exports = {
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
 
-						client.query(`START_REPLICATION SLOT leo_replication LOGICAL ${lastLsn}`, (err, result) => {
+						client.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}`, (err, result) => {
 							if (err) return dieError(err);
 						});
 						let [upper, lower] = lastLsn.split('/');
