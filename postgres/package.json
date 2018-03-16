@@ -12,7 +12,7 @@
   "dependencies": {
     "aws-sdk": "^2.205.0",
     "fast-csv": "^2.4.1",
-    "leo-connector-common": "^1.0.2",
+    "leo-connector-common": "file:../common",
     "leo-sdk": "^1.0.57",
     "pg": "^7.4.1",
     "pg-copy-streams": "^1.2.0",
