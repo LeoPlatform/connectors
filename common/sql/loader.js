@@ -5,6 +5,8 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
+const builder = require("./loaderBuilder.js");
+
 module.exports = function(sqlClient, sql, domainObj, opts = {
 	source: "loader"
 }) {
@@ -58,8 +60,8 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			if (err) {
 				done(err);
 			} else {
-				ids = ids.concat(findIds.filter((e) => {
-					return ids.indexOf(e) === -1;
+				ids = ids.concat(findIds.filter((e, i, self) => {
+					return ids.indexOf(e) === -1 && self.indexOf(e) === i;
 				}));
 				if (ids.length >= MAX) {
 					submit(done);
@@ -71,8 +73,13 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 	}, (done) => {
 		if (ids.length) {
 			submit(err => {
-				pass.end();
-				done(err);
+				if (err) {
+					pass.end(err);
+					done(err);
+				} else {
+					pass.end();
+					done();
+				}
 			});
 		} else {
 			pass.end();
@@ -81,11 +88,15 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 	}), pass);
 
 	function buildEntities(ids, callback) {
+		let r = domainObj(ids, builder.createLoader);
+		if (typeof r.get == "function") {
+			r = r.get();
+		}
 		let obj = Object.assign({
 			id: "id",
 			sql: "select * from dual limit 1",
 			joins: {}
-		}, domainObj(ids));
+		}, r);
 
 		let tasks = [];
 		let domains = {};

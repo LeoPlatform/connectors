@@ -6,11 +6,10 @@ const loader = require("./loader.js");
 
 const moment = require("moment");
 
-module.exports = function(client, table, id, domain, opts) {
+module.exports = function(botId, client, table, id, domain, opts, callback) {
 	opts = Object.assign({
 		event: table,
 	}, opts || {});
-
 
 	let stream = nibbler(client, table, id, {
 		limit: 5000
@@ -22,7 +21,6 @@ module.exports = function(client, table, id, domain, opts) {
 	});
 
 	let timestamp = moment();
-
 	ls.pipe(stream, transform, ls.toS3GzipChunks(opts.event, {
 			useS3Mode: true,
 			time: {
@@ -35,9 +33,9 @@ module.exports = function(client, table, id, domain, opts) {
 				_cmd: 'registerSnapshot',
 				event: opts.event,
 				start: timestamp.valueOf(),
-				next: timestamp.clone().startOf('day').valueOf()
+				next: timestamp.clone().startOf('day').valueOf(),
+				id: botId
 			});
-
 			done();
 		}),
 		ls.toLeo("snapshotter", {
@@ -47,7 +45,7 @@ module.exports = function(client, table, id, domain, opts) {
 				console.log(err);
 				stream.destroy();
 				transform.destroy();
-				process.exit();
 			}
+			callback(err);
 		});
 };
