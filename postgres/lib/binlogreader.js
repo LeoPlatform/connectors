@@ -146,7 +146,7 @@ module.exports = {
 									// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
 									let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
 									log.lsn = lsn;
-									if (log.d) {
+									if (log.d && Array.isArray(log.d)) {
 										log.d = log.d.reduce((acc, field) => {
 											acc[field.n] = field.v;
 											return acc;
