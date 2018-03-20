@@ -4,7 +4,7 @@ const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const sqlSnapshotter = require("leo-connector-common/sql/snapshotter");
 
-const binlogReader = require("./lib/binlogreader.js");
+const binlogReader = require("./lib/binlogreader");
 
 module.exports = {
 	load: function(config, sql, domain) {

@@ -17,7 +17,6 @@ module.exports = {
 		}, opts || {});
 		let lastLsn;
 
-
 		let pass = new PassThrough({
 			objectMode: true
 		});
@@ -29,9 +28,11 @@ module.exports = {
 		});
 		retry.failAfter(100);
 		retry.on('backoff', function(number, delay) {
-			logger.error(`Going to try to connect again in ${delay} ms`);
+			logger.error(`(${config.database}) Going to try to connect again in ${delay} ms`);
 		});
 		retry.once('fail', (err) => {
+			err.database = config.database;
+			err.traceType = 'fail';
 			logger.error(err);
 			pass.destroy(err);
 		});
@@ -43,6 +44,8 @@ module.exports = {
 				replication: 'database'
 			}));
 			let dieError = function(err) {
+				err.database = config.database;
+				err.traceType = 'dieError';
 				logger.error(err);
 				clearTimeout(reportBackTimeout);
 				if (client) {
@@ -50,12 +53,12 @@ module.exports = {
 					try {
 						wrapperClient.end(err => {});
 					} catch (e) {
-						logger.debug("Cannot end WrapperClient");
+						logger.debug(`(${config.database}) Cannot end WrapperClient`);
 					}
 					try {
 						client.end(err => {});
 					} catch (e) {
-						logger.debug("Cannot end client");
+						logger.debug(`(${config.database}) Cannot end client`);
 					}
 					client = null;
 					wrapperClient = null;
@@ -64,7 +67,7 @@ module.exports = {
 			};
 			client.on('error', dieError);
 			client.connect(function(err) {
-				logger.debug("Trying to connect ");
+				logger.debug(`(${config.database}) Trying to connect.`);
 				if (err) return dieError(err);
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 					if (err) return dieError(err);
@@ -87,7 +90,7 @@ module.exports = {
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
 
-						client.query(`START_REPLICATION SLOT leo_replication LOGICAL ${lastLsn}`, (err, result) => {
+						client.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}`, (err, result) => {
 							if (err) return dieError(err);
 						});
 						let [upper, lower] = lastLsn.split('/');
@@ -174,7 +177,7 @@ module.exports = {
 										e();
 									}
 								} else {
-									logger.error('Unknown message', msg.chunk[0]);
+									logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
 								}
 
 							});
