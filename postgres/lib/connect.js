@@ -5,9 +5,7 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
 
-// require("leo-sdk/lib/logger").configure(/.*/, {
-// 	all: true
-// });
+// require("leo-sdk/lib/logger").configure(true);
 
 var copyFrom = require('pg-copy-streams').from;
 let csv = require('fast-csv');
@@ -46,7 +44,7 @@ module.exports = function(config) {
 			pool.query(query, params, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.info(`Had error #${queryId}`, err);
+					log.error(`Had error #${queryId}`, err, query);
 					callback(err);
 				} else {
 					callback(null, result.rows, result.fields);
@@ -139,7 +137,7 @@ module.exports = function(config) {
 						done(null, columns.map(f => nonNull(row[f])));
 					}
 				}
-			}), ls.through((r, done) => {
+			}), ls.write((r, done) => {
 				count++;
 				if (count % 10000 == 0) {
 					console.log(table + ": " + count);
@@ -149,7 +147,7 @@ module.exports = function(config) {
 				} else {
 					done(null);
 				}
-			}, (done) => {
+			}, (done, push) => {
 				stream.on('end', () => {
 					myClient.end();
 					done();

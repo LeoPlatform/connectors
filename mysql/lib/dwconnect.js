@@ -87,11 +87,6 @@ module.exports = function(config) {
 		client.query(`SELECT column_name 
 				FROM information_schema.columns 
 		WHERE table_name = ? order by ordinal_position asc `, [table], (err, result) => {
-			let lookup = {};
-			result.forEach(r => lookup[r.column_name] = 1);
-			if (!("_auditdate" in lookup)) {
-				tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp,  add column _startdate timestamp, add column _enddate timestamp, add column _current boolean, add index(_auditdate), add index(id, _startdate,_enddate)`, done));
-			}
 			async.series(tasks, err => {
 				if (err) {
 					return callback(err);
@@ -311,6 +306,14 @@ module.exports = function(config) {
 			fields.push(`${f} ${field.type}`);
 		});
 
+		fields.push(`_auditdate timestmap`);
+		if (definition.isDimension) {
+			fields.push(`_startdate timestmap`);
+			fields.push(`_enddate timestmap`);
+			fields.push(`__current boolean timestmap`);
+			fields.push(`add index(id, _startdate,_enddate)`);
+		}
+		fields.push(`add index(_auditdate)`);
 		let sql = `create table ${table} (
 				${fields.join(',\n')}
 			)`;

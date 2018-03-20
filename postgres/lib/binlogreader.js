@@ -33,8 +33,7 @@ module.exports = {
 		});
 		retry.once('fail', (err) => {
 			logger.error(err);
-			pass.emit(err);
-			pass.destroy();
+			pass.destroy(err);
 		});
 		let reportBackTimeout = null;
 

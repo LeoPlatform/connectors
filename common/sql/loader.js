@@ -5,8 +5,11 @@ const async = require("async");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
+const builder = require("./loaderBuilder.js");
+
 module.exports = function(sqlClient, sql, domainObj, opts = {
-	source: "loader"
+	source: "loader",
+	isSnapshot: false
 }) {
 	let pass = new PassThrough({
 		objectMode: true
@@ -58,8 +61,8 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			if (err) {
 				done(err);
 			} else {
-				ids = ids.concat(findIds.filter((e) => {
-					return ids.indexOf(e) === -1;
+				ids = ids.concat(findIds.filter((e, i, self) => {
+					return ids.indexOf(e) === -1 && self.indexOf(e) === i;
 				}));
 				if (ids.length >= MAX) {
 					submit(done);
@@ -71,8 +74,13 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 	}, (done) => {
 		if (ids.length) {
 			submit(err => {
-				pass.end();
-				done(err);
+				if (err) {
+					pass.end(err);
+					done(err);
+				} else {
+					pass.end();
+					done();
+				}
 			});
 		} else {
 			pass.end();
@@ -81,11 +89,15 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 	}), pass);
 
 	function buildEntities(ids, callback) {
+		let r = domainObj(ids, builder.createLoader);
+		if (typeof r.get == "function") {
+			r = r.get();
+		}
 		let obj = Object.assign({
 			id: "id",
 			sql: "select * from dual limit 1",
 			joins: {}
-		}, domainObj(ids));
+		}, r);
 
 		let tasks = [];
 		let domains = {};
@@ -183,11 +195,12 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 				let needsDrained = false;
 				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
 
-				for (let id in domains) {
+
+				ids.forEach((id, i) => {
 					// skip the domain if there is no data with it
 					if (Object.keys(domains[id]).length === 0) {
 						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
-						continue;
+						return;
 					}
 
 					let eid = getEid(id, domains[id], eids);
@@ -198,7 +211,8 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 						payload: domains[id],
 						correlation_id: {
 							source: opts.source,
-							start: eid,
+							start: opts.isSnapshot ? id : eid,
+							end: opts.isSnapshot ? ids[i + 1] : undefined,
 							units: 1
 						}
 					};
@@ -206,7 +220,7 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 					if (!pass.write(event)) {
 						needsDrained = true;
 					}
-				}
+				});
 
 				if (needsDrained) {
 					pass.once('drain', callback);
