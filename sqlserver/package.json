@@ -1,6 +1,6 @@
 {
-  "name": "leo-sqlserver",
-  "version": "1.0.1",
+  "name": "leo-connector-sqlserver",
+  "version": "1.0.2",
   "description": "",
   "main": "index.js",
   "scripts": {
