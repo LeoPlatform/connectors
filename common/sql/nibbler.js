@@ -6,7 +6,8 @@ module.exports = function(client, table, id, opts) {
 		time: 1,
 		limit: 20000,
 		maxLimit: 1000000,
-		reverse: true
+		reverse: true,
+		resume: null
 	}, opts || {});
 
 	var nibble = {};
@@ -44,22 +45,44 @@ module.exports = function(client, table, id, opts) {
 	}
 
 	let pass = new PassThrough({
-		objectMode: true
+		objectMode: true,
+		highWaterMark: 1
 	});
-	client.range(table, id, null, (err, result) => {
-		//Now let's nibble our way through it.
-		nibble = {
-			start: opts.reverse ? result.max : result.min,
-			end: opts.reverse ? result.min : result.max,
-			limit: opts.limit,
-			next: null,
-			max: result.max,
-			min: result.min,
-			total: result.total,
-			progress: 0,
-			reverse: opts.reverse
-		};
 
+	let getRange = function(callback) {
+		client.range(table, id, null, (err, result) => {
+			if (err) return callback(err);
+			//Now let's nibble our way through it.
+			nibble = {
+				start: opts.reverse ? result.max : result.min,
+				end: opts.reverse ? result.min : result.max,
+				limit: opts.limit,
+				next: null,
+				max: result.max,
+				min: result.min,
+				total: result.total,
+				progress: 0,
+				reverse: opts.reverse,
+				complete: false
+			};
+			callback(null, nibble);
+		});
+	};
+
+	if (opts.resume) {
+		getRange = function(callback) {
+			callback(null, opts.resume);
+		}
+	}
+
+	getRange((err, nibble) => {
+		process.nextTick(() => {
+			pass.emit("ranged", Object.assign({}, nibble));
+		});
+		let keepRunning = true;
+		pass.stop = function() {
+			keepRunning = false;
+		};
 		log(`Starting.  Total: ${nibble.total}`);
 		//var hadRecentErrors = 0;
 		async.doWhilst(done => {
@@ -89,7 +112,8 @@ module.exports = function(client, table, id, opts) {
 						if (!pass.write({
 								payload: {
 									[table]: ids
-								}
+								},
+								eid: opts.reverse ? nibble.start : nibble.end
 							})) {
 							pass.once('drain', done);
 						} else {
@@ -99,7 +123,7 @@ module.exports = function(client, table, id, opts) {
 				});
 			},
 			() => {
-				return nibble.start != null;
+				return keepRunning && nibble.start != null;
 			},
 			(err, data) => {
 				console.log(err);
