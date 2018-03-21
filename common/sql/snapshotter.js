@@ -49,10 +49,11 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 	}
 
 
-	function saveProgress(data) {
+	function saveProgress(data, bucketKey) {
 		dynamodb.merge(tableName, botId, {
 			snapshot: Object.assign({
-				last_run: moment.now()
+				last_run: moment.now(),
+				bucket_key: bucketKey
 			}, data)
 		}, function(err, result) {
 			if (err) {
@@ -66,13 +67,18 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 		if (err) {
 			callback(err)
 		} else {
+			let timestamp = moment(),
+				// reuse an existing bucket key if we’re resuming, otherwise create a new one.
+				bucket_key = (result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_key) || timestamp.format('YYYY/MM_DD_') + timestamp.valueOf();
+
 			let stream = nibbler(client, table, id, {
 				limit: 5000,
 				resume: result && result.snapshot && !result.snapshot.complete && result.snapshot
 			});
-			stream.on("ranged", function(n) {
+
+			stream.on("ranged", function(n, bucketKey) {
 				nibble = n;
-				saveProgress(nibble);
+				saveProgress(nibble, bucketKey);
 			});
 			let transform = loader(client, {
 				[table]: true
@@ -87,7 +93,6 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				seconds: 180
 			}).asMilliseconds());
 
-			let timestamp = moment();
 			ls.pipe(stream,
 				transform,
 				ls.toS3GzipChunks(opts.event, {
@@ -95,7 +100,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 					time: {
 						minutes: 1
 					},
-					prefix: "_snapshot/" + timestamp.format("YYYY/MM_DD_") + timestamp.valueOf(),
+					prefix: "_snapshot/" + bucket_key,
 					sectionCount: 30
 				}),
 				ls.toLeo("snapshotter", {
@@ -125,7 +130,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 							});
 							closeStream.end(done);
 						} else {
-							saveProgress(nibble);
+							saveProgress(nibble, bucket_key);
 							done();
 						}
 					} else {

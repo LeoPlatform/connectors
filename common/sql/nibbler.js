@@ -86,8 +86,6 @@ module.exports = function(client, table, id, opts) {
 		log(`Starting.  Total: ${nibble.total}`);
 		//var hadRecentErrors = 0;
 		async.doWhilst(done => {
-				let sql;
-				let params;
 				client.nibble(table, id, nibble.start, nibble.min, nibble.max, nibble.limit, opts.reverse, (err, result) => {
 					if (err) {
 						return done(err);
