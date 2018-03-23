@@ -70,6 +70,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				limit: 5000,
 				resume: result && result.snapshot && !result.snapshot.complete && result.snapshot
 			});
+			stream.destroy = stream.destroy || stream.close || (() => {});
 
 			stream.on("ranged", function(n) {
 				nibble = n;
@@ -81,6 +82,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				source: 'snapshot',
 				isSnapshot: true
 			});
+			transform.destroy = transform.destroy || transform.close || (() => {});
 
 			let timeout = setTimeout(() => {
 				stream.stop();
@@ -138,8 +140,8 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 					clearTimeout(timeout);
 					if (err) {
 						console.log(err);
-						stream.destroy && stream.destroy();
-						transform.destroy && transform.destroy();
+						stream.destroy();
+						transform.destroy();
 						callback(err);
 					} else {
 						if (!nibble.complete) {
