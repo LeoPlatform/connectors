@@ -75,6 +75,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				limit: 5000,
 				resume: result && result.snapshot && !result.snapshot.complete && result.snapshot
 			});
+			stream.destroy = stream.destroy || stream.close || (() => {});
 
 			stream.on("ranged", function(n, bucketKey) {
 				nibble = n;
@@ -86,6 +87,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				source: 'snapshot',
 				isSnapshot: true
 			});
+			transform.destroy = transform.destroy || transform.close || (() => {});
 
 			let timeout = setTimeout(() => {
 				stream.stop();

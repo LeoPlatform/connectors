@@ -46,12 +46,19 @@ module.exports = function(client, tableConfig, stream, callback) {
 				let tasks = [];
 
 				let tableSks = {};
+				let tableNks = {};
 				Object.keys(tableConfig).forEach(t => {
 					let config = tableConfig[t];
+					//console.log("config", t, JSON.stringify(config, null, 2));
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 						if (field == "sk" || field.sk) {
 							tableSks[t] = f;
+						} else if (field.nk) {
+							if (!(t in tableNks)) {
+								tableNks[t] = [];
+							}
+							tableNks[t].push(f);
 						}
 					});
 				});
@@ -66,7 +73,8 @@ module.exports = function(client, tableConfig, stream, callback) {
 						6: []
 					};
 					let links = [];
-					Object.keys(config.structure).forEach(f => {
+					//if (!config || !config.structure) console.log(t);
+					config && config.structure && Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 
 						if (field == "sk" || field.sk) {
@@ -83,6 +91,10 @@ module.exports = function(client, tableConfig, stream, callback) {
 									table: field.dimension,
 									source: f
 								};
+								let nks = tableNks[field.dimension]
+								if (nks && nks.length == 1) {
+									link.on = nks[0];
+								}
 							}
 							links.push(Object.assign({
 								table: null,

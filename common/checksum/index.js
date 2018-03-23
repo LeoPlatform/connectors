@@ -55,7 +55,7 @@ function stats(array, other) {
 }
 
 module.exports = {
-	configuration: null,
+	configuration: leo.configuration,
 	getSession: function(systemId, botId, opts) {
 		opts = Object.assign({
 			restart: false
