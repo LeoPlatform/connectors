@@ -1,3 +1,4 @@
+require("./tediousAsRow.js");
 const mssql = require("mssql");
 const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
 
@@ -28,20 +29,20 @@ module.exports = function(config) {
 			process.exit();
 		} else if (buffer.length) {
 			buffer.forEach(i => {
-				client.query(i.query, i.params, (err, result) => {
-					err && console.log(i.query, err);
-					i.callback(err, result)
-				});
+				client.query(i.query, i.params, (err, result, fields) => {
+					i.callback(err, result, fields);
+				}, i.inRowMode);
 			});
 		}
 	});
 
 	let queryCount = 0;
 	let client = {
-		query: function(query, params, callback) {
-			if (!callback) {
+		query: function(query, params, callback, inRowMode = false) {
+			if (typeof params == "function") {
+				inRowMode = callback;
 				callback = params;
-				params = null;
+				params = {};
 			}
 
 			if (!isConnected) {
@@ -49,7 +50,8 @@ module.exports = function(config) {
 				buffer.push({
 					query: query,
 					params: params,
-					callback: callback
+					callback: callback,
+					inRowMode: inRowMode
 				});
 			} else {
 				let queryId = ++queryCount;
@@ -63,19 +65,31 @@ module.exports = function(config) {
 						request.input(i, params[i]);
 					}
 				}
-
-				request.query(query, function(err, result, fields) {
+				let queryType = "query";
+				if (inRowMode) {
+					queryType = "queryRow";
+				}
+				request[queryType](query, function(err, result) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
 						log.info("Had error", err);
 						callback(err);
 					} else {
-						callback(null, result.recordset, Object.keys(result.recordset[0] || {}).map(k => ({
+						console.log(result);
+						callback(null, result.recordset, result.columns || Object.keys(result.recordset[0] || {}).map(k => ({
 							name: k
 						})));
 					}
-				})
+				});
 			}
+		},
+		queryRow: function(query, params, callback) {
+			if (typeof params == "function") {
+				inRowMode = callback;
+				callback = params;
+				params = {};
+			}
+			return this.query(query, params, callback, true);
 		},
 		range: function(table, id, opts, callback) {
 			client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
