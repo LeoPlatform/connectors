@@ -40,37 +40,76 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		let tasks = [];
 		let findIds = [];
 
-		Object.keys(sql).forEach(key => {
-			if (sql[key] === true && key in obj.payload) {
-				findIds = findIds.concat(obj.payload[key]);
-			} else if (key in obj.payload) {
-				tasks.push((done) => {
-					logger.debug(obj.payload, key);
-					let s = sql[key].replace(/__IDS__/, obj.payload[key].join());
-					sqlClient.query(s, (err, results, fields) => {
-						if (!err) {
-							let firstColumn = fields[0].name;
-							findIds = findIds.concat(results.map(row => row[firstColumn]));
-						}
-						done(err);
-					});
+
+		if (typeof sql == "function") {
+			sql(obj.payload, (err, idlist) => {
+				if (err) return done(err);
+
+				idlist.forEach(idthing => {
+					if (Array.isArray(idthing)) {
+						findIds = findIds.concat(idthing);
+					} else if (typeof idthing == "string") {
+						tasks.push((done) => {
+							console.log(idthing);
+							sqlClient.query(idthing, (err, results, fields) => {
+								if (!err) {
+									let firstColumn = fields[0].name;
+									findIds = findIds.concat(results.map(row => row[firstColumn]));
+								}
+								done(err);
+							});
+						});
+					}
 				});
-			}
-		});
-		async.parallelLimit(tasks, 10, (err, results) => {
-			if (err) {
-				done(err);
-			} else {
-				ids = ids.concat(findIds.filter((e, i, self) => {
-					return ids.indexOf(e) === -1 && self.indexOf(e) === i;
-				}));
-				if (ids.length >= MAX) {
-					submit(done);
-				} else {
-					done();
+				async.parallelLimit(tasks, 10, (err, results) => {
+					if (err) {
+						done(err);
+					} else {
+						ids = ids.concat(findIds.filter((e, i, self) => {
+							return ids.indexOf(e) === -1 && self.indexOf(e) === i;
+						}));
+						if (ids.length >= MAX) {
+							submit(done);
+						} else {
+							done();
+						}
+					}
+				});
+
+			});
+		} else {
+			Object.keys(sql).forEach(key => {
+				if (sql[key] === true && key in obj.payload) {
+					findIds = findIds.concat(obj.payload[key]);
+				} else if (key in obj.payload && obj.payload[key].length) {
+					tasks.push((done) => {
+						logger.debug(obj.payload, key);
+						let s = sql[key].replace(/__IDS__/, obj.payload[key].join());
+						sqlClient.query(s, (err, results, fields) => {
+							if (!err) {
+								let firstColumn = fields[0].name;
+								findIds = findIds.concat(results.map(row => row[firstColumn]));
+							}
+							done(err);
+						});
+					});
 				}
-			}
-		});
+			});
+			async.parallelLimit(tasks, 10, (err, results) => {
+				if (err) {
+					done(err);
+				} else {
+					ids = ids.concat(findIds.filter((e, i, self) => {
+						return ids.indexOf(e) === -1 && self.indexOf(e) === i;
+					}));
+					if (ids.length >= MAX) {
+						submit(done);
+					} else {
+						done();
+					}
+				}
+			});
+		}
 	}, (done) => {
 		if (ids.length) {
 			submit(err => {
@@ -115,35 +154,69 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		});
 
 		tasks.push(done => {
-			sqlClient.query(obj.sql, (err, results) => {
+			if (!obj.id) {
+				logger.log('[FATAL ERROR]: No ID specified');
+			}
+
+
+			sqlClient.query(obj.sql, (err, results, fields) => {
+				console.log(results);
+				let mappings = [];
+
+				let last = null;
+				fields.forEach((f, i) => {
+					if (last == null) {
+						last = {
+							path: null,
+							start: i
+						};
+						mappings.push(last);
+					} else if (f.name.match(/^prefix_/)) {
+						last.end = i;
+						last = {
+							path: f.name.replace(/^prefix_/, ''),
+							start: i + 1
+						};
+						mappings.push(last);
+					}
+				});
+				last.end = fields.length;
+
 				if (!err) {
 					let row;
 					for (let i in results) {
-						if (obj.transform) {
-							row = obj.transform(results[i]);
-						} else {
-							row = results[i];
-						}
-
-						try {
-							Object.assign(domains[row[obj.id]], row);
-						} catch (err) {
-							if (!obj.id) {
-								logger.log('[FATAL ERROR]: No ID specified');
-							} else if (!row[obj.id]) {
-								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" not found in object:');
-								logger.log(row);
-							} else if (!domains[row[obj.id]]) {
-								logger.log('[FATAL ERROR]: ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+						let r = results[i];
+						//Convert back to object now
+						let row = {};
+						mappings.forEach(m => {
+							if (m.path === null) {
+								r.slice(m.start, m.end).forEach((value, i) => {
+									row[fields[m.start + i].name] = value;
+								});
+							} else if (m.path) {
+								row[m.path] = r.slice(m.start, m.end).reduce((acc, value, i) => {
+									acc[fields[m.start + i].name] = value;
+									return acc;
+								}, {});
 							}
+						});
+						if (obj.transform) {
+							row = obj.transform(row);
+						}
+						let id = row[obj.id];
+						console.log(id);
 
-							throw new Error(err);
+						if (!id) {
+							logger.error('ID: "' + obj.id + '" not found in object:');
+						} else if (!domains[row[obj.id]]) {
+							logger.error('ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+						} else {
+							domains[row[obj.id]] = row;
 						}
 					}
 				}
-
 				done(err);
-			});
+			}, true);
 		});
 
 

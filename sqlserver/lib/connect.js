@@ -72,10 +72,9 @@ module.exports = function(config) {
 				request[queryType](query, function(err, result) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
-						log.info("Had error", err);
+						log.error(`Had error #${queryId}`, query, err);
 						callback(err);
 					} else {
-						console.log(result);
 						callback(null, result.recordset, result.columns || Object.keys(result.recordset[0] || {}).map(k => ({
 							name: k
 						})));
