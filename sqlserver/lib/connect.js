@@ -31,16 +31,16 @@ module.exports = function(config) {
 			buffer.forEach(i => {
 				client.query(i.query, i.params, (err, result, fields) => {
 					i.callback(err, result, fields);
-				}, i.inRowMode);
+				}, i.opts);
 			});
 		}
 	});
 
 	let queryCount = 0;
 	let client = {
-		query: function(query, params, callback, inRowMode = false) {
+		query: function(query, params, callback, opts = {}) {
 			if (typeof params == "function") {
-				inRowMode = callback;
+				opts = callback;
 				callback = params;
 				params = {};
 			}
@@ -51,7 +51,7 @@ module.exports = function(config) {
 					query: query,
 					params: params,
 					callback: callback,
-					inRowMode: inRowMode
+					opts: opts
 				});
 			} else {
 				let queryId = ++queryCount;
@@ -66,29 +66,37 @@ module.exports = function(config) {
 					}
 				}
 				let queryType = "query";
-				if (inRowMode) {
+				if (opts.inRowMode) {
 					queryType = "queryRow";
+				}
+				if (opts.stream === true) {
+					request.stream = true;
 				}
 				request[queryType](query, function(err, result) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
 						log.error(`Had error #${queryId}`, query, err);
-						callback(err);
+						if (callback) callback(err);
 					} else {
-						callback(null, result.recordset, result.columns || Object.keys(result.recordset[0] || {}).map(k => ({
+						let columns = result.columns || (result.recordset && Object.keys(result.recordset[0] || {}).map(k => ({
 							name: k
 						})));
+						if (callback) callback(null, result.recordset, columns);
 					}
 				});
+
+				return request;
 			}
 		},
-		queryRow: function(query, params, callback) {
+		queryRow: function(query, params, callback, opts = {}) {
 			if (typeof params == "function") {
-				inRowMode = callback;
+				opts = callback;
 				callback = params;
 				params = {};
 			}
-			return this.query(query, params, callback, true);
+			return this.query(query, params, callback, Object.assign(opts, {
+				inRowMode: true
+			}));
 		},
 		range: function(table, id, opts, callback) {
 			client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
