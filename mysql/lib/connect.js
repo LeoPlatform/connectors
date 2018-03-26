@@ -23,12 +23,12 @@ module.exports = function(config) {
 			}
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query);
+			log.info(`SQL query #${queryId} is `, query.slice(0, 100));
 			log.time(`Ran Query #${queryId}`);
 			m.query(query, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.error("Had error #${queryId}", query, err);
+					log.error("Had error #${queryId}", query.slice(0, 100), err);
 				}
 				callback(err, result, fields);
 			});
@@ -48,7 +48,7 @@ module.exports = function(config) {
 			opts = Object.assign({
 				records: 10000,
 				useReplaceInto: false
-			});
+			}, opts || {});
 			let pending = null;
 			let columns = [];
 			let ready = false;
