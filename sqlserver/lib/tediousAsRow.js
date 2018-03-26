@@ -225,10 +225,8 @@ base.Request.prototype.queryRow = function(command, callback) {
 
 				if (error) {
 					debug('req: query fail', error)
-				} else {
-					debug('req: query ok')
-				}
-				if (this.stream) {
+					callback(error);
+				} else if (this.stream) {
 					callback(null, {
 						recordsets: null,
 						recordset: null,

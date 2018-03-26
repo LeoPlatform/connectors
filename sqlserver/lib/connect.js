@@ -44,6 +44,12 @@ module.exports = function(config) {
 				callback = params;
 				params = {};
 			}
+			opts = Object.assign({
+				inRowMode: false,
+				stream: false
+			}, opts || {});
+
+
 
 			if (!isConnected) {
 				console.log("buffering query");

@@ -158,9 +158,9 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 				logger.log('[FATAL ERROR]: No ID specified');
 			}
 
-
 			sqlClient.query(obj.sql, (err, results, fields) => {
-				console.log(results);
+				if (err) return done(err);
+
 				let mappings = [];
 
 				let last = null;
@@ -183,7 +183,6 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 				last.end = fields.length;
 
 				if (!err) {
-					let row;
 					for (let i in results) {
 						let r = results[i];
 						//Convert back to object now
@@ -204,7 +203,6 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 							row = obj.transform(row);
 						}
 						let id = row[obj.id];
-						console.log(id);
 
 						if (!id) {
 							logger.error('ID: "' + obj.id + '" not found in object:');
@@ -216,7 +214,9 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 					}
 				}
 				done(err);
-			}, true);
+			}, {
+				inRowMode: true
+			});
 		});
 
 
