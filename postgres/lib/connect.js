@@ -40,12 +40,12 @@ function create(pool) {
 				return create(c);
 			});
 		},
-		query: function(query, params, callback) {
-      if (!callback) {
-        opts = callback;
-        callback = params;
-        params = undefined;
-      }
+		query: function(query, params, callback, opts = {}) {
+			if (typeof params == "function") {
+				opts = callback;
+				callback = params;
+				params = [];
+			}
       opts = Object.assign({
           inRowMode: false,
           stream: false
