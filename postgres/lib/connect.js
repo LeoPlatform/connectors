@@ -55,7 +55,7 @@ function create(pool) {
       log.info(`SQL query #${queryId} is `, query);
       log.time(`Ran Query #${queryId}`);
       pool.query({
-          test: query,
+          text: query,
           values: params,
           rowMode: opts.inRowMode ? 'array' : undefined
       }, function(err, result) {
