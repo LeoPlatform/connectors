@@ -125,7 +125,7 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			pass.end();
 			done();
 		}
-	}), pass);
+	}), ls.log(), pass);
 
 	function buildEntities(ids, callback) {
 		let r = domainObj(ids, builder.createLoader);
