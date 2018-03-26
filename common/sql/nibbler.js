@@ -48,7 +48,6 @@ module.exports = function(client, table, id, opts) {
 		objectMode: true,
 		highWaterMark: 1
 	});
-
 	let getRange = function(callback) {
 		client.range(table, id, null, (err, result) => {
 			if (err) return callback(err);
@@ -76,6 +75,9 @@ module.exports = function(client, table, id, opts) {
 	}
 
 	getRange((err, nibble) => {
+		if (err) {
+			return pass.end(err);
+		}
 		process.nextTick(() => {
 			pass.emit("ranged", Object.assign({}, nibble));
 		});

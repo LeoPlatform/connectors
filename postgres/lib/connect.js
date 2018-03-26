@@ -20,6 +20,7 @@ require('pg').types.setTypeParser(1114, (val) => {
 
 let ls = require("leo-sdk").streams;
 
+let queryCount = 0;
 module.exports = function(config) {
 	const pool = new Pool(Object.assign({
 		user: 'root',
@@ -29,8 +30,16 @@ module.exports = function(config) {
 		port: 5432,
 	}, config));
 
-	let queryCount = 0;
+	return create(pool);
+};
+
+function create(pool) {
 	let client = {
+		connect: function() {
+			return pool.connect().then(c => {
+				return create(c);
+			});
+		},
 		query: function(query, params, callback) {
 			if (!callback) {
 				callback = params;
@@ -53,6 +62,7 @@ module.exports = function(config) {
 		},
 		disconnect: pool.end.bind(pool),
 		end: pool.end.bind(pool),
+		release: pool.release && pool.release.bind(pool),
 		describeTable: function(table, callback) {
 			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 				callback(err, result);
