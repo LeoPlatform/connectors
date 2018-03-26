@@ -44,7 +44,7 @@ function create(pool) {
       if (!callback) {
         opts = callback;
         callback = params;
-        params = null;
+        params = undefined;
       }
       opts = Object.assign({
           inRowMode: false,
