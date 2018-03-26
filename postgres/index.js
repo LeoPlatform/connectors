@@ -8,7 +8,7 @@ const snapShotter = require("leo-connector-common/sql/snapshotter");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
-const binlogReader = require("./lib/binlogreader.js");
+const binlogReader = require("./lib/binlogreader");
 
 module.exports = {
 	load: function(config, sql, domain) {
