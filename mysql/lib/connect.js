@@ -28,7 +28,7 @@ module.exports = function(config) {
 			m.query(query, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.info("Had error #${queryId}", err);
+					log.error("Had error #${queryId}", query, err);
 				}
 				callback(err, result, fields);
 			});
@@ -46,7 +46,8 @@ module.exports = function(config) {
 		},
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
-				records: 10000
+				records: 10000,
+				useReplaceInto: false
 			});
 			let pending = null;
 			let columns = [];
@@ -69,11 +70,23 @@ module.exports = function(config) {
 					done(null, obj, 1, 1);
 				}
 			}, (records, callback) => {
-				console.log("Inserting " + records.length + " records");
+
+				if (opts.useReplaceInto) {
+					console.log("Replace Inserting " + records.length + " records");
+
+				} else {
+					console.log("Inserting " + records.length + " records");
+				}
+
 				var values = records.map((r) => {
 					return columns.map(f => r[f]);
 				});
-				client.query("INSERT INTO ?? (??) VALUES ?", [table, columns, values], function(err) {
+
+				let cmd = "INSERT INTO ";
+				if (opts.useReplaceInto) {
+					cmd = "REPLACE INTO ";
+				}
+				client.query(`${cmd} ?? (??) VALUES ?`, [table, columns, values], function(err) {
 					if (err) {
 						callback(err);
 					} else {
