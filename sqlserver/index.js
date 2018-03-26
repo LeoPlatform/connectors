@@ -91,5 +91,6 @@ module.exports = {
 				return stats.checkpoint(callback);
 			});
 		}
-	}
+	},
+	connect: connect
 };
