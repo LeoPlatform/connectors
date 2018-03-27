@@ -32,7 +32,7 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		end: null
 	};
 	return ls.through({
-		highWaterMark: 2
+		highWaterMark: opts.isSnapshot?2:16
 	}, (obj, done, push) => {
 		eids.start = eids.start || obj.eid;
 		eids.end = obj.eid;
