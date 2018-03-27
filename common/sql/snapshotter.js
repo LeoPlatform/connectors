@@ -120,9 +120,9 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 						if (nibble.end == nibble.start) {
 							nibble.complete = true;
 							saveProgress(nibble);
-							let closeStream = ls.toLeo("snapshotter", {
+							let closeStream = ls.pipeline(ls.toLeo("snapshotter", {
 								snapshot: timestamp.valueOf()
-							});
+							}), ls.devnull());
 							closeStream.write({
 								_cmd: 'registerSnapshot',
 								event: opts.event,
@@ -130,7 +130,8 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 								next: timestamp.clone().startOf('day').valueOf(),
 								id: botId
 							});
-							closeStream.end(done);
+							closeStream.on("finish", done);
+							closeStream.end();
 						} else {
 							saveProgress(nibble, bucket_key);
 							done();

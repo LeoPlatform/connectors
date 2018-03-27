@@ -1,6 +1,6 @@
 "use strict";
 
-const mysql = require("mysql");
+const mysql = require("mysql2");
 const logger = require("leo-sdk/lib/logger")("leo.connector.sql.mysql");
 let ls = require("leo-sdk").streams;
 
@@ -16,16 +16,26 @@ module.exports = function(config) {
 	}, config));
 	let queryCount = 0;
 	let client = {
-		query: function(query, params, callback) {
-			if (!callback) {
+		query: function(query, params, callback, opts = {}) {
+			if (typeof params == "function") {
+				opts = callback;
 				callback = params;
-				params = null;
+				params = [];
 			}
+			opts = Object.assign({
+				inRowMode: false,
+				stream: false
+			}, opts || {});
+
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
 			log.info(`SQL query #${queryId} is `, query.slice(0, 100));
 			log.time(`Ran Query #${queryId}`);
-			m.query(query, params, function(err, result, fields) {
+
+			m.query({
+				sql: query,
+				rowsAsArray: opts.inRowMode
+			}, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.error("Had error #${queryId}", query.slice(0, 100), err);
