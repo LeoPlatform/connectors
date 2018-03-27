@@ -11,16 +11,13 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 	source: "loader",
 	isSnapshot: false
 }) {
-	let pass = new PassThrough({
-		objectMode: true
-	});
 	const MAX = 5000;
 	let ids = [];
 
-	function submit(done) {
+	function submit(push, done) {
 		async.doWhilst((done) => {
 			let buildIds = ids.splice(0, MAX);
-			buildEntities(buildIds, done);
+			buildEntities(buildIds, push, done);
 		}, () => ids.length >= MAX, (err) => {
 			if (err) {
 				done(err);
@@ -34,7 +31,9 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		start: null,
 		end: null
 	};
-	return ls.pipeline(ls.through((obj, done) => {
+	return ls.through({
+		highWaterMark: 2
+	}, (obj, done, push) => {
 		eids.start = eids.start || obj.eid;
 		eids.end = obj.eid;
 		let tasks = [];
@@ -69,7 +68,7 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 							return ids.indexOf(e) === -1 && self.indexOf(e) === i;
 						}));
 						if (ids.length >= MAX) {
-							submit(done);
+							submit(push, done);
 						} else {
 							done();
 						}
@@ -103,31 +102,24 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 						return ids.indexOf(e) === -1 && self.indexOf(e) === i;
 					}));
 					if (ids.length >= MAX) {
-						submit(done);
+						submit(push, done);
 					} else {
 						done();
 					}
 				}
 			});
 		}
-	}, (done) => {
+	}, (done, push) => {
 		if (ids.length) {
-			submit(err => {
-				if (err) {
-					pass.end(err);
-					done(err);
-				} else {
-					pass.end();
-					done();
-				}
+			submit(push, err => {
+				done(err);
 			});
 		} else {
-			pass.end();
 			done();
 		}
-	}), pass);
+	});
 
-	function buildEntities(ids, callback) {
+	function buildEntities(ids, push, callback) {
 		let r = domainObj(ids, builder.createLoader);
 		if (typeof r.get == "function") {
 			r = r.get();
@@ -153,6 +145,47 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			});
 		});
 
+
+		function mapResults(results, fields, each) {
+			let mappings = [];
+
+			let last = null;
+			fields.forEach((f, i) => {
+				if (last == null) {
+					last = {
+						path: null,
+						start: i
+					};
+					mappings.push(last);
+				} else if (f.name.match(/^prefix_/)) {
+					last.end = i;
+					last = {
+						path: f.name.replace(/^prefix_/, ''),
+						start: i + 1
+					};
+					mappings.push(last);
+				}
+			});
+			last.end = fields.length;
+			results.forEach(r => {
+				//Convert back to object now
+				let row = {};
+				mappings.forEach(m => {
+					if (m.path === null) {
+						r.slice(m.start, m.end).forEach((value, i) => {
+							row[fields[m.start + i].name] = value;
+						});
+					} else if (m.path) {
+						row[m.path] = r.slice(m.start, m.end).reduce((acc, value, i) => {
+							acc[fields[m.start + i].name] = value;
+							return acc;
+						}, {});
+					}
+				});
+				each(row);
+			});
+		}
+
 		tasks.push(done => {
 			if (!obj.id) {
 				logger.log('[FATAL ERROR]: No ID specified');
@@ -160,60 +193,21 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 
 			sqlClient.query(obj.sql, (err, results, fields) => {
 				if (err) return done(err);
-
-				let mappings = [];
-
-				let last = null;
-				fields.forEach((f, i) => {
-					if (last == null) {
-						last = {
-							path: null,
-							start: i
-						};
-						mappings.push(last);
-					} else if (f.name.match(/^prefix_/)) {
-						last.end = i;
-						last = {
-							path: f.name.replace(/^prefix_/, ''),
-							start: i + 1
-						};
-						mappings.push(last);
+				mapResults(results, fields, row => {
+					if (obj.transform) {
+						row = obj.transform(row);
+					}
+					let id = row[obj.id];
+					if (!id) {
+						logger.error('ID: "' + obj.id + '" not found in object:');
+					} else if (!domains[row[obj.id]]) {
+						logger.error('ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+					} else {
+						//We need to keep the domain relationships in tact
+						domains[row[obj.id]] = Object.assign(domains[row[obj.id]], row);
 					}
 				});
-				last.end = fields.length;
-
-				if (!err) {
-					for (let i in results) {
-						let r = results[i];
-						//Convert back to object now
-						let row = {};
-						mappings.forEach(m => {
-							if (m.path === null) {
-								r.slice(m.start, m.end).forEach((value, i) => {
-									row[fields[m.start + i].name] = value;
-								});
-							} else if (m.path) {
-								row[m.path] = r.slice(m.start, m.end).reduce((acc, value, i) => {
-									acc[fields[m.start + i].name] = value;
-									return acc;
-								}, {});
-							}
-						});
-						if (obj.transform) {
-							row = obj.transform(row);
-						}
-						let id = row[obj.id];
-
-						if (!id) {
-							logger.error('ID: "' + obj.id + '" not found in object:');
-						} else if (!domains[row[obj.id]]) {
-							logger.error('ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
-						} else {
-							domains[row[obj.id]] = row;
-						}
-					}
-				}
-				done(err);
+				done();
 			}, {
 				inRowMode: true
 			});
@@ -224,39 +218,36 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			let t = obj.joins[name];
 			if (t.type === "one_to_many") {
 				tasks.push(done => {
-					sqlClient.query(t.sql, (err, results) => {
+					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
 						}
-						for (let i = 0; i < results.length; i++) {
-							let row;
+						mapResults(results, fields, row => {
 							if (t.transform) {
-								row = t.transform(results[i]);
-							} else {
-								row = results[i];
+								row = t.transform(row);
 							}
 							domains[row[t.on]][name].push(row);
-						}
+						});
 						done();
+					}, {
+						inRowMode: true
 					});
 				});
 			} else {
 				tasks.push(done => {
-					sqlClient.query(t.sql, (err, results) => {
+					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
 						}
-						for (let i = 0; i < results.length; i++) {
-							let row;
+						mapResults(results, fields, row => {
 							if (t.transform) {
-								row = t.transform(results[i]);
-							} else {
-								row = results[i];
+								row = t.transform(row);
 							}
-							//console.log(t.on, name, row)
 							domains[row[t.on]][name] = row;
-						}
+						});
 						done();
+					}, {
+						inRowMode: true
 					});
 				});
 			}
@@ -267,15 +258,12 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 			} else {
 				let needsDrained = false;
 				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
-
-
 				ids.forEach((id, i) => {
 					// skip the domain if there is no data with it
 					if (Object.keys(domains[id]).length === 0) {
 						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						return;
 					}
-
 					let eid = getEid(id, domains[id], eids);
 					let event = {
 						event: opts.queue,
@@ -289,17 +277,9 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 							units: 1
 						}
 					};
-
-					if (!pass.write(event)) {
-						needsDrained = true;
-					}
+					push(event);
 				});
-
-				if (needsDrained) {
-					pass.once('drain', callback);
-				} else {
-					callback();
-				}
+				callback();
 			}
 		});
 	}

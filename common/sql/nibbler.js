@@ -1,4 +1,4 @@
-let PassThrough = require("stream").PassThrough;
+let ls = require("leo-sdk/lib/streams.js");
 const async = require('async');
 
 module.exports = function(client, table, id, opts) {
@@ -44,9 +44,9 @@ module.exports = function(client, table, id, opts) {
 		console.log(message);
 	}
 
-	let pass = new PassThrough({
+	let pass = ls.passthrough({
 		objectMode: true,
-		highWaterMark: 1
+		highWaterMark: 2
 	});
 	let getRange = function(callback) {
 		client.range(table, id, null, (err, result) => {
