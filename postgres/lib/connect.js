@@ -41,24 +41,32 @@ function create(pool) {
 			});
 		},
 		query: function(query, params, callback) {
-			if (!callback) {
-				callback = params;
-				params = null;
-			}
-
-			let queryId = ++queryCount;
-			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query);
-			log.time(`Ran Query #${queryId}`);
-			pool.query(query, params, function(err, result) {
-				log.timeEnd(`Ran Query #${queryId}`);
-				if (err) {
-					log.error(`Had error #${queryId}`, err, query);
-					callback(err);
-				} else {
-					callback(null, result.rows, result.fields);
-				}
-			});
+      if (!callback) {
+        opts = callback;
+        callback = params;
+        params = null;
+      }
+      opts = Object.assign({
+          inRowMode: false,
+          stream: false
+      }, opts || {});
+      let queryId = ++queryCount;
+      let log = logger.sub("query");
+      log.info(`SQL query #${queryId} is `, query);
+      log.time(`Ran Query #${queryId}`);
+      pool.query({
+          text: query,
+          values: params,
+          rowMode: opts.inRowMode ? 'array' : undefined
+      }, function(err, result) {
+          log.timeEnd(`Ran Query #${queryId}`);
+          if (err) {
+              log.error(`Had error #${queryId}`, err, query);
+              callback(err);
+          } else {
+              callback(null, result.rows, result.fields);
+          }
+      });
 		},
 		disconnect: pool.end.bind(pool),
 		end: pool.end.bind(pool),

@@ -1,0 +1,17 @@
+{
+  "name": "leo-connector-mongo",
+  "version": "1.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --recursive -w"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.49.0",
+    "leo-sdk": "^1.0.64",
+    "mongodb": "^2.2.26",
+    "leo-connector-common": "^1.0.5"
+  }
+}

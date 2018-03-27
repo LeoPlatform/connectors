@@ -10,10 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "aws-sdk": "^2.205.0",
+    "aws-sdk": "^2.213.1",
     "fast-csv": "^2.4.1",
-    "leo-connector-common": "^1.0.4",
-    "leo-sdk": "^1.0.57",
+    "leo-connector-common": "^1.0.7",
+    "leo-sdk": "^1.0.64",
     "pg": "^7.4.1",
     "pg-copy-streams": "^1.2.0",
     "pg-format": "^1.0.4",
@@ -21,8 +21,8 @@
   },
   "devDependencies": {
     "chai": "^4.1.2",
-    "eslint": "^4.18.2",
-    "mocha": "^5.0.4",
-    "sinon": "^4.4.2"
+    "eslint": "^4.19.1",
+    "mocha": "^5.0.5",
+    "sinon": "^4.4.8"
   }
 }
