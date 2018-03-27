@@ -49,11 +49,11 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 	}
 
 
-	function saveProgress(data, bucketKey) {
+	function saveProgress(data, timestamp) {
 		dynamodb.merge(tableName, botId, {
 			snapshot: Object.assign({
 				last_run: moment.now(),
-				bucket_key: bucketKey
+				bucket_timestamp: timestamp && timestamp.valueOf()
 			}, data)
 		}, function(err, result) {
 			if (err) {
@@ -67,9 +67,9 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 		if (err) {
 			callback(err)
 		} else {
-			let timestamp = moment(),
-				// reuse an existing bucket key if we’re resuming, otherwise create a new one.
-				bucket_key = (result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_key) || timestamp.format('YYYY/MM_DD_') + timestamp.valueOf();
+			// reuse an existing bucket key if we’re resuming, otherwise create a new one.
+			let timestamp = moment(result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_timestamp || undefined),
+				bucketKey = timestamp.format('YYYY/MM_DD_') + timestamp.valueOf();
 
 			let stream = nibbler(client, table, id, {
 				limit: 5000,
@@ -77,9 +77,9 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 			});
 			stream.destroy = stream.destroy || stream.close || (() => {});
 
-			stream.on("ranged", function(n, bucketKey) {
+			stream.on("ranged", function(n) {
 				nibble = n;
-				saveProgress(nibble, bucketKey);
+				saveProgress(nibble, timestamp);
 			});
 			let transform = loader(client, {
 				[table]: true
@@ -102,7 +102,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 					time: {
 						minutes: 1
 					},
-					prefix: "_snapshot/" + bucket_key,
+					prefix: "_snapshot/" + bucketKey,
 					sectionCount: 30
 				}),
 				ls.toLeo("snapshotter", {
@@ -132,7 +132,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 							});
 							closeStream.end(done);
 						} else {
-							saveProgress(nibble, bucket_key);
+							saveProgress(nibble, timestamp);
 							done();
 						}
 					} else {
