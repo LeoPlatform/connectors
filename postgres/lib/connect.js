@@ -4,6 +4,7 @@ const {
 const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
+const async = require('async');
 
 // require("leo-sdk/lib/logger").configure(true);
 
@@ -174,42 +175,144 @@ function create(pool) {
 			}));
 		},
 		range: function(table, id, opts, callback) {
-			client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
-				if (err) return callback(err);
-				callback(null, {
-					min: result[0].min,
-					max: result[0].max,
-					total: result[0].total
+			if (Array.isArray(id)) {
+				let r = {
+					min: {},
+					max: {},
+					total: 0
+				};
+
+				let tasks = [];
+				tasks.push(done => {
+					client.query(`select count(*) as count from ${table}`, (err, result) => {
+						if (!err) {
+							r.total = result[0].count;
+						}
+						done(err);
+					});
 				});
-			});
+				tasks.push(done => {
+					client.query(`select ${id[0]}, ${id[1]} from ${table} order by ${id[0]} asc, ${id[1]} asc limit 1`, (err, result) => {
+						if (!err) {
+
+							r.min = {
+								[id[0]]: result[0][id[0]],
+								[id[1]]: result[0][id[1]]
+							};
+						}
+						done(err);
+					});
+				});
+				tasks.push(done => {
+					client.query(`select ${id[0]}, ${id[1]} from ${table} order by ${id[0]} desc, ${id[1]} desc limit 1`, (err, result) => {
+						if (!err) {
+							r.max = {
+								[id[0]]: result[0][id[0]],
+								[id[1]]: result[0][id[1]]
+							};
+						}
+						done(err);
+					});
+				});
+				async.parallel(tasks, (err) => {
+					callback(err, r);
+				});
+			} else {
+				client.query(`select min(${id}) as min, max(${id}) as max, count(${id}) as total from ${table}`, (err, result) => {
+					if (err) return callback(err);
+					callback(null, {
+						min: result[0].min,
+						max: result[0].max,
+						total: result[0].total
+					});
+				});
+			}
 		},
 		nibble: function(table, id, start, min, max, limit, reverse, callback) {
-			if (reverse) {
-				sql = `select ${id} as id from ${table}  
+			let sql;
+			if (Array.isArray(id)) {
+				if (reverse) {
+					sql = `select ${id[0]}, ${id[1]} from ${table}  
+							where (${id[0]} = ${start[id[0]]} and ${id[1]} <= ${start[id[1]]}) 
+									OR
+								  ${id[0]} < ${start[id[0]]}
+							ORDER BY ${id[0]} desc, ${id[1]} desc
+							LIMIT 2 OFFSET ${limit-1}`;
+				} else {
+					sql = `select ${id[0]}, ${id[1]} from ${table}  
+							where (${id[0]} = ${start[id[0]]} and ${id[1]} >= ${start[id[1]]}) 
+									OR
+								  ${id[0]} > ${start[id[0]]}
+							ORDER BY ${id[0]} asc, ${id[1]} asc
+							LIMIT 2 OFFSET ${limit-1}`;
+				}
+				client.query(sql, (err, result) => {
+					let r = [];
+					if (!err) {
+						if (result[0]) {
+							r[0] = {
+								id: {
+									[id[0]]: result[0][id[0]],
+									[id[1]]: result[0][id[1]]
+								}
+							};
+						}
+						if (result[1]) {
+							r[1] = {
+								id: {
+									[id[0]]: result[1][id[0]],
+									[id[1]]: result[1][id[1]]
+								}
+							};
+						}
+					}
+					callback(err, r);
+				});
+			} else {
+				if (reverse) {
+					sql = `select ${id} as id from ${table}  
 							where ${id} <= ${start} and ${id} >= ${min}
 							ORDER BY ${id} desc
 							LIMIT 2 OFFSET ${limit-1}`;
-			} else {
-				sql = `select ${id} as id from ${table}  
+				} else {
+					sql = `select ${id} as id from ${table}  
 							where ${id} >= ${start} and ${id} <= ${max}
 							ORDER BY ${id} asc
 							LIMIT 2 OFFSET ${limit-1}`;
+				}
+				client.query(sql, callback);
 			}
-
-			client.query(sql, callback);
 		},
 		getIds: function(table, id, start, end, reverse, callback) {
-			if (reverse) {
-				sql = `select ${id} as id from ${table}  
-					where ${id} <= ${start} and ${id} >= ${end}
-					ORDER BY ${id} desc`;
+			if (Array.isArray(id)) {
+				let joinTable = '';
+				if (reverse) {
+					joinTable = `select ${id[0]}, ${id[1]} 
+						from ${table} 
+						where ((${id[0]} = ${start[id[0]]} and ${id[1]} <= ${start[id[1]]}) OR ${id[0]} < ${start[id[0]]}) 
+					      and ((${id[0]} = ${end[id[0]]}   and ${id[1]} >= ${end[id[1]]})   OR ${id[0]} > ${end[id[0]]})
+					    order by ${id[0]} asc, ${id[1]} asc`;
+				} else {
+					joinTable = `select ${id[0]}, ${id[1]} 
+						from ${table} 
+						where ((${id[0]} = ${start[id[0]]} and ${id[1]} >= ${start[id[1]]}) OR ${id[0]} > ${start[id[0]]}) 
+					      and ((${id[0]} = ${end[id[0]]}   and ${id[1]} <= ${end[id[1]]})   OR ${id[0]} < ${end[id[0]]})
+					    order by ${id[0]} asc, ${id[1]} asc`;
+				}
+				callback(null, joinTable);
 			} else {
-				sql = `select ${id} as id from ${table}  
-					where ${id} >= ${start} and ${id} <= ${end}
-					ORDER BY ${id} asc`;
+				let sql;
+				if (reverse) {
+					sql = `select ${id} as id from ${table}  
+						where ${id} <= ${start} and ${id} >= ${end}
+						ORDER BY ${id} desc`;
+				} else {
+					sql = `select ${id} as id from ${table}  
+						where ${id} >= ${start} and ${id} <= ${end}
+						ORDER BY ${id} asc`;
+				}
+				client.query(sql, callback);
 			}
-
-			client.query(sql, callback);
 		}
 	};
 	return client;

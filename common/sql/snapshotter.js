@@ -3,6 +3,7 @@ const ls = leo.streams;
 
 const nibbler = require("./nibbler.js");
 const loader = require("./loader.js");
+const loaderJoin = require("./loaderJoinTable.js");
 
 const moment = require("moment");
 
@@ -81,12 +82,20 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				nibble = n;
 				saveProgress(nibble, bucketKey);
 			});
-			let transform = loader(client, {
-				[table]: true
-			}, domain, {
-				source: 'snapshot',
-				isSnapshot: true
-			});
+			let transform;
+			if (Array.isArray(id)) {
+				transform = loaderJoin(client, id, domain, {
+					source: 'snapshot',
+					isSnapshot: true
+				});
+			} else {
+				transform = loader(client, (obj, done) => {
+					console.log("I AM HERE", obj);
+				}, domain, {
+					source: 'snapshot',
+					isSnapshot: true
+				});
+			}
 			transform.destroy = transform.destroy || transform.close || (() => {});
 
 			let timeout = setTimeout(() => {

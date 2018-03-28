@@ -32,15 +32,16 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		end: null
 	};
 	return ls.through({
-		highWaterMark: opts.isSnapshot?2:16
+		highWaterMark: opts.isSnapshot ? 2 : 16
 	}, (obj, done, push) => {
 		eids.start = eids.start || obj.eid;
 		eids.end = obj.eid;
 		let tasks = [];
 		let findIds = [];
 
-
-		if (typeof sql == "function") {
+		if (obj.jointable) {
+			submit(push, done);
+		} else if (typeof sql == "function") {
 			sql(obj.payload, (err, idlist) => {
 				if (err) return done(err);
 
@@ -49,7 +50,6 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 						findIds = findIds.concat(idthing);
 					} else if (typeof idthing == "string") {
 						tasks.push((done) => {
-							console.log(idthing);
 							sqlClient.query(idthing, (err, results, fields) => {
 								if (!err) {
 									let firstColumn = fields[0].name;
