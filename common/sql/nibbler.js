@@ -112,7 +112,7 @@ module.exports = function(client, table, id, opts) {
 							if (!pass.write({
 									jointable: result,
 									count: nibble.limit,
-									eid: JSON.stringify(opts.reverse ? nibble.start : nibble.end)
+									eid: opts.reverse ? nibble.start : nibble.end
 								})) {
 								pass.once('drain', done);
 							} else {
