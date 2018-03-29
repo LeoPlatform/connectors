@@ -7,9 +7,9 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const transform = require("./transform.js");
 const async = require("async");
+const crypto = require("crypto");
 
-
-module.exports = function(opts) {
+module.exports = function(tableIds, opts) {
 	let streams = {};
 	let count = 0;
 
@@ -40,7 +40,10 @@ module.exports = function(opts) {
 		if (count % 10000 == 0) {
 			console.log(count);
 		}
-		if (!stream.stream.write(`${values.id}-${("00000000"+count).slice(-9)}|` + JSON.stringify(values) + "\n")) {
+		let id = crypto.createHash('md5');
+		id.update(tableIds[table].map(f => values[f]).join(','));
+
+		if (!stream.stream.write(`${id.digest('hex')}-${("00000000"+count).slice(-9)}` + JSON.stringify(values) + "\n")) {
 			stream.stream.once('drain', () => {
 				done(null);
 			});
@@ -99,30 +102,34 @@ function combine(file) {
 		fs.unlinkSync(file);
 
 		var lastObj = null;
+		var lastId = null;
 		console.time("Merged File " + sortedFile);
 		ls.pipe(fs.createReadStream(sortedFile), ls.split(), ls.through((line, done, push) => {
-			try {
-				var data = JSON.parse(line.replace(/^.*?\|{/, '{'));
-			} catch (e) {
-				console.log(e);
-				console.log(file);
-				console.log(line.toString());
-				process.exit();
-			}
-			if (lastObj && data.id == lastObj.id) { //we want double equals here not triple, becuase 1 and "1" should be the same
-				lastObj = merge(lastObj, data);
-			} else {
-				if (lastObj) {
-					push(lastObj);
+				try {
+					var id = line.substr(0, 32);
+					var data = JSON.parse(line.substr(42));
+				} catch (e) {
+					console.log(e);
+					console.log(file);
+					console.log(line.toString());
+					process.exit();
 				}
-				lastObj = data;
-			}
-			done();
-		}, function(done) {
-			if (lastObj) {
-				done(null, lastObj);
-			}
-		}), pass, (err) => {
+				if (lastObj && id === lastId) {
+					lastObj = merge(lastObj, data);
+				} else {
+					if (lastObj) {
+						push(lastObj);
+					}
+					lastObj = data;
+				}
+				lastId = id;
+				done();
+			},
+			function(done) {
+				if (lastObj) {
+					done(null, lastObj);
+				}
+			}), pass, (err) => {
 			if (err) {
 				pass.emit('error', err);
 			} else {

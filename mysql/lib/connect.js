@@ -62,6 +62,7 @@ module.exports = function(config) {
 			let pending = null;
 			let columns = [];
 			let ready = false;
+			let total = 0;
 			client.query(`SELECT column_name 
 					FROM information_schema.columns 
 					WHERE table_name = ? order by ordinal_position asc`, [table], (err, results) => {
@@ -82,11 +83,12 @@ module.exports = function(config) {
 			}, (records, callback) => {
 
 				if (opts.useReplaceInto) {
-					console.log("Replace Inserting " + records.length + " records");
+					console.log("Replace Inserting " + records.length + " records of ", total);
 
 				} else {
-					console.log("Inserting " + records.length + " records");
+					console.log("Inserting " + records.length + " records of ", total);
 				}
+				total += records.length;
 
 				var values = records.map((r) => {
 					return columns.map(f => r[f]);

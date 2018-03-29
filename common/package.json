@@ -1,6 +1,6 @@
 {
   "name": "leo-connector-common",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "",
   "main": "index.js",
   "directories": {},
@@ -25,6 +25,6 @@
   },
   "dependencies": {
     "async": "^2.6.0",
-    "leo-sdk": "^1.0.59"
+    "leo-sdk": "^1.0.65"
   }
 }

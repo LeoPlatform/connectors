@@ -71,7 +71,7 @@ module.exports = function(client, table, id, opts) {
 	if (opts.resume) {
 		getRange = function(callback) {
 			callback(null, opts.resume);
-		}
+		};
 	}
 
 	getRange((err, nibble) => {
@@ -102,22 +102,37 @@ module.exports = function(client, table, id, opts) {
 						nibble.end = result[0].id;
 						nibble.next = result[1].id;
 					}
-
 					client.getIds(table, id, nibble.start, nibble.end, opts.reverse, (err, result) => {
 						if (err) {
 							return done(err);
 						}
 						nibble.start = nibble.next;
-						let ids = result.map(r => r.id);
-						if (!pass.write({
-								payload: {
-									[table]: ids
-								},
-								eid: opts.reverse ? nibble.start : nibble.end
-							})) {
-							pass.once('drain', done);
+
+						if (typeof result == 'string') { //then it is a join table to be used
+							if (!pass.write({
+									jointable: result,
+									count: nibble.limit,
+									eid: opts.reverse ? nibble.start : nibble.end
+								})) {
+								pass.once('drain', done);
+							} else {
+								done();
+
+
+
+							}
 						} else {
-							done();
+							let ids = result.map(r => r.id);
+							if (!pass.write({
+									payload: {
+										[table]: ids
+									},
+									eid: opts.reverse ? nibble.start : nibble.end
+								})) {
+								pass.once('drain', done);
+							} else {
+								done();
+							}
 						}
 					});
 				});

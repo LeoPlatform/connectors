@@ -5,7 +5,27 @@ const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
 module.exports = function(client, tableConfig, stream, callback) {
-	ls.pipe(stream, combine(), ls.through((obj, done) => {
+	let tableSks = {};
+	let tableNks = {};
+	Object.keys(tableConfig).forEach(t => {
+		let config = tableConfig[t];
+		//console.log("config", t, JSON.stringify(config, null, 2));
+		Object.keys(config.structure).forEach(f => {
+			let field = config.structure[f];
+			if (field == "sk" || field.sk) {
+				tableSks[t] = f;
+			} else if (field.nk) {
+				if (!(t in tableNks)) {
+					tableNks[t] = [];
+				}
+				tableNks[t].push(f);
+			}
+		});
+	});
+
+
+
+	ls.pipe(stream, combine(tableNks), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
@@ -44,24 +64,6 @@ module.exports = function(client, tableConfig, stream, callback) {
 				done(err);
 			} else {
 				let tasks = [];
-
-				let tableSks = {};
-				let tableNks = {};
-				Object.keys(tableConfig).forEach(t => {
-					let config = tableConfig[t];
-					//console.log("config", t, JSON.stringify(config, null, 2));
-					Object.keys(config.structure).forEach(f => {
-						let field = config.structure[f];
-						if (field == "sk" || field.sk) {
-							tableSks[t] = f;
-						} else if (field.nk) {
-							if (!(t in tableNks)) {
-								tableNks[t] = [];
-							}
-							tableNks[t].push(f);
-						}
-					});
-				});
 				Object.keys(obj).forEach(t => {
 					let config = tableConfig[t];
 					let sk = null;
