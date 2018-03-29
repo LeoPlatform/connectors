@@ -7,12 +7,13 @@ const ls = leo.streams;
 
 const builder = require("./loaderBuilder.js");
 
-module.exports = function(sqlClient, sql, domainObj, opts = {
-	source: "loader",
-	isSnapshot: false
-}) {
+module.exports = function(sqlClient, sql, domainObj, opts) {
 	const MAX = 5000;
 	let ids = [];
+	opts = Object.assign({
+		source: "loader",
+		isSnapshot: false
+	}, opts || {});
 
 	function submit(push, done) {
 		async.doWhilst((done) => {
@@ -42,9 +43,7 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		if (obj.jointable) {
 			submit(push, done);
 		} else if (typeof sql == "function") {
-			sql(obj.payload, (err, idlist) => {
-				if (err) return done(err);
-
+			function processIdList(idlist) {
 				idlist.forEach(idthing => {
 					if (Array.isArray(idthing)) {
 						findIds = findIds.concat(idthing);
@@ -74,8 +73,26 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 						}
 					}
 				});
-
+			}
+			let handledReturn = false;
+			let result = sql.call({
+				hasIds: (a) => {
+					if (a && Array.isArray(a) && a.length) {
+						return true;
+					} else {
+						return false;
+					}
+				}
+			}, obj.payload, (err, idlist) => {
+				if (!handledReturn) {
+					if (err) return done(err);
+					processIdList(idlist);
+				}
 			});
+			if (result && Array.isArray(result)) {
+				handledReturn = true;
+				processIdList(result);
+			}
 		} else {
 			Object.keys(sql).forEach(key => {
 				if (sql[key] === true && key in obj.payload) {

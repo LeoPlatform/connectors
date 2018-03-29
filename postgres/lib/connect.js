@@ -138,7 +138,7 @@ function create(pool) {
 			let count = 0;
 
 			function nonNull(v) {
-				if (v === null || v === undefined) {
+				if (v === "" || v === null || v === undefined) {
 					return "\\N";
 				} else {
 					return v;

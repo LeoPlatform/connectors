@@ -117,6 +117,9 @@ module.exports = function(client, table, id, opts) {
 								pass.once('drain', done);
 							} else {
 								done();
+
+
+
 							}
 						} else {
 							let ids = result.map(r => r.id);
