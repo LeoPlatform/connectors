@@ -1,6 +1,6 @@
 {
   "name": "leo-connector-mysql",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -10,7 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "chai": "^4.1.2",
-    "leo-connector-common": "^1.0.8",
+    "leo-connector-common": "^1.0.9",
     "leo-sdk": "^1.0.65",
     "mysql2": "^1.5.3"
   }
