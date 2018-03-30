@@ -3,10 +3,36 @@ const logger = require("leo-sdk/lib/logger")("leo.connector.sql");
 const PassThrough = require("stream").PassThrough;
 const async = require("async");
 const leo = require("leo-sdk");
+const merge = require("lodash/merge")
 const ls = leo.streams;
 
 const builder = require("./loaderBuilder.js");
-module.exports = function(sqlClient, idKeys, domainObj, opts = {
+
+const rowValue = (row, id) => {
+	const value = row[id]
+	const err = !value
+	if (err) {
+		logger.error('ID: "' + id + '" not found in object:')
+	}
+	return { value, err }
+}
+
+const domainIdentifierFor = (row, key) => {
+	let domainIdentifier
+	if (Array.isArray(key)) {
+		const { value: primary, err: primaryErr } = rowValue(row, key[0])
+		const { value: secondary, err: secondaryErr } = rowValue(row, key[1])
+		if (primaryErr || secondaryErr) return { err: true }
+		domainIdentifier = `${primary}-${secondary}`
+	} else {
+		const { value, err } = rowValue(row, key)
+		if (err) return { err }
+		domainIdentifier = value;
+	}
+	return { domainIdentifier }
+}
+
+module.exports = function (sqlClient, idKeys, domainObj, opts = {
 	source: "loader",
 	isSnapshot: false
 }) {
@@ -93,58 +119,51 @@ module.exports = function(sqlClient, idKeys, domainObj, opts = {
 					if (obj.transform) {
 						row = obj.transform(row);
 					}
-					let id = row[obj.id];
-					if (!id) {
-						logger.error('ID: "' + obj.id + '" not found in object:');
-					} else {
+					const { domainIdentifier, err } = domainIdentifierFor(row, obj.id)
+					if (!err) {
 						//We need to keep the domain relationships in tact
-						domains[row[obj.id]] = Object.assign({}, template, row);
+						domains[domainIdentifier] = merge({}, template, domains[domainIdentifier], row);
 					}
 				});
 				done();
 			}, {
-				inRowMode: true
-			});
+					inRowMode: true
+				});
 		});
 
+		const oneToManyMapResultsRow = (t, name) => {
+			return row => {
+				if (t.transform) {
+					row = t.transform(row)
+				}
+				const { domainIdentifier, err } = domainIdentifierFor(row, t.on)
+				if (typeof domains[domainIdentifier] === 'undefined') {
+					domains[domainIdentifier] = merge({}, template);
+				}
+				if (!err) {
+					if (t.type === "one_to_many") {
+						domains[domainIdentifier][name].push(row);
+					} else {
+						domains[domainIdentifier][name] = row;
+					}
+				}
+			}
+		}
 
 		Object.keys(obj.joins).forEach(name => {
 			let t = obj.joins[name];
-			if (t.type === "one_to_many") {
-				tasks.push(done => {
-					sqlClient.query(t.sql, (err, results, fields) => {
-						if (err) {
-							return done(err);
-						}
-						mapResults(results, fields, row => {
-							if (t.transform) {
-								row = t.transform(row);
-							}
-							domains[row[t.on]][name].push(row);
-						});
-						done();
-					}, {
+			tasks.push(done => {
+				sqlClient.query(t.sql, (err, results, fields) => {
+					if (err) {
+						return done(err);
+					}
+					mapResults(results, fields, oneToManyMapResultsRow(t, name));
+					done();
+				}, {
 						inRowMode: true
 					});
-				});
-			} else {
-				tasks.push(done => {
-					sqlClient.query(t.sql, (err, results, fields) => {
-						if (err) {
-							return done(err);
-						}
-						mapResults(results, fields, row => {
-							if (t.transform) {
-								row = t.transform(row);
-							}
-							domains[row[t.on]][name] = row;
-						});
-						done();
-					}, {
-						inRowMode: true
-					});
-				});
-			}
+			});
+
 		});
 		async.parallelLimit(tasks, 5, (err) => {
 			if (err) {
