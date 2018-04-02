@@ -131,7 +131,7 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 				});
 		});
 
-		const oneToManyMapResultsRow = (t, name) => {
+		const mapResultsRow = (t, name) => {
 			return row => {
 				if (t.transform) {
 					row = t.transform(row)
@@ -157,7 +157,7 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 					if (err) {
 						return done(err);
 					}
-					mapResults(results, fields, oneToManyMapResultsRow(t, name));
+					mapResults(results, fields, mapResultsRow(t, name));
 					done();
 				}, {
 						inRowMode: true
