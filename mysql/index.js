@@ -18,16 +18,17 @@ module.exports = {
 		return checksum(connect(config));
 	},
 	domainObjectLoader: function(bot_id, dbConfig, sql, domain, opts, callback) {
+		let client = connect(dbConfig);
 		if (opts.snapshot) {
 			snapShotter(bot_id, connect(dbConfig), dbConfig.table, dbConfig.id, domain, {
 				event: opts.outQueue
 			}, callback);
 		} else {
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(leo.read(bot_id, opts.inQueue), this.load(dbConfig, sql, domain, {
+			ls.pipe(leo.read(bot_id, opts.inQueue), stats, this.load(dbConfig, sql, domain, {
 				queue: opts.outQueue,
 				id: bot_id
-			}), stats, ls.toLeo(bot_id), ls.devnull('done'), err => {
+			}), ls.toLeo(bot_id), ls.devnull('done'), err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
 			});

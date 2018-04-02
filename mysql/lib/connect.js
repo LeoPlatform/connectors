@@ -3,9 +3,10 @@
 const mysql = require("mysql2");
 const logger = require("leo-sdk/lib/logger")("leo.connector.sql.mysql");
 let ls = require("leo-sdk").streams;
+let connections = {};
 
-module.exports = function(config) {
-	let m = mysql.createPool(Object.assign({
+module.exports = function(c) {
+	let config = Object.assign({
 		host: "localhost",
 		user: "root",
 		port: 3306,
@@ -13,7 +14,19 @@ module.exports = function(config) {
 		password: "a",
 		connectionLimit: 10,
 		timezone: 'utc'
-	}, config));
+	}, c);
+
+	let connectionHash = JSON.stringify(config);
+	let m;
+
+	if (!(connectionHash in connections)) {
+		console.log("CREATING NEW MYSQL CONNECTION");
+		connections[connectionHash] = mysql.createPool(config);
+	} else {
+		console.log("REUSING CONNECTION");
+	}
+	m = connections[connectionHash];
+
 	let queryCount = 0;
 	let client = {
 		query: function(query, params, callback, opts = {}) {
@@ -43,7 +56,13 @@ module.exports = function(config) {
 				callback(err, result, fields);
 			});
 		},
-		disconnect: m.end.bind(m),
+		end: function(callback) {
+			connections[connectionHash] = undefined;
+			return m.end(callback);
+		},
+		disconnect: function(callback) {
+			return this.end(callback);
+		},
 		describeTable: function(table, callback) {
 			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
 				FROM information_schema.columns
