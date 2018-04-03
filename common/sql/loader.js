@@ -7,12 +7,13 @@ const ls = leo.streams;
 
 const builder = require("./loaderBuilder.js");
 
-module.exports = function(sqlClient, sql, domainObj, opts = {
-	source: "loader",
-	isSnapshot: false
-}) {
+module.exports = function(sqlClient, sql, domainObj, opts) {
 	const MAX = 5000;
 	let ids = [];
+	opts = Object.assign({
+		source: "loader",
+		isSnapshot: false
+	}, opts || {});
 
 	function submit(push, done) {
 		async.doWhilst((done) => {
@@ -32,24 +33,22 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 		end: null
 	};
 	return ls.through({
-		highWaterMark: opts.isSnapshot?2:16
+		highWaterMark: opts.isSnapshot ? 2 : 16
 	}, (obj, done, push) => {
 		eids.start = eids.start || obj.eid;
 		eids.end = obj.eid;
 		let tasks = [];
 		let findIds = [];
 
-
-		if (typeof sql == "function") {
-			sql(obj.payload, (err, idlist) => {
-				if (err) return done(err);
-
+		if (obj.jointable) {
+			submit(push, done);
+		} else if (typeof sql == "function") {
+			function processIdList(idlist) {
 				idlist.forEach(idthing => {
 					if (Array.isArray(idthing)) {
 						findIds = findIds.concat(idthing);
 					} else if (typeof idthing == "string") {
 						tasks.push((done) => {
-							console.log(idthing);
 							sqlClient.query(idthing, (err, results, fields) => {
 								if (!err) {
 									let firstColumn = fields[0].name;
@@ -74,8 +73,26 @@ module.exports = function(sqlClient, sql, domainObj, opts = {
 						}
 					}
 				});
-
+			}
+			let handledReturn = false;
+			let result = sql.call({
+				hasIds: (a) => {
+					if (a && Array.isArray(a) && a.length) {
+						return true;
+					} else {
+						return false;
+					}
+				}
+			}, obj.payload, (err, idlist) => {
+				if (!handledReturn) {
+					if (err) return done(err);
+					processIdList(idlist);
+				}
 			});
+			if (result && Array.isArray(result)) {
+				handledReturn = true;
+				processIdList(result);
+			}
 		} else {
 			Object.keys(sql).forEach(key => {
 				if (sql[key] === true && key in obj.payload) {

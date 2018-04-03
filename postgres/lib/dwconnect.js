@@ -209,7 +209,7 @@ module.exports = function(config) {
 		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
 			let tasks = [];
 			let sets = [];
-
+			tasks.push(done => client.query(`analyze ${table}`, done));
 			tasks.push(done => {
 				let joinTables = links.map(link => {
 					if (link.table == "datetime" || link.table == "dim_datetime") {
@@ -275,6 +275,7 @@ module.exports = function(config) {
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
 
+		let ids = [];
 		Object.keys(definition.structure).forEach(f => {
 			let field = definition.structure[f];
 			if (field == "sk") {
@@ -285,6 +286,10 @@ module.exports = function(config) {
 				field = {
 					type: field
 				};
+			}
+
+			if (field == "nk" || field.nk) {
+				ids.push(f);
 			}
 
 			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -311,12 +316,16 @@ module.exports = function(config) {
 			tasks.push(done => client.query(`alter table ${table} add column _startdate timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column _enddate timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column _current boolean`, done));
-			// tasks.push(done => client.query(`create index ${table}_startenddate on ${table} (id, _startdate, _enddate)`, done));
+			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.concat("_current").join(',')})`, done));
+			tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat("_startdate").join(',')})`, done));
 			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
 		} else {
 			tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
 			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
 		}
+
+
 		async.series(tasks, callback);
 	};
 	client.updateTable = function(table, definition, callback) {
