@@ -82,7 +82,8 @@ function create(pool) {
 		},
 		streamToTableBatch: function(table, fields, opts) {
 			opts = Object.assign({
-				records: 10000
+				records: 10000,
+				passThrough: false
 			}, opts || {});
 			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
 				lookups[f.toLowerCase()] = index;
@@ -104,7 +105,7 @@ function create(pool) {
 					if (err) {
 						callback(err);
 					} else {
-						callback(null, []);
+						callback(null, (opts.passThrough)? records: []);
 					}
 				});
 			}, {

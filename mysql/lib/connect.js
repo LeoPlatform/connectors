@@ -76,7 +76,8 @@ module.exports = function(c) {
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000,
-				useReplaceInto: false
+				useReplaceInto: false,
+				passThrough: false
 			}, opts || {});
 			let pending = null;
 			let columns = [];
@@ -121,7 +122,7 @@ module.exports = function(c) {
 					if (err) {
 						callback(err);
 					} else {
-						callback(null, []);
+						callback(null, (opts.passThrough)? records :[]);
 					}
 				});
 			}, {
