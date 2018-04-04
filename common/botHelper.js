@@ -191,7 +191,7 @@ module.exports = function(event, context, callback, sdk) {
 						if (err) {
 							callback(err);
 						} else {
-							stats.checkpoint(callback)
+							stats.checkpoint(callback);
 						}
 					});
 			}
@@ -266,6 +266,6 @@ module.exports = function(event, context, callback, sdk) {
 						callback(err);
 					});
 			}
-		}
-	}
+		};
+	};
 };
