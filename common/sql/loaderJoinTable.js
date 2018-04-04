@@ -1,45 +1,111 @@
 "use strict";
 const logger = require("leo-sdk/lib/logger")("leo.connector.sql");
-const PassThrough = require("stream").PassThrough;
 const async = require("async");
 const leo = require("leo-sdk");
-const merge = require("lodash/merge")
+const merge = require("lodash/merge");
+const lib = require("./loader/lib");
 const ls = leo.streams;
+
+const MAX = 5000;
 
 const builder = require("./loaderBuilder.js");
 
 const rowValue = (row, id) => {
-	const value = row[id]
-	const err = !value
+	const value = row[id];
+	const err = !value;
 	if (err) {
-		logger.error('ID: "' + id + '" not found in object:')
+		logger.error('ID: "' + id + '" not found in object:');
 	}
-	return { value, err }
-}
+	return {
+		value,
+		err
+	};
+};
 
 const domainIdentifierFor = (row, key) => {
-	let domainIdentifier
+	let domainIdentifier;
 	if (Array.isArray(key)) {
-		const { value: primary, err: primaryErr } = rowValue(row, key[0])
-		const { value: secondary, err: secondaryErr } = rowValue(row, key[1])
-		if (primaryErr || secondaryErr) return { err: true }
-		domainIdentifier = `${primary}-${secondary}`
+		const {
+			value: primary,
+			err: primaryErr
+		} = rowValue(row, key[0]);
+		const {
+			value: secondary,
+			err: secondaryErr
+		} = rowValue(row, key[1]);
+		if (primaryErr || secondaryErr) return {
+			err: true
+		};
+		domainIdentifier = `${primary}-${secondary}`;
 	} else {
-		const { value, err } = rowValue(row, key)
-		if (err) return { err }
+		const {
+			value,
+			err
+		} = rowValue(row, key);
+		if (err) return {
+			err
+		};
 		domainIdentifier = value;
 	}
-	return { domainIdentifier }
-}
+	return {
+		domainIdentifier
+	};
+};
 
-module.exports = function (sqlClient, idKeys, domainObj, opts = {
+
+module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 	source: "loader",
 	isSnapshot: false
 }) {
+	let ids = [];
+
+
+
+	function submit(push, done) {
+		async.doWhilst((done) => {
+			let buildIds = ids.splice(0, MAX);
+			buildEntities({
+				jointable: 'values ' + buildIds.map(keys => {
+					return "(" + keys.join(",") + ")";
+				}).join(","),
+				count: buildIds.length
+			}, push, done);
+		}, () => ids.length >= MAX, (err) => {
+			if (err) {
+				done(err);
+			} else {
+				done();
+			}
+		});
+	}
+
+
 	return ls.through({
 		highWaterMark: opts.isSnapshot ? 2 : 16
 	}, (obj, done, push) => {
-		buildEntities(obj, push, done);
+		if (obj.jointable) {
+			buildEntities(obj, push, done);
+		} else {
+			lib.processIds(sqlClient, obj, sql, idKeys, (err, newIds) => {
+				if (err) {
+					console.log(err);
+				}
+				ids = ids.concat(newIds);
+				if (ids.length >= MAX) {
+					submit(push, done);
+				} else {
+					done();
+				}
+			});
+		}
+	}, (done, push) => {
+		if (ids.length) {
+			submit(push, err => {
+				done(err);
+			});
+		} else {
+			done();
+		}
 	});
 
 	function buildEntities(cmd, push, callback) {
@@ -119,7 +185,10 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 					if (obj.transform) {
 						row = obj.transform(row);
 					}
-					const { domainIdentifier, err } = domainIdentifierFor(row, obj.id)
+					const {
+						domainIdentifier,
+						err
+					} = domainIdentifierFor(row, obj.id);
 					if (!err) {
 						//We need to keep the domain relationships in tact
 						domains[domainIdentifier] = merge({}, template, domains[domainIdentifier], row);
@@ -127,16 +196,19 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 				});
 				done();
 			}, {
-					inRowMode: true
-				});
+				inRowMode: true
+			});
 		});
 
 		const mapResultsRow = (t, name) => {
 			return row => {
 				if (t.transform) {
-					row = t.transform(row)
+					row = t.transform(row);
 				}
-				const { domainIdentifier, err } = domainIdentifierFor(row, t.on)
+				const {
+					domainIdentifier,
+					err
+				} = domainIdentifierFor(row, t.on);
 				if (typeof domains[domainIdentifier] === 'undefined') {
 					domains[domainIdentifier] = merge({}, template);
 				}
@@ -147,8 +219,8 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 						domains[domainIdentifier][name] = row;
 					}
 				}
-			}
-		}
+			};
+		};
 
 		Object.keys(obj.joins).forEach(name => {
 			let t = obj.joins[name];
@@ -160,8 +232,8 @@ module.exports = function (sqlClient, idKeys, domainObj, opts = {
 					mapResults(results, fields, mapResultsRow(t, name));
 					done();
 				}, {
-						inRowMode: true
-					});
+					inRowMode: true
+				});
 			});
 
 		});
