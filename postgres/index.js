@@ -11,6 +11,13 @@ const ls = leo.streams;
 const binlogReader = require("./lib/binlogreader");
 
 module.exports = {
+	query: function(config, sql, params) {
+		const client = connect(config);
+		const results = new Promise((resolve, reject)=> {
+			client.query(sql, params, (err, queryResults) => err ? reject(err) : resolve(queryResults));
+		})
+		return { results, client }
+	},
 	load: function(config, sql, domain) {
 		return sqlLoader(connect(config), sql, domain);
 	},
