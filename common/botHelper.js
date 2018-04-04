@@ -2,10 +2,11 @@
 
 const refUtil = require('leo-sdk/lib/reference.js');
 const loaderBuilder = require('./sql/loaderBuilder');
+const MAX = 5000;
 
 module.exports = function(event, context, callback, sdk) {
-	if (!sdk) {
-		throw new Error('leo-sdk must be passed into the helperFactory');
+	if (!event || !context || !callback || !sdk) {
+		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘callback’, ‘leo-sdk’');
 	}
 
 	/**
@@ -20,41 +21,97 @@ module.exports = function(event, context, callback, sdk) {
 	 *  }
 	 */
 	this.buildDomainObjects = function (params) {
-		params = {
-			connection: params.connection,
-			connector: params.connector,
-			table: params.table,
-			pk: params.pk,
-			query: params.query,
-			snapshot: params.snapshot || process.env.snapshot
-		};
+		params.snapshot = params.snapshot || process.env.snapshot;
 
-		params.connection.table = params.table;
-		params.connection.id = params.pk;
+		// if we're doing a snapshot, put the table and id into the connection object
+		if (params.snapshot) {
+			params.connection.table = params.table;
+			params.connection.id = params.pk;
+		}
 
-		params.connector.domainObjectLoader(event.botId, params.connection, (obj, done) => {
-			done(null, [
-				obj[params.table]
-			]);
-		}, function (ids, builder) {
-			let idsList = ids.join();
-			let builderSql = builder(params.id, params.query(idsList));
+		let tables = {};
 
-			if (params.joins) {
-				params.join.forEach((join) => {
-					if (join.type === 'one_to_many') {
-						builderSql.joinOneToMany(join.table, join.pk, join.query(idsList), join.transform);
-					} else if (join.type === 'one_to_one') {
-						builderSql.join(join.table, join.pk, join.query(idsList), join.transform);
+		return {
+			// Table => primary key || SELECT query to get the primary key
+			mapDomainId: function(table, pk) {
+				tables[table] = pk;
+
+				return this;
+			},
+
+			// do stuff to build the domain objects
+			run: function () {
+				let ls = sdk.streams,
+					stats = ls.stats(event.botId, event.source);
+
+				// setup where we want this pipe to go
+				let end;
+				if (params.devnull) {
+					end = ls.devnull();
+				} else {
+					end = ls.load(event.botId, event.destination);
+				}
+
+				let readParams = {};
+				if (params.start) {
+					readParams.start = params.start;
+				}
+
+				params.connector.domainObjectLoader(event.botId, params.connection, (obj, done) => {
+					let objArray = [];
+
+					Object.keys(tables).forEach((table) => {
+
+						// only process if we have any data for this table
+						if (obj[table] && obj[table].length) {
+
+							// split ID's up into no more than 5k
+							let loops = Math.ceil(obj[table].length / MAX),
+								ids = [];
+
+							// if the value of any of the tables is a SELECT query, replace __IDS__ with the IDs in obj[table]
+							if (tables[table].match(/^SELECT/)) {
+								for (let i = 0; i < loops; i++) {
+									ids = obj[table].slice(i * MAX, (i * MAX) + MAX);
+									objArray.push(tables[table].replace(/\_\_IDS\_\_/, ids.join()));
+								}
+							} else {
+								for (let i = 0; i < loops; i++) {
+									ids = obj[table].slice(i * MAX, (i * MAX) + MAX);
+									objArray.push([ids.join()]);
+								}
+							}
+						}
+					});
+
+					done(null, objArray);
+				},
+				function (ids, builder) {
+					let idsList = ids.join();
+					let builderSql = builder(params.pk, params.query(idsList));
+
+					if (params.joins) {
+						params.joins.forEach((join) => {
+							if (join.type === 'one_to_many') {
+								builderSql.joinOneToMany(join.table, join.pk, join.query(idsList), join.transform);
+							} else if (join.type === 'one_to_one') {
+								builderSql.join(join.table, join.pk, join.query(idsList), join.transform);
+							}
+						});
 					}
-				});
+
+					return builderSql;
+				},
+				{
+					snapshot: params.snapshot,
+					inQueue: event.source,
+					outQueue: event.destination,
+					start: params.start || null
+				},
+				callback);
+
 			}
-			return builderSql;
-		}, {
-			snapshot: params.snapshot,
-			inQueue: event.source,
-			outQueue: event.destination
-		}, callback);
+		};
 	};
 
 	/**
@@ -119,7 +176,12 @@ module.exports = function(event, context, callback, sdk) {
 					end = sdk.load(event.botId, event.destination);
 				}
 
-				params.ls.pipe(sdk.read(event.botId, event.source, {start: params.start})
+				let readParams = {};
+				if (params.start) {
+					readParams.start = params.start;
+				}
+
+				params.ls.pipe(sdk.read(event.botId, event.source, readParams)
 					, stats
 					// , params.ls.log()
 					, params.ls.through(function (obj, done) {
@@ -157,10 +219,10 @@ module.exports = function(event, context, callback, sdk) {
 	/**
 	 * Filter bin logs to pull changed ids for specific tables
 	 * @param params
+	 * @todo
 	 */
-	this.filterBinLogs = function (params) {
+	this.filterBinLogs = function (params) {};
 
-	};
 	/**
 	 * Create a change stream and get changed ids for specific tables
 	 * @param params {
@@ -174,19 +236,15 @@ module.exports = function(event, context, callback, sdk) {
 	 * }
 	 */
 	this.trackTableChanges = function (params) {
-		let trackedTables = loaderBuilder.createChangeTrackingObject();
-
 		if (!params.connector) {
 			throw new Error('Connector is a required parameter, and must be one of leo-connector-(sqlserver|postgres|mysql|etc...).');
-		}
-
-		if (params.table && params.pk) {
-			trackedTables.trackTable(params.table, params.pk);
 		}
 
 		if (!params.ls) {
 			params.ls = sdk.streams;
 		}
+
+		let trackedTables = {};
 
 		// get the starting point
 		let queue = refUtil.ref(event.source);
@@ -200,16 +258,12 @@ module.exports = function(event, context, callback, sdk) {
 			|| '0.0';
 
 		return {
-			trackTable: function(table, pk, query) {
-				trackedTables.trackTable(table, pk);
-
-				if (query) {
-					trackedTables.mapToDomainId(table, query);
-				}
+			trackTable: function(table, pk) {
+				trackedTables[table] = pk;
 				return this;
 			},
 			run: function() {
-				let stream = params.connector.streamChanges(params.connection, trackedTables.getTrackedTables(), {
+				let stream = params.connector.streamChanges(params.connection, trackedTables, {
 					start: start,
 					source: event.source
 				});
