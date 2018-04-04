@@ -17,6 +17,12 @@ module.exports = {
 			client.query(sql, params, (err, queryResults) => err ? reject(err) : resolve(queryResults));
 		})
 		return { results, client }
+	load: function(config, sql, domain, idColumns) {
+		if (Array.isArray(idColumns)) {
+			return sqlLoaderJoin(connect(config), idColumns, sql, domain);
+		} else {
+			return sqlLoader(connect(config), sql, domain);
+		}
 	},
 	load: function(config, sql, domain, idColumns) {
 		if (Array.isArray(idColumns)) {
