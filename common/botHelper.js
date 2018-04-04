@@ -127,7 +127,7 @@ module.exports = function(event, context, callback, sdk) {
 
 				entities.push({
 					"type": "dimension",
-					"entity": name,
+					"table": name,
 					"data": dataTransform
 				});
 
@@ -140,7 +140,7 @@ module.exports = function(event, context, callback, sdk) {
 
 				entities.push({
 					"type": "fact",
-					"entity": name,
+					"table": name,
 					"data": dataTransform
 				});
 
@@ -148,8 +148,7 @@ module.exports = function(event, context, callback, sdk) {
 			},
 			run: function () {
 				let i = 0,
-					stats = params.ls.stats(event.botId, event.source),
-					logEvents = params.logEvents || 1000;
+					stats = params.ls.stats(event.botId, event.source);
 
 				let end;
 				if (params.devnull) {
@@ -168,7 +167,7 @@ module.exports = function(event, context, callback, sdk) {
 					// , params.ls.log()
 					, params.ls.through(function (obj, done) {
 						i++;
-						if (i % logEvents === 0) {
+						if (i % params.logEvents === 0) {
 							console.log(i);
 						}
 
