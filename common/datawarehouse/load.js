@@ -93,7 +93,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 									table: field.dimension,
 									source: f
 								};
-								let nks = tableNks[field.dimension]
+								let nks = tableNks[field.dimension];
 								if (nks && nks.length == 1) {
 									link.on = nks[0];
 								}
@@ -101,7 +101,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							links.push(Object.assign({
 								table: null,
 								on: f,
-								destination: "d_" + f.replace(/_id$/, ''),
+								destination: client.getDimensionColumn(f),
 								link_date: "_auditdate",
 								sk: tableSks[link.table]
 							}, link));

@@ -4,8 +4,21 @@ const async = require("async");
 const ls = require("leo-sdk").streams;
 
 
-module.exports = function(config) {
+module.exports = function(config, columnConfig) {
 	let client = postgres(config);
+
+	columnConfig = Object.assign({
+		_auditdate: '_auditdate',
+		_startdate: '_startdate',
+		_enddate: '_enddate',
+		_current: '_current',
+		dimColumnTransform: (column) => {
+			return `d_${column.replace(/_id$/,'')}`;
+		},
+		useSurrogateDateKeys: true
+	}, columnConfig || {});
+
+	client.getDimensionColumn = columnConfig.dimColumnTransform;
 
 	client.importFact = function(stream, table, ids, callback) {
 		if (!Array.isArray(ids)) {
@@ -35,7 +48,7 @@ module.exports = function(config) {
 
 					tasks.push(done => {
 						client.query(`Update ${table} dm
-								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, _auditdate = now()
+								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._auditdate} = now()
 								FROM staging_${table} staging
 								JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								where ${ids.map(id=>`dm.${id} = staging.${id}`).join(' and ')}
@@ -45,14 +58,14 @@ module.exports = function(config) {
 
 					//Now insert any we were missing
 					tasks.push(done => {
-						client.query(`INSERT INTO ${table} (${columns.join(',')},_auditdate)
-								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate
+						client.query(`INSERT INTO ${table} (${columns.join(',')},${columnConfig._auditdate})
+								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as ${columnConfig._auditdate}
 								FROM staging_${table} staging
 								LEFT JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
 							`, done);
 					});
-					tasks.push(done => client.query(`drop table staging_${table}`, done));
+					// tasks.push(done => client.query(`drop table staging_${table}`, done));
 
 					async.series(tasks, err => {
 						if (!err) {
@@ -97,13 +110,13 @@ module.exports = function(config) {
 					let scd3 = scds[3] || [];
 					let scd6 = Object.keys(scds[6] || {});
 
-
+					let ignoreColumns = [columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current];
 					let allColumns = result.map(r => r.column_name).filter(f => {
-						return !f.match(/^_/) && f !== sk;
+						return ignoreColumns.indexOf(f) === -1 && f !== sk;
 					});
 
 					let scd1 = result.map(r => r.column_name).filter(f => {
-						return !f.match(/^_/) && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== sk && nk.indexOf(f) === -1;
+						return ignoreColumns.indexOf(f) === -1 && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== sk && nk.indexOf(f) === -1;
 					});
 
 
@@ -135,7 +148,7 @@ module.exports = function(config) {
 				select ${nk.map(id=>`s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
 					FROM staging_${table} s
-					LEFT JOIN ${table} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d._current`, (err, result) => {
+					LEFT JOIN ${table} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err, result) => {
 						if (err) {
 							console.log(err);
 							process.exit();
@@ -157,12 +170,12 @@ module.exports = function(config) {
 						tasks.push(done => client.query(`Begin Transaction`, done));
 
 						tasks.push(done => {
-							let fields = [sk].concat(allColumns).concat(['_auditdate', '_startdate', '_enddate', '_current']);
+							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 							client.query(`INSERT INTO ${table} (${fields.join(',')})
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as _auditdate, case when changes.isNew then '1900-01-01 00:00:00' else now() END as _startdate, '9999-01-01 00:00:00' as _enddate, true as _current
+								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 								FROM staging_${table}_changes changes  
 								JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-								LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev._current
+								LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
 						});
@@ -171,21 +184,21 @@ module.exports = function(config) {
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
 							let columns = scd1.map(f => `${f} = coalesce(staging.${f}, prev.${f})`).concat(scd6.map(f => `current_${f} = coalesce(staging.${f}, prev.${f})`));
-							columns.push(`_enddate = case when changes.runSCD2 =1 then now() else dm._enddate END`);
-							columns.push(`_current = case when changes.runSCD2 =1 then false else dm._current END`);
-							columns.push(`_auditdate = now()`);
+							columns.push(`${columnConfig._enddate} = case when changes.runSCD2 =1 then now() else dm.${columnConfig._enddate} END`);
+							columns.push(`${columnConfig._current} = case when changes.runSCD2 =1 then false else dm.${columnConfig._current} END`);
+							columns.push(`${columnConfig._auditdate} = now()`);
 							client.query(`update ${table} as dm
 										set  ${columns.join(', ')}
 										FROM staging_${table}_changes changes
 										JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-										LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev._current
-										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm._startdate != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having ._current*/
+										LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
 
-						tasks.push(done => client.query(`drop table staging_${table}_changes`, done));
-						tasks.push(done => client.query(`drop table staging_${table}`, done));
+						// tasks.push(done => client.query(`drop table staging_${table}_changes`, done));
+						// tasks.push(done => client.query(`drop table staging_${table}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								client.query(`commit`, e => {
@@ -213,27 +226,38 @@ module.exports = function(config) {
 			tasks.push(done => {
 				let joinTables = links.map(link => {
 					if (link.table == "datetime" || link.table == "dim_datetime") {
-						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						if (columnConfig.useSurrogateDateKeys) {
+							sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
+							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						}
 					} else if (link.table == "d_date" || link.table == "dim_date") {
-						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
+						if (columnConfig.useSurrogateDateKeys) {
+							sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
+						}
 					} else if (link.table == "d_time" || link.table == "dim_time") {
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						if (columnConfig.useSurrogateDateKeys) {
+							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						}
 					} else {
 						sets.push(`${link.destination} = coalesce(${link.source}_join_table.${link.sk}, 1)`);
 						return `LEFT JOIN ${link.table} ${link.source}_join_table 
 							on ${link.source}_join_table.${link.on} = t.${link.source} 
-								and t.${link.link_date} >= ${link.source}_join_table._startdate 
-								and (t.${link.link_date} <= ${link.source}_join_table._enddate or ${link.source}_join_table._current)
+								and t.${link.link_date} >= ${link.source}_join_table.${columnConfig._startdate}
+								and (t.${link.link_date} <= ${link.source}_join_table.${columnConfig._enddate} or ${link.source}_join_table.${columnConfig._current})
 					`;
 					}
 				});
-				client.query(`Update ${table} dm
+
+				if (sets.length) {
+					client.query(`Update ${table} dm
 						SET  ${sets.join(', ')}
 						FROM ${table} t
 						${joinTables.join("\n")}
 						where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
 					`, done);
+				} else {
+					done();
+				}
 			});
 			async.series(tasks, err => {
 				callback(err);
@@ -293,14 +317,20 @@ module.exports = function(config) {
 			}
 
 			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
-				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
-				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+				}
 			} else if (field.dimension == "date" || field.dimension == "dim_date") {
-				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+				}
 			} else if (field.dimension == "time" || field.dimension == "dim_time") {
-				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+				}
 			} else if (field.dimension) {
-				fields.push(`d_${f.replace(/_id$/,'')} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(f)} integer`);
 			}
 			fields.push(`"${f}" ${field.type}`);
 		});
@@ -309,19 +339,23 @@ module.exports = function(config) {
 				${fields.join(',\n')}
 			)`;
 
+
+		/*
+			@todo if dimension, add empty row
+		*/
 		let tasks = [];
 		tasks.push(done => client.query(sql, done));
 		if (definition.isDimension) {
-			tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
-			tasks.push(done => client.query(`alter table ${table} add column _startdate timestamp`, done));
-			tasks.push(done => client.query(`alter table ${table} add column _enddate timestamp`, done));
-			tasks.push(done => client.query(`alter table ${table} add column _current boolean`, done));
-			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.concat("_current").join(',')})`, done));
-			tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat("_startdate").join(',')})`, done));
-			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._startdate} timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._enddate} timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._current} boolean`, done));
+			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.concat(columnConfig._current).join(',')})`, done));
+			tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat(columnConfig._startdate).join(',')})`, done));
+			tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
 		} else {
-			tasks.push(done => client.query(`alter table ${table} add column _auditdate timestamp`, done));
-			tasks.push(done => client.query(`create index ${table}_auditdate on ${table} using btree(_auditdate)`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
+			tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
 			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
 		}
 
@@ -343,14 +377,20 @@ module.exports = function(config) {
 			}
 
 			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
-				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
-				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+				}
 			} else if (field.dimension == "date" || field.dimension == "dim_date") {
-				fields.push(`d_${f.replace(/_id$/,'')}_date integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+				}
 			} else if (field.dimension == "time" || field.dimension == "dim_date") {
-				fields.push(`d_${f.replace(/_id$/,'')}_time integer`);
+				if (columnConfig.useSurrogateDateKeys) {
+					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+				}
 			} else if (field.dimension) {
-				fields.push(`d_${f.replace(/_id$/,'')} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(f)} integer`);
 			}
 			fields.push(`"${f}" ${field.type}`);
 		});
