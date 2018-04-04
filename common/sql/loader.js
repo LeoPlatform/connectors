@@ -1,8 +1,8 @@
 "use strict";
 const logger = require("leo-sdk/lib/logger")("leo.connector.sql");
-const PassThrough = require("stream").PassThrough;
 const async = require("async");
 const leo = require("leo-sdk");
+const lib = require("./loader/lib");
 const ls = leo.streams;
 
 const builder = require("./loaderBuilder.js");
@@ -43,56 +43,17 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 		if (obj.jointable) {
 			submit(push, done);
 		} else if (typeof sql == "function") {
-			function processIdList(idlist) {
-				idlist.forEach(idthing => {
-					if (Array.isArray(idthing)) {
-						findIds = findIds.concat(idthing);
-					} else if (typeof idthing == "string") {
-						tasks.push((done) => {
-							sqlClient.query(idthing, (err, results, fields) => {
-								if (!err) {
-									let firstColumn = fields[0].name;
-									findIds = findIds.concat(results.map(row => row[firstColumn]));
-								}
-								done(err);
-							});
-						});
-					}
-				});
-				async.parallelLimit(tasks, 10, (err, results) => {
-					if (err) {
-						done(err);
-					} else {
-						ids = ids.concat(findIds.filter((e, i, self) => {
-							return ids.indexOf(e) === -1 && self.indexOf(e) === i;
-						}));
-						if (ids.length >= MAX) {
-							submit(push, done);
-						} else {
-							done();
-						}
-					}
-				});
-			}
-			let handledReturn = false;
-			let result = sql.call({
-				hasIds: (a) => {
-					if (a && Array.isArray(a) && a.length) {
-						return true;
-					} else {
-						return false;
-					}
+			lib.processIds(sqlClient, obj, sql, null, (err, newIds) => {
+				if (err) {
+					console.log(err);
 				}
-			}, obj.payload, (err, idlist) => {
-				if (!handledReturn) {
-					if (err) return done(err);
-					processIdList(idlist);
+				ids = ids.concat(newIds);
+				if (ids.length >= MAX) {
+					submit(push, done);
+				} else {
+					done();
 				}
 			});
-			if (result && Array.isArray(result)) {
-				handledReturn = true;
-				processIdList(result);
-			}
 		} else {
 			Object.keys(sql).forEach(key => {
 				if (sql[key] === true && key in obj.payload) {
