@@ -96,7 +96,11 @@ function create(pool) {
 				var values = records.map((r) => {
 					return columns.map(f => r[f]);
 				});
-				client.query(format('INSERT INTO %I (%I) VALUES %L', table, fields, values), function(err) {
+				const formattedQuery = format('INSERT INTO %I (%I) VALUES %L', table, fields, values)
+				if (opts.upsert) {
+					formattedQuery + "ON CONFLICT...."
+				}
+				client.query(formattedQuery, function(err) {
 					if (err) {
 						callback(err);
 					} else {
