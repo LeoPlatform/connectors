@@ -1,7 +1,7 @@
 "use strict";
 
 const refUtil = require('leo-sdk/lib/reference.js');
-const loaderBuilder = require('./sql/loaderBuilder');
+const async = require('async');
 const MAX = 5000;
 
 module.exports = function(event, context, callback, sdk) {
@@ -41,17 +41,6 @@ module.exports = function(event, context, callback, sdk) {
 
 			// do stuff to build the domain objects
 			run: function () {
-				let ls = sdk.streams,
-					stats = ls.stats(event.botId, event.source);
-
-				// setup where we want this pipe to go
-				let end;
-				if (params.devnull) {
-					end = ls.devnull();
-				} else {
-					end = ls.load(event.botId, event.destination);
-				}
-
 				let readParams = {};
 				if (params.start) {
 					readParams.start = params.start;
@@ -64,22 +53,16 @@ module.exports = function(event, context, callback, sdk) {
 
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
-
-							// split ID's up into no more than 5k
-							let loops = Math.ceil(obj[table].length / MAX),
-								ids = [];
-
 							// if the value of any of the tables is a SELECT query, replace __IDS__ with the IDs in obj[table]
 							if (tables[table].match(/^SELECT/)) {
-								for (let i = 0; i < loops; i++) {
-									ids = obj[table].slice(i * MAX, (i * MAX) + MAX);
+								async.doWhilst((done) => {
+									// split the ID's up into no more than 5k for each query
+									let ids = obj[table].splice(0, MAX);
 									objArray.push(tables[table].replace(/\_\_IDS\_\_/, ids.join()));
-								}
+									done();
+								}, () => obj[table].length);
 							} else {
-								for (let i = 0; i < loops; i++) {
-									ids = obj[table].slice(i * MAX, (i * MAX) + MAX);
-									objArray.push([ids.join()]);
-								}
+								objArray.push(obj[table]);
 							}
 						}
 					});
@@ -109,7 +92,6 @@ module.exports = function(event, context, callback, sdk) {
 					start: params.start || null
 				},
 				callback);
-
 			}
 		};
 	};
