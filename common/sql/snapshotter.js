@@ -66,7 +66,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 	}
 	dynamodb.get(tableName, botId, function(err, result) {
 		if (err) {
-			callback(err)
+			callback(err);
 		} else {
 			// reuse an existing bucket key if we’re resuming, otherwise create a new one.
 			let timestamp = moment(result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_timestamp || undefined),
@@ -84,7 +84,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 			});
 			let transform;
 			if (Array.isArray(id)) {
-				transform = loaderJoin(client, id, domain, {
+				transform = loaderJoin(client, id, null, domain, {
 					source: 'snapshot',
 					isSnapshot: true
 				});

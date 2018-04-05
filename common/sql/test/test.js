@@ -19,8 +19,8 @@ describe.only('SQL', function() {
 		const MAX = 24531;
 		async.doWhilst((done) => {
 			if (!stream.write({
-					test: [++count, ++count, ++count]
-				})) {
+				test: [++count, ++count, ++count]
+			})) {
 				stream.once('drain', done);
 			} else {
 				done();
@@ -55,7 +55,7 @@ describe.only('SQL', function() {
 								log.error("Had error", err);
 							}
 							callback(err, result, fields);
-						})
+						});
 					},
 					disconnect: m.end
 				};

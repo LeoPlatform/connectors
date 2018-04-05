@@ -59,8 +59,6 @@ module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 }) {
 	let ids = [];
 
-
-
 	function submit(push, done) {
 		async.doWhilst((done) => {
 			let buildIds = ids.splice(0, MAX);
