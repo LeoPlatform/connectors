@@ -4,9 +4,9 @@ const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
 const MAX = 5000;
 
-module.exports = function(event, context, callback, sdk) {
-	if (!event || !context || !callback || !sdk) {
-		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘callback’, ‘leo-sdk’');
+module.exports = function(event, context, sdk) {
+	if (!event || !context || !sdk) {
+		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘leo-sdk’');
 	}
 
 	/**
@@ -23,13 +23,19 @@ module.exports = function(event, context, callback, sdk) {
 	this.buildDomainObjects = function (params) {
 		params.snapshot = params.snapshot || process.env.snapshot;
 
+		// use the event.connection if it exists and we don't specifically pass in a connection
+		if (!params.connection && event.connection) {
+			params.connection = event.connection;
+		}
+
 		// if we're doing a snapshot, put the table and id into the connection object
 		if (params.snapshot) {
 			params.connection.table = params.table;
 			params.connection.id = params.pk;
 		}
 
-		let tables = {};
+		let tables = {},
+			joins = {};
 
 		return {
 			// Table => primary key || SELECT query to get the primary key
@@ -39,8 +45,20 @@ module.exports = function(event, context, callback, sdk) {
 				return this;
 			},
 
+			joinOneToMany: function(name, pk, query) {
+				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: query};
+
+				return this;
+			},
+
+			joinOneToOne: function(name, pk, query) {
+				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: query};
+
+				return this;
+			},
+
 			// do stuff to build the domain objects
-			run: function () {
+			run: function (callback) {
 				let readParams = {};
 				if (params.start) {
 					readParams.start = params.start;
@@ -53,15 +71,18 @@ module.exports = function(event, context, callback, sdk) {
 
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
+
 							// if the value of any of the tables is a SELECT query, replace __IDS__ with the IDs in obj[table]
 							if (tables[table].match(/^SELECT/)) {
 								async.doWhilst((done) => {
+
 									// split the ID's up into no more than 5k for each query
 									let ids = obj[table].splice(0, MAX);
 									objArray.push(tables[table].replace(/\_\_IDS\_\_/, ids.join()));
 									done();
 								}, () => obj[table].length);
 							} else {
+								// we just have id's. Push them into the object
 								objArray.push(obj[table]);
 							}
 						}
@@ -73,15 +94,15 @@ module.exports = function(event, context, callback, sdk) {
 					let idsList = ids.join();
 					let builderSql = builder(params.pk, params.query(idsList));
 
-					if (params.joins) {
-						params.joins.forEach((join) => {
-							if (join.type === 'one_to_many') {
-								builderSql.joinOneToMany(join.table, join.pk, join.query(idsList), join.transform);
-							} else if (join.type === 'one_to_one') {
-								builderSql.join(join.table, join.pk, join.query(idsList), join.transform);
-							}
-						});
-					}
+					// build the joins
+					Object.keys(joins).forEach((name) => {
+						let join = joins[name];
+						if (join.type === 'one_to_many') {
+							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\_\_IDS\_\_/, idsList), join.transform);
+						} else if (join.type === 'one_to_one') {
+							builderSql.join(join.table, join.pk, join.query.replace(/\_\_IDS\_\_/, idsList), join.transform);
+						}
+					});
 
 					return builderSql;
 				},
@@ -127,7 +148,7 @@ module.exports = function(event, context, callback, sdk) {
 
 				entities.push({
 					"type": "dimension",
-					"entity": name,
+					"table": name,
 					"data": dataTransform
 				});
 
@@ -140,16 +161,15 @@ module.exports = function(event, context, callback, sdk) {
 
 				entities.push({
 					"type": "fact",
-					"entity": name,
+					"table": name,
 					"data": dataTransform
 				});
 
 				return this;
 			},
-			run: function () {
+			run: function (callback) {
 				let i = 0,
-					stats = params.ls.stats(event.botId, event.source),
-					logEvents = params.logEvents || 1000;
+					stats = params.ls.stats(event.botId, event.source);
 
 				let end;
 				if (params.devnull) {
@@ -168,7 +188,7 @@ module.exports = function(event, context, callback, sdk) {
 					// , params.ls.log()
 					, params.ls.through(function (obj, done) {
 						i++;
-						if (i % logEvents === 0) {
+						if (i % params.logEvents === 0) {
 							console.log(i);
 						}
 
@@ -176,11 +196,21 @@ module.exports = function(event, context, callback, sdk) {
 						entities.forEach((entityObj) => {
 							let data = entityObj.data.call(this, obj.payload);
 
-							this.push({
-								"type": entityObj.type,
-								"entity": entityObj.entity,
-								"data": data
-							});
+							if (Array.isArray(data)) {
+								data.forEeach((dataObj) => {
+									this.push({
+										"type": entityObj.type,
+										"entity": entityObj.entity,
+										"data": dataObj
+									});
+								})
+							} else {
+								this.push({
+									"type": entityObj.type,
+									"entity": entityObj.entity,
+									"data": data
+								});
+							}
 						});
 						done();
 					})
@@ -244,7 +274,7 @@ module.exports = function(event, context, callback, sdk) {
 				trackedTables[table] = pk;
 				return this;
 			},
-			run: function() {
+			run: function(callback) {
 				let stream = params.connector.streamChanges(params.connection, trackedTables, {
 					start: start,
 					source: event.source
