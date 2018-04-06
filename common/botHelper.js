@@ -35,7 +35,8 @@ module.exports = function(event, context, sdk) {
 		}
 
 		let tables = {},
-			joins = {};
+			joins = {},
+			sqlQuery;
 
 		return {
 			// Table => primary key || SELECT query to get the primary key
@@ -45,14 +46,18 @@ module.exports = function(event, context, sdk) {
 				return this;
 			},
 
-			joinOneToMany: function(name, pk, query) {
-				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: query};
+			query: function(sql) {
+				sqlQuery = sql;
+			},
+
+			joinOneToMany: function(name, pk, sql) {
+				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: sql};
 
 				return this;
 			},
 
-			joinOneToOne: function(name, pk, query) {
-				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: query};
+			joinOneToOne: function(name, pk, sql) {
+				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: sql};
 
 				return this;
 			},
@@ -92,7 +97,7 @@ module.exports = function(event, context, sdk) {
 				},
 				function (ids, builder) {
 					let idsList = ids.join();
-					let builderSql = builder(params.pk, params.query(idsList));
+					let builderSql = builder(params.pk, sqlQuery(idsList));
 
 					// build the joins
 					Object.keys(joins).forEach((name) => {
