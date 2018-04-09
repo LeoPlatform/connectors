@@ -48,10 +48,6 @@ module.exports = function(event, context, sdk) {
 
 			query: function(sql) {
 				sqlQuery = sql;
-			},
-
-			joinOneToMany: function(name, pk, sql) {
-				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: sql};
 
 				return this;
 			},
@@ -75,7 +71,7 @@ module.exports = function(event, context, sdk) {
 					readParams.start = params.start;
 				}
 
-				params.connector.domainObjectLoader(context.botId || event.botId, params.connection, (obj, done) => {
+				params.connector.domainObjectLoader(event.botId, params.connection, (obj, done) => {
 					let objArray = [];
 
 					Object.keys(tables).forEach((table) => {
@@ -179,13 +175,13 @@ module.exports = function(event, context, sdk) {
 			},
 			run: function (callback) {
 				let i = 0,
-					stats = params.ls.stats(context.botId || event.botId, event.source);
+					stats = params.ls.stats(event.botId, event.source);
 
 				let end;
 				if (params.devnull) {
 					end = params.ls.devnull();
 				} else {
-					end = sdk.load(context.botId || event.botId, event.destination);
+					end = sdk.load(event.botId, event.destination);
 				}
 
 				let readParams = {};
@@ -193,7 +189,7 @@ module.exports = function(event, context, sdk) {
 					readParams.start = params.start;
 				}
 
-				params.ls.pipe(sdk.read(context.botId || event.botId, event.source, readParams)
+				params.ls.pipe(sdk.read(event.botId, event.source, readParams)
 					, stats
 					// , params.ls.log()
 					, params.ls.through(function (obj, done) {
@@ -294,7 +290,7 @@ module.exports = function(event, context, sdk) {
 				if (params.devnull) {
 					end = params.ls.devnull();
 				} else {
-					end = sdk.load(context.botId || event.botId, event.destination);
+					end = sdk.load(event.botId, event.destination);
 				}
 
 				params.ls.pipe(stream,
