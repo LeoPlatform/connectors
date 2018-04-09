@@ -48,6 +48,10 @@ module.exports = function(event, context, sdk) {
 
 			query: function(sql) {
 				sqlQuery = sql;
+			},
+
+			joinOneToMany: function(name, pk, sql) {
+				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: sql};
 
 				return this;
 			},
