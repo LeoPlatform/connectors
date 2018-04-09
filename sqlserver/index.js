@@ -1,6 +1,7 @@
 "use strict";
 const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
+const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const leo = require("leo-sdk");
@@ -12,8 +13,12 @@ const PassThrough = require("stream").PassThrough;
 // 	all: true
 // });
 module.exports = {
-	load: function(config, sql, domain, opts) {
-		return sqlLoader(connect(config), sql, domain, opts);
+	load: function(config, sql, domain, opts, idColumns) {
+		if (Array.isArray(idColumns)) {
+			return sqlLoaderJoin(connect(config), idColumns, sql, domain, opts);
+		} else {
+			return sqlLoader(connect(config), sql, domain, opts);
+		}
 
 		// Possible solution if the above doesn't work correctly. I didn't find the below to work correctly, but don't
 		// want to destroy it we have a change to test another 5k+ records
@@ -86,7 +91,7 @@ module.exports = {
 		} else {
 			let stream = leo.read(bot_id, opts.inQueue, {start: opts.start});
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(stream, this.load(dbConfig, sql, domain), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
+			ls.pipe(stream, this.load(dbConfig, sql, domain, opts, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
 			});
