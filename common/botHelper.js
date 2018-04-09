@@ -48,6 +48,8 @@ module.exports = function(event, context, sdk) {
 
 			query: function(sql) {
 				sqlQuery = sql;
+
+				return this;
 			},
 
 			joinOneToMany: function(name, pk, sql) {
@@ -205,14 +207,14 @@ module.exports = function(event, context, sdk) {
 								data.forEeach((dataObj) => {
 									this.push({
 										"type": entityObj.type,
-										"entity": entityObj.entity,
+										"table": entityObj.table,
 										"data": dataObj
 									});
 								})
-							} else {
+							} else if (Object.keys(data).length) {
 								this.push({
 									"type": entityObj.type,
-									"entity": entityObj.entity,
+									"table": entityObj.table,
 									"data": data
 								});
 							}
