@@ -11,9 +11,11 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	const MAX = 5000;
 	let ids = [];
 	opts = Object.assign({
-		source: "loader",
+		// source: "loader",
 		isSnapshot: false
 	}, opts || {});
+
+	opts.source = opts.source || opts.inQueue || "loader";
 
 	function submit(push, done) {
 		async.doWhilst((done) => {

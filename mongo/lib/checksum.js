@@ -1,7 +1,7 @@
 "use strict";
 var aws = require("aws-sdk");
 const crypto = require('crypto');
-var base = require("leo-connector-common/checksum/index.js");
+var base = require("leo-connector-common/checksum/lib/handler.js");
 var moment = require("moment");
 require("moment-timezone");
 var uuid = require("uuid");
