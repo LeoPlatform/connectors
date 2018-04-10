@@ -27,7 +27,8 @@ module.exports = {
 			let stats = ls.stats(bot_id, opts.inQueue);
 			ls.pipe(leo.read(bot_id, opts.inQueue), stats, this.load(dbConfig, sql, domain, {
 				queue: opts.outQueue,
-				id: bot_id
+				id: bot_id,
+				limit: opts.limit
 			}), ls.toLeo(bot_id), ls.devnull('done'), err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
