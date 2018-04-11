@@ -9,7 +9,7 @@ module.exports = {
 			idlist.forEach(idthing => {
 				if (Array.isArray(idthing)) {
 					ids = ids.concat(idthing);
-				} else if (typeof idthing == "object") {
+				} else if (idthing && typeof idthing == "object") {
 					if (idthing.ids && idthing.ids.length >= 1) {
 						tasks.push((done) => {
 							async.doWhilst((done) => {

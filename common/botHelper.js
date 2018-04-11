@@ -48,6 +48,8 @@ module.exports = function(event, context, sdk) {
 
 			query: function(sql) {
 				sqlQuery = sql;
+
+				return this;
 			},
 
 			joinOneToMany: function(name, pk, sql) {
@@ -73,17 +75,16 @@ module.exports = function(event, context, sdk) {
 					let objArray = [];
 
 					Object.keys(tables).forEach((table) => {
-
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
 
-							// if the value of any of the tables is a SELECT query, replace __IDS__ with the IDs in obj[table]
+							// if the value of any of the tables is a SELECT query, replace ? with the IDs in obj[table]
 							if (tables[table].match(/^SELECT/)) {
 								async.doWhilst((done) => {
 
 									// split the ID's up into no more than 5k for each query
 									let ids = obj[table].splice(0, MAX);
-									objArray.push(tables[table].replace(/\_\_IDS\_\_/, ids.join()));
+									objArray.push(tables[table].replace(/\?/, ids.join()));
 									done();
 								}, () => obj[table].length);
 							} else {
@@ -97,15 +98,15 @@ module.exports = function(event, context, sdk) {
 				},
 				function (ids, builder) {
 					let idsList = ids.join();
-					let builderSql = builder(params.pk, sqlQuery(idsList));
+					let builderSql = builder(params.pk, sqlQuery.replace(/\?/, idsList));
 
 					// build the joins
 					Object.keys(joins).forEach((name) => {
 						let join = joins[name];
 						if (join.type === 'one_to_many') {
-							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\_\_IDS\_\_/, idsList), join.transform);
+							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/, idsList), join.transform);
 						} else if (join.type === 'one_to_one') {
-							builderSql.join(join.table, join.pk, join.query.replace(/\_\_IDS\_\_/, idsList), join.transform);
+							builderSql.join(join.table, join.pk, join.query.replace(/\?/, idsList), join.transform);
 						}
 					});
 
@@ -205,14 +206,14 @@ module.exports = function(event, context, sdk) {
 								data.forEeach((dataObj) => {
 									this.push({
 										"type": entityObj.type,
-										"entity": entityObj.entity,
+										"table": entityObj.table,
 										"data": dataObj
 									});
 								})
-							} else {
+							} else if (Object.keys(data).length) {
 								this.push({
 									"type": entityObj.type,
-									"entity": entityObj.entity,
+									"table": entityObj.table,
 									"data": data
 								});
 							}

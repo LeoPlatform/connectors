@@ -1,17 +1,17 @@
 {
-  "name": "leo-connector-elasticsearch",
-  "version": "1.0.1",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "mocha --recursive -w"
-  },
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "leo-sdk": "^1.0.54",
-    "elasticsearch": "^13.2.0",
-    "http-aws-es": "^4.0.0",
-    "leo-connector-common": "^1.0.5"
-  }
+	"name": "leo-connector-elasticsearch",
+	"version": "1.0.3",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"test": "mocha --recursive -w"
+	},
+	"author": "",
+	"license": "MIT",
+	"dependencies": {
+		"leo-sdk": "^1.0.66",
+		"elasticsearch": "^13.2.0",
+		"http-aws-es": "^4.0.0",
+		"leo-connector-common": "^1.0.14"
+	}
 }

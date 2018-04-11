@@ -8,18 +8,20 @@ const ls = leo.streams;
 const builder = require("./loaderBuilder.js");
 
 module.exports = function(sqlClient, sql, domainObj, opts) {
-	const MAX = 5000;
 	let ids = [];
 	opts = Object.assign({
-		source: "loader",
-		isSnapshot: false
+		// source: "loader",
+		isSnapshot: false,
+		limit: 5000
 	}, opts || {});
+
+	opts.source = opts.source || opts.inQueue || "loader";
 
 	function submit(push, done) {
 		async.doWhilst((done) => {
-			let buildIds = ids.splice(0, MAX);
+			let buildIds = ids.splice(0, opts.limit);
 			buildEntities(buildIds, push, done);
-		}, () => ids.length >= MAX, (err) => {
+		}, () => ids.length >= opts.limit, (err) => {
 			if (err) {
 				done(err);
 			} else {
@@ -47,8 +49,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 				if (err) {
 					console.log(err);
 				}
-				ids = ids.concat(newIds);
-				if (ids.length >= MAX) {
+				ids = ids.concat(newIds.filter((e, i, self) => {
+					return e !== null && ids.indexOf(e) === -1 && self.indexOf(e) === i;
+				}));
+				if (ids.length >= opts.limit) {
 					submit(push, done);
 				} else {
 					done();
@@ -77,9 +81,9 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					done(err);
 				} else {
 					ids = ids.concat(findIds.filter((e, i, self) => {
-						return ids.indexOf(e) === -1 && self.indexOf(e) === i;
+						return e !== null && ids.indexOf(e) === -1 && self.indexOf(e) === i;
 					}));
-					if (ids.length >= MAX) {
+					if (ids.length >= opts.limit) {
 						submit(push, done);
 					} else {
 						done();

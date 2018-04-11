@@ -89,8 +89,8 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 					isSnapshot: true
 				});
 			} else {
-				transform = loader(client, (obj, done) => {
-					console.log("I AM HERE", obj);
+				transform = loader(client, (obj) => {
+					return [obj[table]];
 				}, domain, {
 					source: 'snapshot',
 					isSnapshot: true

@@ -42,7 +42,7 @@ module.exports = function(c) {
 
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query.slice(0, 100));
+			log.info(`SQL query #${queryId} is `, query.slice(0, 300));
 			log.time(`Ran Query #${queryId}`);
 
 			m.query({
@@ -51,7 +51,7 @@ module.exports = function(c) {
 			}, params, function(err, result, fields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.error("Had error #${queryId}", query.slice(0, 100), err);
+					log.error("Had error #${queryId}", query, err);
 				}
 				callback(err, result, fields);
 			});
