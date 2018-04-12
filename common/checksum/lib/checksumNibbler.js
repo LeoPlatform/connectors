@@ -2,6 +2,8 @@
 var async = require("async");
 var createNibbler = require("./nibbler.js");
 
+let logger = require("leo-sdk/lib/logger")("leo-checksum.nibbler");
+
 module.exports = function(local, remote, opts) {
 
 	var nibbler = createNibbler(local, opts);
@@ -13,7 +15,7 @@ module.exports = function(local, remote, opts) {
 		totalExtra: 0,
 		streak: 0,
 	}, (opts || {}).totals);
-	//console.log("START VALUES", data)
+	//logger.log("START VALUES", data)
 
 	// Add extra param to this sync;
 	var sync = nibbler.sync;
@@ -164,7 +166,7 @@ module.exports = function(local, remote, opts) {
 						callback(err);
 						return;
 					}
-					// console.log(JSON.stringify(responses, null, 2));
+					// logger.log(JSON.stringify(responses, null, 2));
 					let localData = responses[0];
 					let remoteData = responses[1];
 					var diffs = [];
@@ -233,8 +235,8 @@ module.exports = function(local, remote, opts) {
 				nibble.progress = data.progress
 			},
 			onEnd: function(err, nibble, callback) {
-				console.log(`Summary`);
-				console.log(`Correct: ${data.totalCorrect}, Incorrect:${data.totalIncorrect}, Missing:${data.totalMissing}, Extra:${data.totalExtra}`);
+				logger.log(`Summary`);
+				logger.log(`Correct: ${data.totalCorrect}, Incorrect:${data.totalIncorrect}, Missing:${data.totalMissing}, Extra:${data.totalExtra}`);
 				callback();
 			},
 			onError: function(err, result, nibble, done) {
@@ -285,9 +287,9 @@ module.exports = function(local, remote, opts) {
 								remote.delete({
 									ids: dataResult.extra
 								}).then(result => {
-									console.log("deleted records")
+									logger.log("deleted records")
 								}, err => {
-									console.log(err);
+									logger.log(err);
 								});
 							}
 

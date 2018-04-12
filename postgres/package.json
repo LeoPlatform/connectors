@@ -1,28 +1,28 @@
 {
-  "name": "leo-connector-postgres",
-  "version": "1.0.5",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "mocha ./test/unit/**/*.test.js",
-    "test:int": "mocha ./test/integration/**/*.test.js"
-  },
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "aws-sdk": "^2.213.1",
-    "fast-csv": "^2.4.1",
-    "leo-connector-common": "^1.0.7",
-    "leo-sdk": "^1.0.64",
-    "pg": "^7.4.1",
-    "pg-copy-streams": "^1.2.0",
-    "pg-format": "^1.0.4",
-    "pg-logical-replication": "^1.0.3"
-  },
-  "devDependencies": {
-    "chai": "^4.1.2",
-    "eslint": "^4.19.1",
-    "mocha": "^5.0.5",
-    "sinon": "^4.4.8"
-  }
+	"name": "leo-connector-postgres",
+	"version": "1.0.5",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"test": "mocha ./test/unit/**/*.test.js",
+		"test:int": "mocha ./test/integration/**/*.test.js"
+	},
+	"author": "",
+	"license": "ISC",
+	"dependencies": {
+		"aws-sdk": "^2.213.1",
+		"fast-csv": "^2.4.1",
+		"leo-connector-common": "^1.0.14",
+		"leo-sdk": "^1.0.66",
+		"pg": "^7.4.1",
+		"pg-copy-streams": "^1.2.0",
+		"pg-format": "^1.0.4",
+		"pg-logical-replication": "^1.0.3"
+	},
+	"devDependencies": {
+		"chai": "^4.1.2",
+		"eslint": "^4.19.1",
+		"mocha": "^5.0.5",
+		"sinon": "^4.4.8"
+	}
 }

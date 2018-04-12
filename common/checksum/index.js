@@ -17,6 +17,7 @@ const ls = leo.streams;
 const async = require("async");
 
 const tableName = leo.configuration.resources.LeoCron;
+let logger = require("leo-sdk/lib/logger")("leo-checksum");
 
 function saveProgress(systemId, botId, data) {
 	return new Promise((resolve, reject) => {
@@ -84,7 +85,7 @@ module.exports = {
 			return saveProgress(systemId, botId, emptySession)
 		} else {
 			return new Promise((resolve, reject) => {
-				console.log("Getting Session", systemId, botId);
+				logger.log("Getting Session", systemId, botId);
 				dynamodb.get(tableName, botId, function(err, result) {
 					if (err) {
 						reject(err)
@@ -113,7 +114,7 @@ module.exports = {
 				}).then(d => reject(err)).catch(e => reject(err));
 			}
 			this.getSession(system, botId, opts).then((session) => {
-				console.log("Session:", session);
+				logger.log("Session:", session);
 				let tasks = [];
 				master.setSession(session);
 				slave.setSession(session);
@@ -132,7 +133,7 @@ module.exports = {
 						opts.end = session.end || opts.end;
 						opts.total = session.total;
 						master.range = (opts) => {
-							console.log("Using Cached Range Value");
+							logger.log("Using Cached Range Value");
 							return Promise.resolve({
 								min: opts.min,
 								max: opts.max,
@@ -153,7 +154,7 @@ module.exports = {
 						loopStart = Date.now();
 						var neededTime = lastLoopDuration * 1.33;
 
-						//console.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
+						//logger.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
 						if (loopStart + neededTime >= opts.stop_at) {
 							return "Out Of Time";
 						} else {
@@ -207,7 +208,7 @@ module.exports = {
 							total: nibble.total,
 							reset: null
 						});
-						// console.log(JSON.stringify(data, null, 2));
+						// logger.log(JSON.stringify(data, null, 2));
 						saveProgress(system, botId, data).then(result => done(null, result), done);
 					};
 
@@ -399,7 +400,7 @@ module.exports = {
 				}
 				return new Promise((resolve, reject) => {
 					var start = moment.now();
-					//console.log("URL:", url)
+					//logger.log("URL:", url)
 					let requestOptions = Object.assign(URL.parse(url), {
 						method: 'POST',
 						headers: {
@@ -437,7 +438,7 @@ module.exports = {
 						})
 					});
 					req.on('error', function(e) {
-						console.log('problem with request: ' + e.message);
+						logger.error('problem with request: ' + e.message);
 						reject(e);
 					});
 
@@ -494,7 +495,7 @@ module.exports = {
 					done();
 				},
 				getChecksum: function(data, callback) {
-					console.log(" BATCH", settings.name, data, rand.batch)
+					logger.log(" BATCH", settings.name, data, rand.batch)
 					callback(null, {
 						qty: data.end - data.start + 1,
 						hash: [1, 2, 3, Math.round(Math.random() * rand.batch)],
@@ -516,11 +517,11 @@ module.exports = {
 							hash: "1-2-3-" + (Math.round(Math.random() * rand.single))
 						})
 					}
-					console.log(" INDIVIDUAL", settings.name, data)
+					logger.log(" INDIVIDUAL", settings.name, data)
 					callback(null, result)
 				},
 				sample: function(data, callback) {
-					console.log(" SAMPLE", settings.name, data);
+					logger.log(" SAMPLE", settings.name, data);
 					var result = {
 						qty: 0,
 						ids: [],
@@ -543,12 +544,12 @@ module.exports = {
 						max: settings.mock.max,
 						total: settings.mock.max - settings.mock.min + 1
 					};
-					console.log(" RANGE", settings.name, data, result)
+					logger.log(" RANGE", settings.name, data, result)
 					callback(null, result);
 				},
 				nibble: function(data, callback) {
 					setTimeout(function() {
-						console.log(" NIBBLE", settings.name, data);
+						logger.log(" NIBBLE", settings.name, data);
 						data.end = Math.min(data.start + data.limit - 1, settings.mock.max);
 						data.next = data.start + data.limit < settings.mock.max ? data.start + data.limit : null;
 						callback(null, data)
@@ -569,13 +570,13 @@ module.exports = {
 			func = func || ((d) => {});
 			return (data) => {
 				return new Promise((resolve, reject) => {
-					//console.log(method, data)
+					//logger.log(method, data)
 					try {
 						let result = func(data);
-						//console.log(`${id} ${method}: ${JSON.stringify(result)}`);
+						//logger.log(`${id} ${method}: ${JSON.stringify(result)}`);
 						resolve(result);
 					} catch (err) {
-						console.log(`${id} ${method} Error: ${err}`);
+						logger.log(`${id} ${method} Error: ${err}`);
 						reject(err);
 					}
 				});
