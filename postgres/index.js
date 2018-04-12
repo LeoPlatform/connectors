@@ -11,7 +11,7 @@ const ls = leo.streams;
 
 const binlogReader = require("./lib/binlogreader");
 module.exports = {
-	load: function(config, sql, domain, idColumns) {
+	load: function(config, sql, domain, idColumns, opts) {
 		if (Array.isArray(idColumns)) {
 			return sqlLoaderJoin(connect(config), idColumns, sql, domain);
 		} else {
@@ -30,13 +30,22 @@ module.exports = {
 				event: opts.outQueue
 			}, callback);
 		} else {
-			let stream = leo.read(bot_id, opts.inQueue);
+			let stream = leo.read(bot_id, opts.inQueue, {
+				start: opts.start
+			});
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(stream, this.load(dbConfig, sql, domain, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
+			let destination = (opts.devnull) ? ls.devnull('here') : leo.load(bot_id, opts.outQueue || dbConfig.table);
+
+			ls.pipe(stream, this.load(dbConfig, sql, domain, dbConfig.id, {
+				queue: opts.outQueue,
+				id: bot_id,
+				limit: opts.limit
+			}), ls.log(), destination, err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
 			});
 		}
 	},
-	streamChanges: binlogReader.stream
+	streamChanges: binlogReader.stream,
+	connect: connect
 };
