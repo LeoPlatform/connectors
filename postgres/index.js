@@ -12,14 +12,7 @@ const ls = leo.streams;
 
 const binlogReader = require("./lib/binlogreader");
 module.exports = {
-	query: function(config, sql, params) {
-		const client = connect(config);
-		const results = new Promise((resolve, reject)=> {
-			client.query(sql, params, (err, queryResults) => err ? reject(err) : resolve(queryResults));
-		});
-		return { results, client };
-	},
-	load: function(config, sql, domain, idColumns) {
+	load: function(config, sql, domain, idColumns, opts) {
 		if (Array.isArray(idColumns)) {
 			return sqlLoaderJoin(connect(config), idColumns, sql, domain);
 		} else {
@@ -38,15 +31,24 @@ module.exports = {
 				event: opts.outQueue
 			}, callback);
 		} else {
-			let stream = leo.read(bot_id, opts.inQueue);
+			let stream = leo.read(bot_id, opts.inQueue, {
+				start: opts.start
+			});
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(stream, this.load(dbConfig, sql, domain, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
+			let destination = (opts.devnull) ? ls.devnull('here') : leo.load(bot_id, opts.outQueue || dbConfig.table);
+
+			ls.pipe(stream, this.load(dbConfig, sql, domain, dbConfig.id, {
+				queue: opts.outQueue,
+				id: bot_id,
+				limit: opts.limit
+			}), ls.log(), destination, err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
 			});
 		}
 	},
 	streamChanges: binlogReader.stream,
+	connect: connect,
 	checksum: function(config, fieldsTable) {
 		return checksum(connect(config), fieldsTable);
 	}
