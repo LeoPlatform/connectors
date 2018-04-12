@@ -97,9 +97,9 @@ function create(pool) {
 				var values = records.map((r) => {
 					return columns.map(f => r[f]);
 				});
-				const formattedQuery = format('INSERT INTO %I (%I) VALUES %L', table, fields, values)
+				const formattedQuery = format('INSERT INTO %I (%I) VALUES %L', table, fields, values);
 				if (opts.upsert) {
-					formattedQuery + "ON CONFLICT...."
+					formattedQuery + "ON CONFLICT....";
 				}
 				client.query(formattedQuery, function(err) {
 					if (err) {
@@ -115,6 +115,14 @@ function create(pool) {
 			});
 		},
 		streamToTable: function(table /*, opts*/ ) {
+			const ts = table.split('.');
+			let schema = 'public';
+			let shortTable = table;
+			if (ts.length > 1) {
+				schema = ts[0];
+				shortTable = ts[1];
+			}
+					
 			// opts = Object.assign({
 			// 	records: 10000
 			// }, opts || {});
@@ -123,10 +131,10 @@ function create(pool) {
 			let myClient = null;
 			let pending = null;
 			pool.connect().then(c => {
-				client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+				client.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = $2 AND table_name = $1 order by ordinal_position asc`, [shortTable, schema], (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
-
+					console.log("TABLE", table);
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
 					stream.on("error", function(err) {
 						console.log(err);
@@ -321,4 +329,4 @@ function create(pool) {
 		}
 	};
 	return client;
-};
+}
