@@ -73,7 +73,10 @@ module.exports = {
 					obj.eid = eid;
 					obj.payload[r.tableName].push(r.id);
 				});
-				stream.write(obj);
+
+				if (obj.correlation_id.units > 0) {
+					stream.write(obj);
+				}
 			} else {
 				console.log(err);
 			}
