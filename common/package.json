@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"async": "^2.6.0",
+		"aws-sdk": "^2.224.1",
 		"leo-sdk": "^1.0.66"
 	}
 }
