@@ -37,11 +37,11 @@ module.exports = {
 			let stats = ls.stats(bot_id, opts.inQueue);
 			let destination = (opts.devnull) ? ls.devnull('here') : leo.load(bot_id, opts.outQueue || dbConfig.table);
 
-			ls.pipe(stream, this.load(dbConfig, sql, domain, dbConfig.id, {
+			ls.pipe(stream, stats, this.load(dbConfig, sql, domain, dbConfig.id, {
 				queue: opts.outQueue,
 				id: bot_id,
 				limit: opts.limit
-			}), ls.log(), destination, err => {
+			}), destination, err => {
 				if (err) return callback(err);
 				return stats.checkpoint(callback);
 			});
