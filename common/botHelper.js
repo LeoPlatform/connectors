@@ -155,7 +155,6 @@ module.exports = function(event, context, sdk) {
 				entities.push({
 					"type": "dimension",
 					"table": name,
-					"entity": name, // added for backwards compatibility
 					"data": dataTransform
 				});
 
