@@ -85,10 +85,7 @@ function create(pool) {
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000,
-				passThrough: false
-			}, opts || {});
-			opts = Object.assign({
-				records: 10000,
+				passThrough: false,
 				useReplaceInto: false,
 				useOnDuplicateUpdate: false
 			}, opts || {});
@@ -161,13 +158,13 @@ function create(pool) {
 				var values = records.map((r, i) => {
 					Object.keys(uniqueKeys).forEach(constraint => {
 						toRemoveRecords[constraint].push(
-							uniqueKeys[constraint].map(f => r[f])
+							uniqueKeys[constraint].map(f => r.d[f])
 						);
 					});
 					if (opts.onInsert && primaryKey.length) {
-						primaryKeyLists.push(primaryKey.map(f => r[f]));
+						primaryKeyLists.push(primaryKey.map(f => r.d[f]));
 					}
-					return columns.map(f => r[f]);
+					return { action: r.a, data: columns.map(f => r.d[f]) };
 				});
 				let cmd = 'INSERT INTO %I (%I) VALUES %L';
 				if (opts.useOnDuplicateUpdate && primaryKey.length) {
@@ -175,8 +172,30 @@ function create(pool) {
 						${f} = EXCLUDED.${f}
 					`);
 				}
-				let insertQuery = format(cmd, table, columns, values, columns);
-				client.query(insertQuery, function(err) {
+				// Dedupe values by PK (take last)
+				const latestValues = values.reverse().filter((value, index, self) =>
+					index === self.findIndex((v) => { 
+						return primaryKey.every(pk => { 
+							return v.data[columns.indexOf(pk)] === value.data[columns.indexOf(pk)];
+						});
+					})
+				);
+				// Handle DELETE
+				const insertValues = latestValues.reduce((accumulator, current)=> {
+					return current.action === 'DELETE'
+						? accumulator
+						: [...accumulator, current.data];
+				},[]);
+				const deleteValues = latestValues.reduce((accumulator, current)=> {
+					return current.action === 'DELETE'
+						? [...accumulator, current.data]
+						: accumulator;
+				},[]);
+				const insertQuery = format(cmd, table, columns, insertValues, columns);
+				const deleteQuery = format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, columns, deleteValues);
+				const sql = ((insertValues.length > 0) ? insertQuery + ';' : '') + ((deleteValues.length > 0)? deleteQuery + ';' : '');
+
+				client.query(sql, function(err, result) {
 					if (err) {
 						let tasks = [];
 						tasks.push(done => client.query("BEGIN", done));
