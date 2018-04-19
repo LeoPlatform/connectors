@@ -84,7 +84,7 @@ module.exports = function(event, context, sdk) {
 
 									// split the ID's up into no more than 5k for each query
 									let ids = obj[table].splice(0, MAX);
-									objArray.push(tables[table].replace(/\?/, ids.join()));
+									objArray.push(tables[table].replace(/\?/g, ids.join()));
 									done();
 								}, () => obj[table].length);
 							} else {
@@ -98,15 +98,15 @@ module.exports = function(event, context, sdk) {
 				},
 				function (ids, builder) {
 					let idsList = ids.join();
-					let builderSql = builder(params.pk, sqlQuery.replace(/\?/, idsList));
+					let builderSql = builder(params.pk, sqlQuery.replace(/\?/g, idsList));
 
 					// build the joins
 					Object.keys(joins).forEach((name) => {
 						let join = joins[name];
 						if (join.type === 'one_to_many') {
-							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/, idsList), join.transform);
+							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
 						} else if (join.type === 'one_to_one') {
-							builderSql.join(join.table, join.pk, join.query.replace(/\?/, idsList), join.transform);
+							builderSql.join(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
 						}
 					});
 
