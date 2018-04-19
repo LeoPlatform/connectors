@@ -62,7 +62,9 @@ function create(pool) {
 			}, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
-					log.error(`Had error #${queryId}`, err, query);
+					if (!opts.allowError) {
+						log.error(`Had error #${queryId}`, err, query);
+					}
 					callback(err);
 				} else {
 					callback(null, result.rows, result.fields);
@@ -80,28 +82,141 @@ function create(pool) {
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
 		},
-		streamToTableBatch: function(table, fields, opts) {
+		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
 			}, opts || {});
-			let fieldColumnLookup = fields.reduce((lookups, f, index) => {
-				lookups[f.toLowerCase()] = index;
-				return lookups;
-			}, {});
-			let columns = Object.keys(fieldColumnLookup);
+			opts = Object.assign({
+				records: 10000,
+				useReplaceInto: false,
+				useOnDuplicateUpdate: false
+			}, opts || {});
+			let pending = null;
+			let columns = [];
+			let ready = false;
+			let total = 0;
+
+			let primaryKey = [];
+			let uniqueKeys = {};
+			let uniqueLookup = {};
+
+
+			client.query(`select c.column_name, pk.constraint_name, pk.constraint_type
+					FROM information_schema.columns c
+					LEFT JOIN (SELECT kc.column_name, kc.constraint_name, tc.constraint_type
+  						FROM information_schema.key_column_usage kc
+  						JOIN information_schema.table_constraints tc on kc.table_name = tc.table_name and kc.table_schema = tc.table_schema and kc.constraint_name = tc.constraint_name
+  						WHERE tc.table_name = $1
+    						and tc.table_schema = 'public'
+						) pk on pk.column_name = c.column_name
+					WHERE 
+   					c.table_name = $1 and c.table_schema = 'public';
+			`, [table], (err, results) => {
+				columns = results.map(r => {
+					if (r.constraint_type) {
+						if (r.constraint_type.toLowerCase() == "primary key") {
+							primaryKey.push(r.column_name);
+						}
+						if (r.constraint_type.toLowerCase() == "unique") {
+							if (!(r.constraint_name in uniqueKeys)) {
+								uniqueKeys[r.constraint_name] = [];
+							}
+							if (!(r.column_name in uniqueLookup)) {
+								uniqueLookup[r.column_name] = [];
+							}
+							uniqueKeys[r.constraint_name].push(r.column_name);
+							uniqueLookup[r.column_name].push(r.constraint_name);
+						}
+					}
+					return r.column_name;
+				}).filter((v, i, self) => {
+					return self.indexOf(v) === i;
+				});
+				ready = true;
+				if (pending) {
+					pending();
+				}
+			});
 			return ls.bufferBackoff((obj, done) => {
-				done(null, obj, 1, 1);
+				if (!ready) {
+					pending = () => {
+						done(null, obj, 1, 1);
+					};
+				} else {
+					done(null, obj, 1, 1);
+				}
 			}, (records, callback) => {
-				console.log("Inserting " + records.length + " records");
-				var values = records.map((r) => {
+				if (opts.useReplaceInto) {
+					console.log("Replace Inserting " + records.length + " records of ", total);
+				} else {
+					console.log("Inserting " + records.length + " records of ", total);
+				}
+				total += records.length;
+				let primaryKeyLists = [];
+				let toRemoveRecords = {};
+				Object.keys(uniqueKeys).forEach(constraint => {
+					toRemoveRecords[constraint] = [];
+				});
+				var values = records.map((r, i) => {
+					Object.keys(uniqueKeys).forEach(constraint => {
+						toRemoveRecords[constraint].push(
+							uniqueKeys[constraint].map(f => r[f])
+						);
+					});
+					if (opts.onInsert && primaryKey.length) {
+						primaryKeyLists.push(primaryKey.map(f => r[f]));
+					}
 					return columns.map(f => r[f]);
 				});
-				client.query(format('INSERT INTO %I (%I) VALUES %L', table, fields, values), function(err) {
+				let cmd = 'INSERT INTO %I (%I) VALUES %L';
+				if (opts.useOnDuplicateUpdate && primaryKey.length) {
+					cmd += ` ON CONFLICT (${primaryKey.join(',')}) DO UPDATE SET ` + columns.map(f => `
+						${f} = EXCLUDED.${f}
+					`);
+				}
+				let insertQuery = format(cmd, table, columns, values, columns, );
+				client.query(insertQuery, function(err) {
 					if (err) {
-						callback(err);
+						let tasks = [];
+						tasks.push(done => client.query("BEGIN", done));
+						tasks.push(done => client.query(format("ALTER TABLE %I DISABLE TRIGGER ALL", table), done));
+						Object.keys(uniqueKeys).forEach(constraint => {
+							tasks.push(done => {
+								//Let's delete the offending records and try again
+								client.query(format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, uniqueKeys[constraint], toRemoveRecords[constraint]), done);
+							});
+						});
+						async.series(tasks, err => {
+							if (err) {
+								callback(err);
+							} else {
+								client.query(insertQuery, function(err) {
+									if (err) {
+										callback(err);
+									} else {
+										client.query("COMMIT", err => {
+											if (err) {
+												console.log(err);
+												callback(err);
+											} else {
+												if (opts.onInsert) {
+													opts.onInsert(primaryKeyLists);
+												}
+												callback(null, []);
+											}
+										});
+									}
+								});
+							}
+						});
 					} else {
+						if (opts.onInsert) {
+							opts.onInsert(primaryKeyLists);
+						}
 						callback(null, []);
 					}
+				}, {
+					// allowError: true
 				});
 			}, {
 				failAfter: 2
