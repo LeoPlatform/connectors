@@ -8,8 +8,8 @@ const async = require('async');
 
 // require("leo-sdk/lib/logger").configure(true);
 
-var copyFrom = require('pg-copy-streams').from;
-let csv = require('fast-csv');
+const copyFrom = require('pg-copy-streams').from;
+const csv = require('fast-csv');
 // var TIMESTAMP_OID = 1114;
 
 require('pg').types.setTypeParser(1114, (val) => {
@@ -19,26 +19,36 @@ require('pg').types.setTypeParser(1114, (val) => {
 });
 
 
-let ls = require("leo-sdk").streams;
+const ls = require("leo-sdk").streams;
+const clients = {};
 
 let queryCount = 0;
 module.exports = function(config) {
-	const pool = new Pool(Object.assign({
+	const defaultedConfig = Object.assign({
 		user: 'root',
 		host: 'localhost',
 		database: 'test',
 		password: 'a',
 		port: 5432,
-	}, config));
+	}, config);
 
-	return create(pool);
+	const connectionHash = JSON.stringify(defaultedConfig);
+	if (!(connectionHash in clients) || typeof clients[connectionHash] === 'undefined') {
+		console.log("CREATING NEW POSTGRES CLIENT");
+		clients[connectionHash] = create(connectionHash, new Pool(defaultedConfig));
+	} else {
+		console.log("REUSING POSTGRES CLIENT");
+	}
+
+	return clients[connectionHash];
 };
 
-function create(pool) {
+function create(hash, pool) {
+	const connectionHash = hash;
 	let client = {
 		connect: function() {
 			return pool.connect().then(c => {
-				return create(c);
+				return create(connectionHash, c);
 			});
 		},
 		query: function(query, params, callback, opts = {}) {
@@ -71,8 +81,14 @@ function create(pool) {
 				}
 			});
 		},
-		disconnect: pool.end.bind(pool),
-		end: pool.end.bind(pool),
+		disconnect: function() {
+			clients[connectionHash] = undefined;
+			return pool.end();
+		},
+		end: function(callback) {
+			clients[connectionHash] = undefined;
+			return pool.end(callback);
+		},
 		release: pool.release && pool.release.bind(pool),
 		describeTable: function(table, callback) {
 			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
