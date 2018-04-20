@@ -1,7 +1,7 @@
 "use strict";
 const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
-const sqlLoaderJoin = require("leo-connector-common/sql/loaderJoinTable.js");
+const sqlLoaderJoin = require("leo-connector-common/sql/loaderJoinTable");
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const sqlSnapshotter = require("leo-connector-common/sql/snapshotter");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
@@ -14,9 +14,9 @@ const binlogReader = require("./lib/binlogreader");
 module.exports = {
 	load: function(config, sql, domain, idColumns, opts) {
 		if (Array.isArray(idColumns)) {
-			return sqlLoaderJoin(connect(config), idColumns, sql, domain);
+			return sqlLoaderJoin(connect(config), idColumns, sql, domain, opts);
 		} else {
-			return sqlLoader(connect(config), sql, domain);
+			return sqlLoader(connect(config), sql, domain, opts);
 		}
 	},
 	nibble: function(config, table, id, opts) {
@@ -38,6 +38,7 @@ module.exports = {
 			let destination = (opts.devnull) ? ls.devnull('here') : leo.load(bot_id, opts.outQueue || dbConfig.table);
 
 			ls.pipe(stream, stats, this.load(dbConfig, sql, domain, dbConfig.id, {
+				source: opts.inQueue,
 				queue: opts.outQueue,
 				id: bot_id,
 				limit: opts.limit

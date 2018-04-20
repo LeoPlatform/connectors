@@ -110,6 +110,7 @@ function create(pool) {
 					WHERE 
    					c.table_name = $1 and c.table_schema = 'public';
 			`, [table], (err, results) => {
+				if (err) throw err;
 				columns = results.map(r => {
 					if (r.constraint_type) {
 						if (r.constraint_type.toLowerCase() == "primary key") {

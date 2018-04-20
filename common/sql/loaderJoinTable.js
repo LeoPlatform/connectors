@@ -235,22 +235,21 @@ module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 			});
 
 		});
+		function getId(o) {
+			if (Array.isArray(idKeys)) {
+				return {
+					[idKeys[0]]: o[idKeys[0]],
+					[idKeys[1]]: o[idKeys[1]]
+				};
+			} else {
+				return o[idKeys];
+			}
+		}
 		async.parallelLimit(tasks, 5, (err) => {
 			if (err) {
 				callback(err);
 			} else {
 				let ids = Object.keys(domains);
-
-				function getId(o) {
-					if (Array.isArray(idKeys)) {
-						return {
-							[idKeys[0]]: o[idKeys[0]],
-							[idKeys[1]]: o[idKeys[1]]
-						};
-					} else {
-						return o[idKeys];
-					}
-				}
 
 				ids.forEach((id, i) => {
 					// skip the domain if there is no data with it
