@@ -19,9 +19,16 @@ module.exports = function(tableIds, opts) {
 	let dateFormat = opts.dateFormat;
 
 	return ls.through((obj, done) => {
+		count++;
+		if (count % 10000 == 0) {
+			console.log(count);
+		}
 		let payload = obj.payload;
-
 		let table = transform.parseTable(payload);
+		if (table == undefined) {
+			return done(null);
+		}
+
 		let values = transform.parseValues(payload.data, dateFormat);
 
 		let stream = streams[table];
@@ -36,10 +43,6 @@ module.exports = function(tableIds, opts) {
 			};
 		}
 		Object.keys(values).forEach(f => stream.fields[f] = 1);
-		count++;
-		if (count % 10000 == 0) {
-			console.log(count);
-		}
 		let id = crypto.createHash('md5');
 		id.update(tableIds[table].map(f => values[f]).join(','));
 
