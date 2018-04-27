@@ -32,7 +32,7 @@ module.exports = function(config) {
 		port: 5432,
 	}, config, {
 		max: 15
-	}));
+	});
 
 	const connectionHash = JSON.stringify(defaultedConfig);
 	if (!(connectionHash in clients) || typeof clients[connectionHash] === 'undefined') {
@@ -99,24 +99,26 @@ function create(hash, pool, parentCache) {
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
-		describeTable: function(table, callback) {
-			if (cache.schema[table]) {
-				logger.info(`Table "${table}" schema from cache`, cache.timestamp);
-				callback(null, cache.schema[table] || []);
+		describeTable: function(table, callback, tableSchema = 'public') {
+			const tblSch = `${tableSchema}.${table}`;
+			if (cache.schema[tblSch]) {
+				logger.info(`Table "${tblSch}" schema from cache`, cache.timestamp);
+				callback(null, cache.schema[tblSch] || []);
 			} else {
 				this.describeTables((err, schema) => {
-					callback(err, schema && schema[table] || []);
-				});
+					callback(err, schema && schema[tblSch] || []);
+				}, tableSchema);
 			}
 		},
-		describeTables: function(callback) {
-			client.query("SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' order by ordinal_position asc", (err, result) => {
+		describeTables: function(callback, tableSchema = 'public') {
+			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(r => {
-					if (!(r.table_name in schema)) {
-						schema[r.table_name] = [];
+					const tblSch = `${tableSchema}.${r}`;
+					if (!(tblSch in schema)) {
+						schema[tblSch] = [];
 					}
-					schema[r.table_name].push(r);
+					schema[tblSch].push(r);
 				});
 				cache.schema = schema;
 				cache.timestamp = Date.now();
@@ -310,7 +312,7 @@ function create(hash, pool, parentCache) {
 			let myClient = null;
 			let pending = null;
 			pool.connect().then(c => {
-				client.describeTable([shortTable, schema], (err, result) => {
+				client.describeTable(shortTable, (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
 					console.log("TABLE", table);
@@ -322,7 +324,7 @@ function create(hash, pool, parentCache) {
 					if (pending) {
 						pending();
 					}
-				});
+				}, schema);
 			}, err => {
 				console.log(err);
 			});
