@@ -321,19 +321,19 @@ module.exports = function(config, columnConfig) {
 
 			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
-					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
 				}
 			} else if (field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
 				}
 			} else if (field.dimension == "time" || field.dimension == "dim_time") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(f)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(f, field)} integer`);
 			}
 			fields.push(`"${f}" ${field.type}`);
 		});
@@ -381,19 +381,19 @@ module.exports = function(config, columnConfig) {
 
 			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
-					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
 				}
 			} else if (field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
 				}
 			} else if (field.dimension == "time" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
+					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(f)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(f, field)} integer`);
 			}
 			fields.push(`"${f}" ${field.type}`);
 		});
