@@ -30,7 +30,9 @@ module.exports = function(config) {
 		database: 'test',
 		password: 'a',
 		port: 5432,
-	}, config);
+	}, config, {
+		max: 15
+	}));
 
 	const connectionHash = JSON.stringify(defaultedConfig);
 	if (!(connectionHash in clients) || typeof clients[connectionHash] === 'undefined') {
@@ -43,12 +45,17 @@ module.exports = function(config) {
 	return clients[connectionHash];
 };
 
-function create(hash, pool) {
+function create(hash, pool, parentCache) {
 	const connectionHash = hash;
+	let cache = {
+		schema: Object.assign({}, parentCache && parentCache.schema || {}),
+		timestamp: parentCache && parentCache.timestamp || null
+	};
 	let client = {
-		connect: function() {
+		connect: function(opts) {
+			opts = opts || {};
 			return pool.connect().then(c => {
-				return create(connectionHash, c);
+				return create(connectionHash, c, opts.type == "isolated" ? {} : cache);
 			});
 		},
 		query: function(query, params, callback, opts = {}) {
@@ -89,11 +96,36 @@ function create(hash, pool) {
 			clients[connectionHash] = undefined;
 			return pool.end(callback);
 		},
-		release: pool.release && pool.release.bind(pool),
+		release: (destroy) => {
+			pool.release && pool.release(destroy);
+		},
 		describeTable: function(table, callback) {
-			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-				callback(err, result);
+			if (cache.schema[table]) {
+				logger.info(`Table "${table}" schema from cache`, cache.timestamp);
+				callback(null, cache.schema[table] || []);
+			} else {
+				this.describeTables((err, schema) => {
+					callback(err, schema && schema[table] || []);
+				});
+			}
+		},
+		describeTables: function(callback) {
+			client.query("SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' order by ordinal_position asc", (err, result) => {
+				let schema = {};
+				result && result.map(r => {
+					if (!(r.table_name in schema)) {
+						schema[r.table_name] = [];
+					}
+					schema[r.table_name].push(r);
+				});
+				cache.schema = schema;
+				cache.timestamp = Date.now();
+				logger.info("Caching Schema Table", cache.timestamp);
+				callback(err, cache.schema);
 			});
+		},
+		getSchemaCache: function() {
+			return cache.schema || {};
 		},
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
@@ -278,7 +310,7 @@ function create(hash, pool) {
 			let myClient = null;
 			let pending = null;
 			pool.connect().then(c => {
-				client.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = $2 AND table_name = $1 order by ordinal_position asc`, [shortTable, schema], (err, result) => {
+				client.describeTable([shortTable, schema], (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
 					console.log("TABLE", table);
@@ -328,7 +360,7 @@ function create(hash, pool) {
 				}
 			}, (done, push) => {
 				stream.on('end', () => {
-					myClient.end();
+					myClient.release(true);
 					done();
 				});
 				stream.end();

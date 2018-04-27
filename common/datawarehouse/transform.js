@@ -5,10 +5,17 @@ module.exports = {
 		if (obj.table) {
 			return obj.table;
 		} else if (obj.type) {
-			if (obj.type == "fact") {
-				return "f_" + obj.entity.toLowerCase().replace(/\s/g, '_');
-			} else {
-				return "d_" + obj.entity.toLowerCase().replace(/\s/g, '_');
+			try {
+				if (obj.type == "fact" && obj.entity) {
+					return "f_" + obj.entity.toLowerCase().replace(/\s/g, '_');
+				} else if (obj.entity) {
+					return "d_" + obj.entity.toLowerCase().replace(/\s/g, '_');
+				} else {
+					return null;
+				}
+			} catch (e) {
+				console.log("Invalid Table to Parse", obj);
+				return null;
 			}
 		} else {
 			return null;
