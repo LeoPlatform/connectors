@@ -1,7 +1,7 @@
 "use strict";
-var uuid = require("uuid");
-var base = require("leo-connector-common/checksum/lib/handler.js");
-var moment = require("moment");
+let uuid = require("uuid");
+let base = require("leo-connector-common/checksum/lib/handler.js");
+let moment = require("moment");
 
 let fieldTypes = {
 	BIT: 16,
@@ -51,35 +51,31 @@ module.exports = function(connection) {
 		initialize: initialize,
 		destroy: destroy,
 		delete: del
-	})
+	});
 
-
-	function getConnection(settings) {
+	function getConnection() {
 		return connection;
 	}
 
 	function batch(event, callback) {
-		var startTime = moment.now();
+		let startTime = moment.now();
 
-		var data = event.data;
-		var settings = event.settings;
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings;
+		let connection = getConnection(settings);
 
 		getFields(connection, event).then((table) => {
-			var fieldCalcs = table.fieldCalcs;
-			var batchQuery = `
-		select count(*) as count,
-		sum(truncate(conv(substring(hash, 1, 8), 16, 10), 0)) as sum1,
-		sum(truncate(conv(substring(hash, 9, 8), 16, 10), 0)) as sum2,
-		sum(truncate(conv(substring(hash, 17, 8), 16, 10), 0)) as sum3,
-		sum(truncate(conv(substring(hash, 25, 8), 16, 10), 0)) as sum4
-		from (
-			select md5(concat(${fieldCalcs.join(', ')})) as hash
+			let fieldCalcs = table.fieldCalcs;
+			let batchQuery = `select count(*) as count,
+				sum(truncate(conv(substring(hash, 1, 8), 16, 10), 0)) as sum1,
+				sum(truncate(conv(substring(hash, 9, 8), 16, 10), 0)) as sum2,
+				sum(truncate(conv(substring(hash, 17, 8), 16, 10), 0)) as sum3,
+				sum(truncate(conv(substring(hash, 25, 8), 16, 10), 0)) as sum4
 			from (
-        ${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}
-      ) i
-		) as t
-		`;
+				select md5(concat(${fieldCalcs.join(', ')})) as hash
+				from (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i
+			) as t`;
+
 			console.log("Batch Query", batchQuery);
 			connection.query(batchQuery, (err, rows) => {
 				if (err) {
@@ -96,32 +92,27 @@ module.exports = function(connection) {
 					});
 				}
 			});
-		}).catch(callback); //.then(() => connection.end());
+		}).catch(callback);
 	}
 
 	function individual(event, callback) {
 
-		//console.log("Calling Individual");
-		var data = event.data;
-		var settings = event.settings
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings
+		let connection = getConnection(settings);
 
 		getFields(connection, event).then((table) => {
-			var fieldCalcs = table.fieldCalcs;
-			var individualQuery = `
-      select ${settings.id_column} as id, md5(concat(${fieldCalcs.join(', ')})) as hash
-      from (
-        ${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}
-      ) i
-		`;
+			let fieldCalcs = table.fieldCalcs;
+			let individualQuery = `select ${settings.id_column} as id, md5(concat(${fieldCalcs.join(', ')})) as hash
+				from (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i`;
+
 			console.log("Individual Query", individualQuery);
 			connection.query(individualQuery, (err, rows) => {
-				//connection.end();
 				if (err) {
 					console.log("Individual Checksum Error", err);
 					callback(err);
 				} else {
-					var results = {
+					let results = {
 						ids: data.ids,
 						start: data.start,
 						end: data.end,
@@ -137,56 +128,51 @@ module.exports = function(connection) {
 					callback(null, results);
 				}
 			});
-		}).catch(callback); //.then(() => connection.end());
+		}).catch(callback);
 	}
 
 	function del(event, callback) {
 
-		//console.log("Calling Sample", event);
-		var data = event.data;
-		var settings = event.settings
-		var tableName = getTable(event);
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings;
+		let tableName = getTable(event);
+		let connection = getConnection(settings);
 
 		getFields(connection, event).then((table) => {
-			var fields = table.fields;
-			var delQuery = `
-    delete from ${tableName}
-      where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`;
+			let delQuery = `delete from ${tableName}
+				where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`;
 
 			console.log("Delete Query", delQuery);
-			connection.query(delQuery, (err, rows) => {
+			connection.query(delQuery, (err) => {
 				if (err) {
-					console.log("Delete Error", err)
+					console.log("Delete Error", err);
 					callback(err);
 					return;
 				}
-				var results = {
-					ids: data.ids,
+				let results = {
+					ids: data.ids
 				};
 				callback(null, results);
 			});
-		}).catch(callback); //.then(() => connection.end());
+		}).catch(callback);
 	}
 
 	function sample(event, callback) {
 
-		//console.log("Calling Sample", event);
-		var data = event.data;
-		var settings = event.settings
-		var tableName = getTable(event);
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings;
+		let connection = getConnection(settings);
 
 		getFields(connection, event).then((table) => {
-			var sampleQuery = table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings));
+			let sampleQuery = table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings));
 			console.log("Sample Query", sampleQuery);
 			connection.query(sampleQuery, (err, rows) => {
 				if (err) {
-					console.log("Sample Error", err)
+					console.log("Sample Error", err);
 					callback(err);
 					return;
 				}
-				var results = {
+				let results = {
 					ids: data.ids,
 					start: data.start,
 					end: data.end,
@@ -199,19 +185,18 @@ module.exports = function(connection) {
 				};
 				callback(null, results);
 			});
-		}).catch(callback); //.then(() => connection.end());
+		}).catch(callback);
 	}
 
 	function range(event, callback) {
-		//console.log("Calling Range", event);
 
-		var data = event.data;
-		var settings = event.settings;
-		var tableName = getTable(event);
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings;
+		let tableName = getTable(event);
+		let connection = getConnection(settings);
 
-		var where = [];
-		var whereStatement = "";
+		let where = [];
+		let whereStatement = "";
 		if (data.min) {
 			where.push(`${settings.id_column} >= ${escape(data.min)}`);
 		}
@@ -221,7 +206,7 @@ module.exports = function(connection) {
 		if (where.length) {
 			whereStatement = ` where ${where.join(" and ")} `;
 		}
-		var query = `select MIN(${settings.id_column}) as min, MAX(${settings.id_column}) as max, count(${settings.id_column}) total from ${tableName}${whereStatement}`;
+		let query = `select MIN(${settings.id_column}) as min, MAX(${settings.id_column}) as max, count(${settings.id_column}) total from ${tableName}${whereStatement}`;
 		console.log(`Range Query: ${query}`);
 		connection.query(query, (err, result) => {
 			if (err) {
@@ -233,25 +218,23 @@ module.exports = function(connection) {
 					max: result[0].max,
 					total: result[0].total
 				});
-
 			}
 		});
 	}
 
 	function nibble(event, callback) {
 
-		var data = event.data;
-		var settings = event.settings;
-		var tableName = getTable(event);
-		var connection = getConnection(settings);
+		let data = event.data;
+		let settings = event.settings;
+		let tableName = getTable(event);
+		let connection = getConnection(settings);
 
-		var query = `
-		select ${settings.id_column} as id from ${tableName} force key(${settings.key_column || settings.id_column})
-		where id >= ${escape(data.start)} and id <= ${escape(data.end)}
-		order by id ${!data.reverse ? "asc":"desc"}
-		limit 2
-		offset ${data.limit - 1}
-	`;
+		let query = `select ${settings.id_column} as id from ${tableName} force key(${settings.key_column || settings.id_column})
+			where id >= ${escape(data.start)} and id <= ${escape(data.end)}
+			order by id ${!data.reverse ? "asc":"desc"}
+			limit 2
+			offset ${data.limit - 1}`;
+
 		console.log(`Nibble Query: ${query}`);
 		connection.query(query, (err, rows) => {
 			if (err) {
@@ -267,15 +250,15 @@ module.exports = function(connection) {
 
 	function initialize(event, callback) {
 		// Generate session data
-		var session = {
+		let session = {
 			id: uuid.v4()
 		};
 		if (typeof event.settings.table == "object" && event.settings.table.sql) {
 			session.table = `${event.settings.table.name || 'leo_chk'}_${moment.now()}`;
 
-			console.log("Table", session.table)
+			console.log("Table", session.table);
 
-			var connection = getConnection(event.settings);
+			let connection = getConnection(event.settings);
 			connection.query(`create table ${session.table} (${event.settings.table.sql})`, (err, data) => {
 				session.drop = !err;
 				console.log(err);
@@ -305,20 +288,19 @@ module.exports = function(connection) {
 	}
 
 	function getFields(connection, event) {
-		var settings = event.settings;
+		let settings = event.settings;
+
 		if (!event.settings.sql) {
-			var tableName = getTable(event);
-			event.settings.sql = `
-      SELECT ${settings.fields.map(field => {
-        if(field.match(/^\*/)) {
-          return escapeId(field.slice(1));
-        } else {
-          return escapeId(field);
-        }
-      })}
-      FROM ${tableName}
-      where ${event.settings.id_column} __IDCOLUMNLIMIT__
-    `;
+			let tableName = getTable(event);
+			event.settings.sql = `SELECT ${settings.fields.map(field => {
+				if(field.match(/^\*/)) {
+					return escapeId(field.slice(1));
+				} else {
+					return escapeId(field);
+				}
+			})}
+			FROM ${tableName}
+			where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
 		}
 		return new Promise((resolve, reject) => {
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between 1 and 0`), (err, rows, fields) => {
@@ -331,10 +313,9 @@ module.exports = function(connection) {
 					fieldCalcs: fields.map(f => {
 						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(UNIX_TIMESTAMP(\`${f.name}\`))), " ")`
-						} else {
-							return `coalesce(md5(\`${f.name}\`), " ")`;
 						}
-						return escapeId(f.name)
+
+						return `coalesce(md5(\`${f.name}\`), " ")`;
 					}),
 					fields: fields.map(f => {
 						return f.name
@@ -345,11 +326,11 @@ module.exports = function(connection) {
 	}
 
 	function where(data, settings) {
-		var where = "";
+		let where = "";
 		if (data.ids) {
 			where = ` in (${data.ids.map(f=>escape(f))})`
 		} else if (data.start || data.end) {
-			var parts = [];
+			let parts = [];
 			if (data.start && data.end) {
 				parts.push(` between ${escape(data.start)} and ${escape(data.end)} `);
 			} else if (data.start) {
@@ -374,15 +355,14 @@ module.exports = function(connection) {
 	}
 
 	function getTable(event) {
-		var table = event.settings.table;
+		let table = event.settings.table;
 		return event.session && event.session.table || ((typeof table === "object") ? table.name : table);
 	}
 
-
 	function buildWhere(where, combine) {
-		combine = combine || "and"
+		combine = combine || "and";
 		if (where) {
-			var w = [];
+			let w = [];
 			if (typeof where == "object" && where.length) {
 				where.forEach(function(e) {
 					if (typeof e != "object") {
@@ -398,10 +378,10 @@ module.exports = function(connection) {
 					}
 				});
 			} else if (typeof where == "object") {
-				for (var k in where) {
-					var entry = where[k];
-					var val = "";
-					var op = "="
+				for (let k in where) {
+					let entry = where[k];
+					let val = "";
+					let op = "=";
 
 					if (typeof(entry) != "object") {
 						val = entry;
@@ -421,7 +401,7 @@ module.exports = function(connection) {
 				w.push(where);
 			}
 
-			var joined = w.join(` ${combine} `);
+			let joined = w.join(` ${combine} `);
 			return `(${joined})`;
 		}
 		return ""

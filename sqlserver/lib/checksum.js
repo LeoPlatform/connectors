@@ -5,36 +5,7 @@ const moment = require("moment");
 
 let fieldTypes = {
 	INT8: 127,
-	BIGVARCHR: 167,
-
-	// unverified for sql server
-	BIT: 16,
-	BLOB: 252,
-	DATE: 10,
-	DATETIME: 12,
-	DECIMAL: 0,
-	DOUBLE: 5,
-	ENUM: 247,
-	FLOAT: 4,
-	GEOMETRY: 255,
-	INT24: 9,
-	LONG: 3,
-	LONGLONG: 8,
-	LONG_BLOB: 251,
-	MEDIUM_BLOB: 250,
-	NEWDATE: 14,
-	NEWDECIMAL: 246,
-	NULL: 6,
-	SET: 248,
-	SHORT: 2,
-	STRING: 254,
-	TIME: 11,
-	TIMESTAMP: 7,
-	TINY: 1,
-	TINY_BLOB: 249,
-	VARCHAR: 15,
-	VAR_STRING: 253,
-	YEAR: 13
+	BIGVARCHR: 167
 };
 let fieldIds = {};
 Object.keys(fieldTypes).forEach(key => {
@@ -100,7 +71,7 @@ module.exports = function (connection) {
 					});
 				}
 			});
-		}).catch(callback); //.then(() => connection.end());
+		}).catch(callback);
 	}
 
 	function individual(event, callback) {
@@ -156,7 +127,7 @@ module.exports = function (connection) {
 				WHERE ${settings.id_column} IN (${data.ids.map(f => escape(f))})`;
 
 			console.log("Delete Query", delQuery);
-			connection.query(delQuery, (err, rows) => {
+			connection.query(delQuery, (err) => {
 				if (err) {
 					console.log("Delete Error", err);
 					callback(err);
