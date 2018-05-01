@@ -12,14 +12,14 @@ module.exports = function(connection, fieldsTable) {
 	var FIELDS_TABLE = fieldsTable;
 
 	return base({
-		batch: wrap(batch),
-		individual: wrap(individual),
-		sample: wrap(sample),
-		nibble: wrap(nibble),
-		range: wrap(range),
-		initialize: wrap(initialize),
-		destroy: wrap(destroy),
-		delete: wrap(del)
+		batch: batch,
+		individual: individual,
+		sample: sample,
+		nibble: nibble,
+		range: range,
+		initialize: initialize,
+		destroy: destroy,
+		delete: del
 	});
 
 	function wrap(method) {
@@ -320,7 +320,7 @@ module.exports = function(connection, fieldsTable) {
 
 	function getTable(event) {
 		var table = event.settings.table || event.settings.tableName;
-		return event.session.table || ((typeof table === "object") ? table.name : table);
+		return event.session && event.session.table || ((typeof table === "object") ? table.name : table);
 	}
 
 	function escape(value) {

@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "1.0.5",
+	"version": "1.0.6-alpha3",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -17,7 +17,8 @@
 		"pg": "^7.4.1",
 		"pg-copy-streams": "^1.2.0",
 		"pg-format": "^1.0.4",
-		"pg-logical-replication": "^1.0.3"
+		"pg-logical-replication": "^1.0.3",
+		"pg-native": "^2.2.0"
 	},
 	"devDependencies": {
 		"chai": "^4.1.2",

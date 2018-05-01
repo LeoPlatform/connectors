@@ -4,6 +4,8 @@ const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
 const MAX = 5000;
 
+const moment = require('moment');
+
 module.exports = function(event, context, sdk) {
 	if (!event || !context || !sdk) {
 		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘leo-sdk’');
@@ -54,12 +56,6 @@ module.exports = function(event, context, sdk) {
 
 			joinOneToMany: function(name, pk, sql) {
 				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: sql};
-
-				return this;
-			},
-
-			joinOneToOne: function(name, pk, sql) {
-				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: sql};
 
 				return this;
 			},
@@ -303,5 +299,66 @@ module.exports = function(event, context, sdk) {
 					});
 			}
 		}
-	}
+	};
+
+	this.checksum = function (params) {
+		if (!params.source_connector || !params.slave_connector || !params.checksum_connector) {
+			console.log(params);
+			throw new Error('Missing one of the following parameter values: source_connector, source_connection, slave_connector, slave_connection, or checksum_connector');
+		}
+		let sourceParams = [];
+		let slaveParams = [];
+		let checksum = params.checksum_connector;
+
+		if (!params.ls) {
+			params.ls = sdk.streams;
+		}
+
+		return {
+			sourceQuery: function(query) {
+				sourceParams.query = query;
+
+				return this;
+			},
+			slaveQuery: function(query) {
+				slaveParams.query = query;
+
+				return this;
+			},
+			run: function(callback) {
+				let system = event.botId;
+
+				let source = checksum.lambdaConnector(event.botId, "SqlserverConnector", sourceParams);
+				let slave = checksum.lambdaConnector(event.botId, "PostgresConnector", slaveParams);
+
+				checksum.checksum(system, system, source, slave, {
+					stopOnStreak: 1750000,
+					stop_at: moment().add({
+						minutes: 4
+					}),
+					maxLimit: 2500,
+					loadSize: 50000,
+					limit: 2500,
+					reverse: true,
+					sample: true,
+					version: 2,
+					queue: {
+						name: "test-checksum.output",
+						transform: params.ls.through((obj, done) => {
+							done(null, {
+								orders: obj.missing.concat(obj.incorrect)
+							});
+						})
+					},
+					skipBatch: true,
+					showOutput: true
+				})
+				.then((result) => {
+						console.log(result);
+					}, (err) => {
+						console.log(err);
+					});
+			}
+		}
+	};
 };

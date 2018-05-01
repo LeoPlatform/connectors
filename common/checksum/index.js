@@ -309,7 +309,6 @@ module.exports = {
 		function invoke(method) {
 			return (data) => {
 				return new Promise((resolve, reject) => {
-					var start = moment.now();
 					lambdaInvoker.invoke({
 						FunctionName: lambdaName,
 						InvocationType: 'RequestResponse',
@@ -399,7 +398,6 @@ module.exports = {
 					http = httpsObj;
 				}
 				return new Promise((resolve, reject) => {
-					var start = moment.now();
 					//logger.log("URL:", url)
 					let requestOptions = Object.assign(URL.parse(url), {
 						method: 'POST',
@@ -474,7 +472,6 @@ module.exports = {
 	},
 	mockConnector: function(settings) {
 		return function(data, callback) {
-			var start = settings.mock.min;
 			var rand = Object.assign({
 				batch: 10,
 				single: 10,

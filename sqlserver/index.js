@@ -4,6 +4,7 @@ const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
+const checksum = require("./lib/checksum.js");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
@@ -100,6 +101,9 @@ module.exports = {
 				return stats.checkpoint(callback);
 			});
 		}
+	},
+	checksum: function(config) {
+		return checksum(connect(config));
 	},
 	connect: connect
 };
