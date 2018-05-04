@@ -173,7 +173,8 @@ module.exports = function (connection) {
 	}
 
 	function range(event, callback) {
-		//console.log("Calling Range", event);
+		console.log("Calling Range", event);
+		process.exit();
 
 		let data = event.data;
 		let settings = event.settings;

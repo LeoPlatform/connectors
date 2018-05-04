@@ -73,7 +73,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 				bucketKey = timestamp.format('YYYY/MM_DD_') + timestamp.valueOf();
 
 			let stream = nibbler(client, table, id, {
-				limit: 5000,
+				limit: 50,
 				resume: result && result.snapshot && !result.snapshot.complete && result.snapshot
 			});
 			stream.destroy = stream.destroy || stream.close || (() => {});
@@ -112,7 +112,7 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 						minutes: 1
 					},
 					prefix: "_snapshot/" + bucketKey,
-					sectionCount: 30
+					sectionCount: 5
 				}),
 				ls.toLeo("snapshotter", {
 					snapshot: timestamp.valueOf()
