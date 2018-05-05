@@ -84,7 +84,7 @@ module.exports = function(event, context, sdk) {
 
 									// split the ID's up into no more than 5k for each query
 									let ids = obj[table].splice(0, MAX);
-									objArray.push(tables[table].replace(/\?/g, ids.join()));
+									objArray.push(tables[table].replace(/\?/g, ids.filter((id) => {return id;}).join()));
 									done();
 								}, () => obj[table].length);
 							} else {
@@ -97,7 +97,7 @@ module.exports = function(event, context, sdk) {
 					done(null, objArray);
 				},
 				function (ids, builder) {
-					let idsList = ids.join();
+					let idsList = ids.filter((id) => {return id;}).join();
 					let builderSql = builder(params.pk, sqlQuery.replace(/\?/g, idsList));
 
 					// build the joins

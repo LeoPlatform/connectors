@@ -343,7 +343,7 @@ module.exports = function(client) {
 				var id = settings.id_column == "_id" ? (i) => {
 					return i._id
 				} : (i) => {
-					return i._source[settings.id_column]
+					return i._source[settings.id_column] || i._source[settings.id_column.replace(".keyword", "")]
 				};
 
 				callback(null, {
@@ -403,7 +403,7 @@ module.exports = function(client) {
 			var id = settings.id_column == "_id" ? (i) => {
 				return i._id
 			} : (i) => {
-				return i._source[settings.id_column]
+				return i._source[settings.id_column] || i._source[settings.id_column.replace(".keyword", "")]
 			};
 
 			data.current = result.hits.hits[0] ? id(result.hits.hits[0]) : null;
