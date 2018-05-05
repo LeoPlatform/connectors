@@ -114,7 +114,7 @@ function create(hash, pool, parentCache) {
 			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(r => {
-					const tblSch = `${tableSchema}.${r}`;
+					const tblSch = `${tableSchema}.${r.table_name}`;
 					if (!(tblSch in schema)) {
 						schema[tblSch] = [];
 					}
