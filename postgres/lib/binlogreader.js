@@ -72,20 +72,20 @@ module.exports = {
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 					if (err) return dieError(err);
 					let tasks = [];
+					lastLsn = '0/00000000';
 					if (!result.length) {
-						lastLsn = '0/00000000';
 						tasks.push(done => wrapperClient.query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
 							if (err) return dieError(err);
 							wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 								if (err) return dieError(err);
 								if (result.length != 1) return dieError(err);
 
-								lastLsn = result[0].confirmed_flush_lsn;
+								lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
 								done();
 							});
 						}));
 					} else {
-						lastLsn = result[0].confirmed_flush_lsn;
+						lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
 					}
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
