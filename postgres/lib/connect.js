@@ -137,10 +137,12 @@ function create(hash, pool, parentCache) {
 				records: 10000,
 				passThrough: false,
 				useReplaceInto: false,
-				useOnDuplicateUpdate: false
+				useOnDuplicateUpdate: false,
+				ignoreDestinationMissingTable: false
 			}, opts || {});
 			let pending = null;
 			let columns = [];
+			let noTable = false;
 			let ready = false;
 			let total = 0;
 
@@ -160,6 +162,7 @@ function create(hash, pool, parentCache) {
 					WHERE 
    					c.table_name = $1 and c.table_schema = 'public';
 			`, [table], (err, results) => {
+				if (results.length === 0) noTable = true;
 				if (err) throw err;
 				columns = results.map(r => {
 					if (r.constraint_type) {
@@ -195,6 +198,7 @@ function create(hash, pool, parentCache) {
 					done(null, obj, 1, 1);
 				}
 			}, (records, callback) => {
+				if (noTable && opts.ignoreDestinationMissingTable) return callback(null, []);
 				if (opts.useReplaceInto) {
 					console.log("Replace Inserting " + records.length + " records of ", total);
 				} else {
