@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-sqlserver",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -9,8 +9,8 @@
 	"author": "",
 	"license": "ISC",
 	"dependencies": {
-		"leo-connector-common": "^1.0.10",
-		"leo-sdk": "^1.0.65",
+		"leo-connector-common": "^1.0.18",
+		"leo-sdk": "^1.0.68",
 		"mssql": "^4.1.0"
 	},
 	"devDependencies": {

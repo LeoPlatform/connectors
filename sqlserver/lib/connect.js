@@ -45,7 +45,7 @@ module.exports = function(config) {
 				params = {};
 			}
 			opts = Object.assign({
-				inRowMode: false,
+				inRowMode: true,
 				stream: false
 			}, opts || {});
 
