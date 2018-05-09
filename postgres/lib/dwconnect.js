@@ -25,6 +25,11 @@ module.exports = function(config, columnConfig) {
 			ids = [ids];
 		}
 
+
+		// Add the new table to in memory schema // Prevents locking on schema table
+		let schema = client.getSchemaCache();
+		schema[`staging_${table}`] = schema[table];
+
 		let tasks = [];
 		// tasks.push(done => client.query(`alter table ${table} add primary key (${ids.join(',')})`, done));
 
@@ -33,8 +38,8 @@ module.exports = function(config, columnConfig) {
 		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
-		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-			let columns = result.map(f => f.column_name).filter(f => !f.match(/^_/));
+		client.describeTable(table, (err, result) => {
+			let columns = result.filter(f => !f.column_name.match(/^_/)).map(f => `"${f.column_name}"`);
 
 			client.connect().then(client => {
 				async.series(tasks, err => {
@@ -90,6 +95,10 @@ module.exports = function(config, columnConfig) {
 			nk = [nk];
 		}
 
+		// Add the new table to in memory schema // Prevents locking on schema table
+		let schema = client.getSchemaCache();
+		schema[`staging_${table}`] = schema[table].filter(c => c.column_name != sk);
+
 		let tasks = [];
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
@@ -97,8 +106,7 @@ module.exports = function(config, columnConfig) {
 		tasks.push(done => client.query(`alter table staging_${table} drop column ${sk}`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 
-		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-
+		client.describeTable(table, (err, result) => {
 			client.connect().then(client => {
 				async.series(tasks, err => {
 					if (err) {
@@ -111,9 +119,9 @@ module.exports = function(config, columnConfig) {
 					let scd6 = Object.keys(scds[6] || {});
 
 					let ignoreColumns = [columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current];
-					let allColumns = result.map(r => r.column_name).filter(f => {
-						return ignoreColumns.indexOf(f) === -1 && f !== sk;
-					});
+					let allColumns = result.filter(f => {
+						return ignoreColumns.indexOf(f.column_name) === -1 && f.column_name !== sk;
+					}).map(r => `"${r.column_name}"`);
 
 					let scd1 = result.map(r => r.column_name).filter(f => {
 						return ignoreColumns.indexOf(f) === -1 && scd2.indexOf(f) === -1 && scd3.indexOf(f) === -1 && f !== sk && nk.indexOf(f) === -1;
@@ -183,10 +191,10 @@ module.exports = function(config, columnConfig) {
 						//This needs to be done last
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
-							let columns = scd1.map(f => `${f} = coalesce(staging.${f}, prev.${f})`).concat(scd6.map(f => `current_${f} = coalesce(staging.${f}, prev.${f})`));
-							columns.push(`${columnConfig._enddate} = case when changes.runSCD2 =1 then now() else dm.${columnConfig._enddate} END`);
-							columns.push(`${columnConfig._current} = case when changes.runSCD2 =1 then false else dm.${columnConfig._current} END`);
-							columns.push(`${columnConfig._auditdate} = now()`);
+							let columns = scd1.map(f => `"${f}" = coalesce(staging."${f}", prev."${f}")`).concat(scd6.map(f => `"current_${f}" = coalesce(staging."${f}", prev."${f}")`));
+							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else dm."${columnConfig._enddate}" END`);
+							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else dm."${columnConfig._current}" END`);
+							columns.push(`"${columnConfig._auditdate}" = now()`);
 							client.query(`update ${table} as dm
 										set  ${columns.join(', ')}
 										FROM staging_${table}_changes changes
@@ -219,22 +227,22 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.linkDimensions = function(table, links, nk, callback) {
-		client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+		client.describeTable(table, (err, result) => {
 			let tasks = [];
 			let sets = [];
 			tasks.push(done => client.query(`analyze ${table}`, done));
 			tasks.push(done => {
 				let joinTables = links.map(link => {
-					if (link.table == "datetime" || link.table == "dim_datetime") {
+					if (link.table == "d_datetime" || link.table == "datetime" || link.table == "dim_datetime") {
 						if (columnConfig.useSurrogateDateKeys) {
 							sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
 							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 						}
-					} else if (link.table == "d_date" || link.table == "dim_date") {
+					} else if (link.table == "d_date" || link.table == "date" || link.table == "dim_date") {
 						if (columnConfig.useSurrogateDateKeys) {
 							sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
 						}
-					} else if (link.table == "d_time" || link.table == "dim_time") {
+					} else if (link.table == "d_time" || link.table == "time" || link.table == "dim_time") {
 						if (columnConfig.useSurrogateDateKeys) {
 							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 						}
@@ -271,7 +279,7 @@ module.exports = function(config, columnConfig) {
 			tasks.push(done => {
 				client.describeTable(table, (err, fields) => {
 					if (err) return done(err);
-					if (!fields.length) {
+					if (!fields || !fields.length) {
 						client.createTable(table, structures[table], done);
 					} else {
 						let fieldLookup = fields.reduce((acc, field) => {
@@ -316,16 +324,16 @@ module.exports = function(config, columnConfig) {
 				ids.push(f);
 			}
 
-			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
+			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
 					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
 				}
-			} else if (field.dimension == "date" || field.dimension == "dim_date") {
+			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
 				}
-			} else if (field.dimension == "time" || field.dimension == "dim_time") {
+			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_time") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
 				}
@@ -376,16 +384,16 @@ module.exports = function(config, columnConfig) {
 				};
 			}
 
-			if (field.dimension == "datetime" || field.dimension == "dim_datetime") {
+			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
 					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
 				}
-			} else if (field.dimension == "date" || field.dimension == "dim_date") {
+			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_date integer`);
 				}
-			} else if (field.dimension == "time" || field.dimension == "dim_date") {
+			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f)}_time integer`);
 				}
