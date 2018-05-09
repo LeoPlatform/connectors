@@ -130,11 +130,11 @@ module.exports = function(event, context, sdk) {
 	 * @returns {exports}
 	 */
 	this.loadDWObjects = function (params) {
-		params = {
+		params = Object.assign({
 			ls: params.ls,
 			logEvents: params.logEvents || 1000,
 			start: params.start || undefined
-		};
+		}, params || {});
 
 		if (!params.ls) {
 			params.ls = sdk.streams;
