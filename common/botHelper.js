@@ -2,7 +2,7 @@
 
 const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
-const MAX = 500;
+const MAX = 5000;
 
 const moment = require('moment');
 
@@ -131,14 +131,10 @@ module.exports = function(event, context, sdk) {
 	 */
 	this.loadDWObjects = function (params) {
 		params = Object.assign({
-			ls: params.ls,
-			logEvents: params.logEvents || 1000,
-			start: params.start || undefined
+			ls: sdk.streams,
+			logEvents: 1000,
+			start: undefined
 		}, params || {});
-
-		if (!params.ls) {
-			params.ls = sdk.streams;
-		}
 
 		let entities = [];
 

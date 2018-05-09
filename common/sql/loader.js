@@ -12,7 +12,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	opts = Object.assign({
 		// source: "loader",
 		isSnapshot: false,
-		limit: 1000
+		limit: 5000
 	}, opts || {});
 
 	opts.source = opts.source || opts.inQueue || "loader";
