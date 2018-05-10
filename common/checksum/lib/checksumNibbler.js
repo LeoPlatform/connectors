@@ -15,16 +15,14 @@ module.exports = function(local, remote, opts) {
 		totalExtra: 0,
 		streak: 0,
 	}, (opts || {}).totals);
-	console.log("START VALUES", data);
+	// logger.log("START VALUES", data);
 
 	// Add extra param to this sync;
 	let sync = nibbler.sync;
 	nibbler.sync = function(opts, resultCallback, callback) {
-		console.log('in nibbler sync');
 		let asyncMethod = opts.inSeries ? "mapSeries" : "map";
 		let fieldNames = opts.fieldNames || [];
 		let update = function(nibble, obj, results) {
-			console.log('in update');
 			obj.progress += results.qty;
 			obj.totalCorrect += results.correct;
 			obj.totalMissing += results.missing;
@@ -43,7 +41,6 @@ module.exports = function(local, remote, opts) {
 		};
 
 		let compare = function(start, end, callback) {
-			console.log('in compare');
 			if (opts.skipBatch) {
 				return callback(true, {
 					errors: ["Skipping"],
@@ -58,13 +55,11 @@ module.exports = function(local, remote, opts) {
 				});
 			}
 			nibbler.timeLog("Running Master & Slave Batch Checksum");
-			console.log("Running Master & Slave Batch Checksum");
 			async [asyncMethod]([local, remote], (connector, done) => {
 				connector.getChecksum({
 					start,
 					end
 				}).then(result => {
-					console.log('getChecksum result: ', result);
 					done(null, result)
 				}, callback);
 			}, (err, batchResults) => {
@@ -72,7 +67,6 @@ module.exports = function(local, remote, opts) {
 					callback(err);
 					return;
 				}
-				console.log('async batchResults: ', batchResults);
 				let localData = batchResults[0];
 				let remoteData = batchResults[1];
 				let result = {
@@ -83,11 +77,9 @@ module.exports = function(local, remote, opts) {
 
 				if (localData.qty > remoteData.qty) {
 					result.errors.push(remote.name + " has too few");
-					console.log(remote.name + " has too few");
 				}
 				if (localData.qty < remoteData.qty) {
 					result.errors.push(remote.name + " has too many");
-					console.log(remote.name + " has too many");
 				}
 				if (
 					localData.hash[0] != remoteData.hash[0] ||
@@ -96,13 +88,11 @@ module.exports = function(local, remote, opts) {
 					localData.hash[3] != remoteData.hash[3]
 				) {
 					result.errors.push("Hashes do not match");
-					console.log("Hashes do not match");
 				}
 
 				result.duration = Math.max(localData.duration, remoteData.duration);
 				result.qty = localData.qty;
 
-				console.log('result', result);
 				if (result.errors.length == 0) {
 					callback(null, result);
 				} else {
@@ -114,7 +104,6 @@ module.exports = function(local, remote, opts) {
 		let compareIndividual = function(start, end, callback) {
 			// log("running individual", start, end);
 			nibbler.timeLog("Running Master & Slave Individual Checksum");
-			console.log("Running Master & Slave Individual Checksum");
 			async [asyncMethod]([local, remote], (connector, done) => {
 				connector.getIndividualChecksums({
 					start,
@@ -162,14 +151,12 @@ module.exports = function(local, remote, opts) {
 						results.incorrect.push(o.id);
 					}
 				});
-				console.log('162: results', results);
 				callback(null, results);
 			});
 		};
 		let sample = function(ids, callback) {
 			if (local.sample && remote.sample) {
 				nibbler.timeLog("Running Master & Slave Sample");
-				console.log("Running Master & Slave Sample");
 
 				async [asyncMethod]([local, remote], (connector, done) => {
 					connector.sample({
@@ -246,22 +233,19 @@ module.exports = function(local, remote, opts) {
 				return !streak && !other
 			},
 			onInit: function(nibble) {
-				console.log('Init');
 				nibble.progress = data.progress
 			},
 			onEnd: function(err, nibble, callback) {
-				console.log(`Summary`);
-				console.log(`Correct: ${data.totalCorrect}, Incorrect:${data.totalIncorrect}, Missing:${data.totalMissing}, Extra:${data.totalExtra}`);
+				logger.log(`Summary`);
+				logger.log(`Correct: ${data.totalCorrect}, Incorrect:${data.totalIncorrect}, Missing:${data.totalMissing}, Extra:${data.totalExtra}`);
 				callback();
 			},
 			onError: function(err, result, nibble, done) {
-				console.log('error');
 				if (err && !result) {
 					return done(err)
 				}
 				if (nibble.limit <= 20000 || result.qty < 20000 || opts.skipBatch) { //It is small enough, we need to do individual checks
 					compareIndividual(nibble.start, nibble.end, (err, dataResult) => {
-						console.log('comparing individual');
 						if (err) {
 							done(err);
 							return;
@@ -332,7 +316,6 @@ module.exports = function(local, remote, opts) {
 				}
 			},
 			onBite: function(nibble, done) {
-				console.log('biting');
 				compare(nibble.start, nibble.end, (err, result) => {
 					if (err) {
 						done(err, result);
