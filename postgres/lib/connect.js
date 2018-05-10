@@ -135,7 +135,6 @@ function create(hash, pool, parentCache) {
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000,
-				passThrough: false,
 				useReplaceInto: false,
 				useOnDuplicateUpdate: false,
 				ignoreDestinationMissingTable: false
