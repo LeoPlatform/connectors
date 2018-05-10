@@ -13,6 +13,7 @@ module.exports = {
 		opts = Object.assign({
 			slot_name: 'leo_replication',
 			keepalive: 1000 * 3,
+			failAfter: 100,
 			event: 'logical_replication'
 		}, opts || {});
 		let lastLsn;
@@ -26,7 +27,7 @@ module.exports = {
 			initialDelay: 1000,
 			maxDelay: 60000
 		});
-		retry.failAfter(100);
+		retry.failAfter(opts.failAfter);
 		retry.on('backoff', function(number, delay) {
 			logger.error(`(${config.database}) Going to try to connect again in ${delay} ms`);
 		});
@@ -34,6 +35,7 @@ module.exports = {
 			err.database = config.database;
 			err.traceType = 'fail';
 			logger.error(err);
+			pass.emit('error', err);
 			pass.destroy(err);
 		});
 		let reportBackTimeout = null;
@@ -70,15 +72,18 @@ module.exports = {
 				logger.debug(`(${config.database}) Trying to connect.`);
 				if (err) return dieError(err);
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
+					logger.debug(`(${config.database}) Trying to get replication slot ${opts.slot_name}.`);
 					if (err) return dieError(err);
 					let tasks = [];
 					lastLsn = '0/00000000';
 					if (!result.length) {
 						tasks.push(done => wrapperClient.query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
-							if (err) return dieError(err);
+							logger.debug(`(${config.database}) Trying to create logical replication slot ${opts.slot_name}.`);
+							if (err) return done(err);
 							wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
-								if (err) return dieError(err);
-								if (result.length != 1) return dieError(err);
+								logger.debug(`(${config.database}) Trying to get newly created replication slot ${opts.slot_name}. Result Len = ${result.length}`);
+								if (err) return done(err);
+								if (result.length != 1) return done(err);
 
 								lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
 								done();
@@ -91,97 +96,100 @@ module.exports = {
 						if (err) return dieError(err);
 
 						client.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}  ("include-xids" 'on' , "include-timestamp" 'on')`, (err, result) => {
-							if (err) return dieError(err);
-						});
-						let [upper, lower] = lastLsn.split('/');
-						lastLsn = {
-							upper: parseInt(upper, 16),
-							lower: parseInt(lower, 16)
-						};
-						client.connection.once('replicationStart', function() {
-							console.log(`Successfully listening for Changes on ${config.host}`);
-							retry.reset();
-							let e = function() {
-								if (reportBackTimeout) {
-									clearTimeout(reportBackTimeout);
-								}
-								checkpoint(client, lastLsn);
-								reportBackTimeout = setTimeout(e, opts.keepalive);
-							};
-							e();
-							pass.acknowledge = function(lsn) {
-								if (typeof lsn == "string") {
-									let [upper, lower] = lsn.split('/');
-									lsn = {
-										upper: parseInt(upper, 16),
-										lower: parseInt(lower, 16)
-									};
-								}
+							if (err) return dieError(err); //wal error comes here
 
-								if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
-									lsn.upper = lsn.upper + 1;
-									lsn.lower = 0;
-								} else {
-									lsn.lower = lsn.lower + 1;
-								}
-								lastLsn = lsn;
+							let [upper, lower] = lastLsn.split('/');
+							lastLsn = {
+								upper: parseInt(upper, 16),
+								lower: parseInt(lower, 16)
+							};
+							client.connection.once('replicationStart', function() {
+								console.log(`Successfully listening for Changes on ${config.host}:${config.database}`);
+								retry.reset();
+								let e = function() {
+									if (reportBackTimeout) {
+										clearTimeout(reportBackTimeout);
+									}
+									checkpoint(client, lastLsn);
+									reportBackTimeout = setTimeout(e, opts.keepalive);
+								};
 								e();
-							};
-							let count = 0;
-							client.connection.on('error', dieError);
-							client.connection.on('copyData', function(msg) {
-								if (msg.chunk[0] == 0x77) { // XLogData
-									count++;
-									if (count === 10000) {
-										e();
-										console.log(count);
-										count = 0;
+								pass.acknowledge = function(lsn) {
+									if (typeof lsn == "string") {
+										let [upper, lower] = lsn.split('/');
+										lsn = {
+											upper: parseInt(upper, 16),
+											lower: parseInt(lower, 16)
+										};
 									}
-									let lsn = {
-										upper: msg.chunk.readUInt32BE(1),
-										lower: msg.chunk.readUInt32BE(5),
-									};
-									lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
-									//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
-									// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
-									let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
-									log.lsn = lsn;
-									if (log.d && log.d.reduce) {
-										log.d = log.d.reduce((acc, field) => {
-											acc[field.n] = field.v;
-											return acc;
-										}, {});
-									}
-									let c = {
-										source: 'postgres',
-										start: log.lsn.string
-									};
-									delete log.lsn;
-									pass.write({
-										id: ID,
-										event: opts.event,
-										payload: log,
-										correlation_id: c
-									});
-									// }
-								} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
-									let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
-									var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
-									var shouldRespond = msg.chunk.readInt8(17);
-									logger.info({
-										lsn,
-										timestamp,
-										shouldRespond
-									});
-									if (shouldRespond) {
-										e();
-									}
-								} else {
-									logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
-								}
 
+									if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
+										lsn.upper = lsn.upper + 1;
+										lsn.lower = 0;
+									} else {
+										lsn.lower = lsn.lower + 1;
+									}
+									lastLsn = lsn;
+									e();
+								};
+								let count = 0;
+								client.connection.on('error', dieError);
+								client.connection.on('copyData', function(msg) {
+									if (msg.chunk[0] == 0x77) { // XLogData
+										count++;
+										if (count === 10000) {
+											e();
+											console.log(count);
+											count = 0;
+										}
+										let lsn = {
+											upper: msg.chunk.readUInt32BE(1),
+											lower: msg.chunk.readUInt32BE(5),
+										};
+										lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
+										//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
+										// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
+										let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+										log.lsn = lsn;
+										if (log.d && log.d.reduce) {
+											log.d = log.d.reduce((acc, field) => {
+												acc[field.n] = field.v;
+												return acc;
+											}, {});
+										}
+										let c = {
+											source: 'postgres',
+											start: log.lsn.string
+										};
+										delete log.lsn;
+										pass.write({
+											id: ID,
+											event: opts.event,
+											payload: log,
+											correlation_id: c
+										});
+									// }
+									} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
+										let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
+										var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
+										var shouldRespond = msg.chunk.readInt8(17);
+										logger.info({
+											lsn,
+											timestamp,
+											shouldRespond
+										});
+										if (shouldRespond) {
+											e();
+										}
+									} else {
+										logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
+									}
+
+								});
 							});
+
 						});
+
 					});
 				});
 			});
