@@ -2,6 +2,7 @@
 const uuid = require("uuid");
 const base = require("leo-connector-common/checksum/lib/handler.js");
 const moment = require("moment");
+const logger = require("leo-sdk/lib/logger")("leo-checksum");
 
 let fieldTypes = {
 	INT8: 127,
@@ -56,10 +57,10 @@ module.exports = function (connection) {
 					FROM (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i
 				) AS t`;
 
-			console.log("Batch Query", batchQuery);
+			logger.log("Batch Query", batchQuery);
 			connection.query(batchQuery, (err, rows) => {
 				if (err) {
-					console.log("Batch Checksum Error", err);
+					logger.log("Batch Checksum Error", err);
 					callback(err);
 				} else {
 					callback(null, {
@@ -91,10 +92,10 @@ module.exports = function (connection) {
 			let individualQuery = `SELECT ${settings.id_column} AS id, LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', ${fieldCalcConcat}), 2)) AS hash
 				FROM (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i`;
 
-			console.log("Individual Query", individualQuery);
+			logger.log("Individual Query", individualQuery);
 			connection.query(individualQuery, (err, rows) => {
 				if (err) {
-					console.log("Individual Checksum Error", err);
+					logger.log("Individual Checksum Error", err);
 					callback(err);
 				} else {
 					let results = {
@@ -127,10 +128,10 @@ module.exports = function (connection) {
 			let delQuery = `DELETE from ${tableName}
 				WHERE ${settings.id_column} IN (${data.ids.map(f => escape(f))})`;
 
-			console.log("Delete Query", delQuery);
+			logger.log("Delete Query", delQuery);
 			connection.query(delQuery, (err) => {
 				if (err) {
-					console.log("Delete Error", err);
+					logger.log("Delete Error", err);
 					callback(err);
 					return;
 				}
@@ -150,10 +151,10 @@ module.exports = function (connection) {
 
 		getFields(connection, event).then((table) => {
 			let sampleQuery = table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings));
-			console.log("Sample Query", sampleQuery);
+			logger.log("Sample Query", sampleQuery);
 			connection.query(sampleQuery, (err, rows) => {
 				if (err) {
-					console.log("Sample Error", err);
+					logger.log("Sample Error", err);
 					callback(err);
 					return;
 				}
@@ -174,7 +175,7 @@ module.exports = function (connection) {
 	}
 
 	function range(event, callback) {
-		console.log("Calling Range", event);
+		logger.log("Calling Range", event);
 
 		let data = event.data;
 		let settings = event.settings;
@@ -193,13 +194,12 @@ module.exports = function (connection) {
 			whereStatement = ` where ${where.join(" and ")} `;
 		}
 		let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total FROM ${tableName}${whereStatement}`;
-		console.log(`Range Query: ${query}`);
+		logger.log(`Range Query: ${query}`);
 		connection.query(query, (err, result, fields) => {
 			if (err) {
-				console.log("Range Error", err);
+				logger.log("Range Error", err);
 				callback(err);
 			} else {
-				// console.log(result);
 				callback(null, {
 					min: correctValue(result[0][0], fields[0]),
 					max: correctValue(result[0][1], fields[1]),
@@ -223,14 +223,14 @@ module.exports = function (connection) {
 			OFFSET ${data.limit - 1} ROWS
 			FETCH NEXT 2 ROWS ONLY`;
 
-		console.log(`Nibble Query: ${query}`);
+		logger.log(`Nibble Query: ${query}`);
 		connection.query(query, (err, rows, fields) => {
 			if (err) {
-				console.log("Nibble Error", err);
+				logger.log("Nibble Error", err);
 				callback(err);
 			} else {
-				// console.log('query', query);
-				// console.log(rows, fields);
+				// logger.log('query', query);
+				// logger.log(rows, fields);
 				data.current = rows[0] ? correctValue(rows[0][0], fields[0]) : null;
 				data.next = rows[1] ? correctValue(rows[1][0], fields[0]) : null;
 				callback(null, data)
@@ -247,11 +247,11 @@ module.exports = function (connection) {
 			let connection = getConnection(event.settings);
 			session.table = `${event.settings.table.name || 'leo_chk'}_${moment.now()}`;
 
-			console.log("Table", session.table);
+			logger.log("Table", session.table);
 
 			connection.query(`create table ${session.table} (${event.settings.table.sql})`, (err, data) => {
 				session.drop = !err;
-				console.log(err);
+				logger.log(err);
 				callback(err, session)
 			});
 		} else {

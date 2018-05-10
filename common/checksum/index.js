@@ -107,7 +107,6 @@ module.exports = {
 	checksum: function(system, botId, master, slave, opts) {
 		return new Promise((resolve, reject) => {
 			function logError(err) {
-				console.log('logging error');
 				saveProgress(system, botId, {
 					status: "error",
 					statusReason: err.toString()
@@ -120,7 +119,6 @@ module.exports = {
 				slave.setSession(session.slave);
 
 				if (session.status === 'initializing') {
-					console.log('initializing');
 					tasks.push(Promise.all([
 						master.init({}),
 						slave.init({})
@@ -163,7 +161,6 @@ module.exports = {
 						return false;
 					};
 					opts.stats = function(nibble, result, total, done) {
-						console.log('in opts stats');
 						let percent = (nibble.progress / nibble.total) * 100;
 						let fixed = percent.toFixed(2);
 
@@ -223,7 +220,6 @@ module.exports = {
 
 					let stream;
 					if (opts.queue) {
-						console.log('opts queue');
 						let load = leo.load(botId, opts.queue.name, {
 							useS3: true,
 							debug: true
@@ -257,7 +253,7 @@ module.exports = {
 					}, function(err, data, stopReason) {
 						let status = err ? ("error") : (stopReason === "Out Of Time" ? "running" : "complete");
 						let tasks = [];
-						console.log('stopReason', stopReason)
+						logger.log('stopReason', stopReason);
 
 						if (status === "complete") {
 							tasks.push(done => {
@@ -275,7 +271,6 @@ module.exports = {
 						}
 
 						stream.end((err) => {
-							console.log('saving progress 282');
 							saveProgress(system, botId,
 								Object.assign(session, {
 									endTime: status !== "running" ? moment.now() : null,

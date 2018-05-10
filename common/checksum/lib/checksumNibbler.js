@@ -37,7 +37,6 @@ module.exports = function(local, remote, opts) {
 
 			nibble.progress = data.progress;
 			nibbler.log(`Correct: ${results.correct}, Incorrect: ${results.incorrect}, Missing: ${results.missing}, Extra: ${results.extra}, Start: ${nibble.start}, End: ${nibble.end}`);
-			console.log(`Correct: ${results.correct}, Incorrect: ${results.incorrect}, Missing: ${results.missing}, Extra: ${results.extra}, Start: ${nibble.start}, End: ${nibble.end}`);
 		};
 
 		let compare = function(start, end, callback) {
