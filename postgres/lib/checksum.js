@@ -6,6 +6,7 @@ const moment = require("moment");
 let fieldTypes = {
 	INT4: 23,
 	VARCHAR: 1043,
+	DATETIME: 12,
 	DATE: 1082,
 	TIME: 1083,
 	TIMESTAMP: 1114,
@@ -184,17 +185,17 @@ module.exports = function(connection, fieldsTable) {
 		if (where.length) {
 			whereStatement = ` where ${where.join(" and ")} `;
 		}
-		let query = `select MIN(${settings.id_column}) as min, MAX(${settings.id_column}) as max, count(${settings.id_column}) total from ${tableName}${whereStatement}`;
+		let query = `select MIN(${settings.id_column}) as min, MAX(${settings.id_column}) as max, COUNT(${settings.id_column}) as total from ${tableName}${whereStatement}`;
 		console.log(`Range Query: ${query}`);
-		connection.query(query, (err, result) => {
+		connection.query(query, (err, result, fields) => {
 			if (err) {
 				console.error("Range Error", err);
 				callback(err);
 			} else {
 				callback(null, {
-					min: result[0].min,
-					max: result[0].max,
-					total: result[0].total
+					min: correctValue(result[0].min, fields[0]),
+					max: correctValue(result[0].max, fields[1]),
+					total: correctValue(result[0].total, fields[2])
 				});
 			}
 		});
@@ -214,13 +215,13 @@ module.exports = function(connection, fieldsTable) {
 			offset ${data.limit - 1}`;
 
 		console.log(`Nibble Query: ${query}`);
-		connection.query(query, (err, rows) => {
+		connection.query(query, (err, rows, fields) => {
 			if (err) {
 				console.error("Nibble Error", err);
 				callback(err);
 			} else {
-				data.current = rows[0] ? rows[0].id : null;
-				data.next = rows[1] ? rows[1].id : null;
+				data.current = rows[0] ? correctValue(rows[0].id, fields[0]) : null;
+				data.next = rows[1] ? correctValue(rows[1].id, fields[0]) : null;
 				callback(null, data);
 			}
 		});
@@ -285,12 +286,9 @@ module.exports = function(connection, fieldsTable) {
 					reject(err);
 					return;
 				}
-				console.log(fields);
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						console.log(f);
-
 						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.dataTypeID].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(extract(epoch from ${f.name}))::text), ' ')`;
 						}
@@ -385,5 +383,19 @@ module.exports = function(connection, fieldsTable) {
 			return `(${joined})`;
 		}
 		return "";
+	}
+
+	/**
+	 * Convert bigint from string to integer for comparisons
+	 * @param value
+	 * @param metadata
+	 * @returns {*}
+	 */
+	function correctValue(value, metadata) {
+		if (metadata.dataTypeID == 20) {
+			return parseInt(value);
+		}
+
+		return value;
 	}
 };

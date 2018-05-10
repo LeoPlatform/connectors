@@ -117,8 +117,8 @@ module.exports = {
 			this.getSession(system, botId, opts).then((session) => {
 				console.log("Session:", session);
 				let tasks = [];
-				master.setSession(session);
-				slave.setSession(session);
+				master.setSession(session.master);
+				slave.setSession(session.slave);
 
 				if (session.status === 'initializing') {
 					console.log('initializing');
@@ -342,6 +342,13 @@ module.exports = {
 								err = new Error(obj.body);
 							} else {
 								payload = obj.response;
+								if (obj.session) {
+									let o = {
+										id: session.id,
+										type: session.type
+									};
+									Object.assign(session, obj.session, o);
+								}
 							}
 						}
 						if (err) {

@@ -52,7 +52,7 @@ module.exports = {
 				} else if (typeof idthing == "string") {
 					tasks.push((done) => {
 						sqlClient.query(idthing, (err, results, fields) => {
-							if (!err) {
+							if (!err && results.length) {
 								let firstColumn = fields[0].name;
 								ids = ids.concat(results.map(row => row[firstColumn]));
 							}

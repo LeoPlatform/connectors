@@ -5,7 +5,8 @@ const moment = require("moment");
 
 let fieldTypes = {
 	INT8: 127,
-	BIGVARCHR: 167
+	BIGVARCHR: 167,
+	BIGINT: 38
 };
 let fieldIds = {};
 Object.keys(fieldTypes).forEach(key => {
@@ -70,7 +71,7 @@ module.exports = function (connection) {
 						hash: [rows[0].sum1, rows[0].sum2, rows[0].sum3, rows[0].sum4]
 					});
 				}
-			});
+			}, {inRowMode: false});
 		}).catch(callback);
 	}
 
@@ -111,8 +112,8 @@ module.exports = function (connection) {
 					});
 					callback(null, results);
 				}
-			});
-		}).catch(callback); //.then(() => connection.end());
+			}, {inRowMode: false});
+		}).catch(callback);
 	}
 
 	function del(event, callback) {
@@ -137,8 +138,8 @@ module.exports = function (connection) {
 					ids: data.ids,
 				};
 				callback(null, results);
-			});
-		}).catch(callback); //.then(() => connection.end());
+			}, {inRowMode: false});
+		}).catch(callback);
 	}
 
 	function sample(event, callback) {
@@ -168,13 +169,12 @@ module.exports = function (connection) {
 					})
 				};
 				callback(null, results);
-			});
-		}).catch(callback); //.then(() => connection.end());
+			}, {inRowMode: false});
+		}).catch(callback);
 	}
 
 	function range(event, callback) {
 		console.log("Calling Range", event);
-		process.exit();
 
 		let data = event.data;
 		let settings = event.settings;
@@ -194,18 +194,19 @@ module.exports = function (connection) {
 		}
 		let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total FROM ${tableName}${whereStatement}`;
 		console.log(`Range Query: ${query}`);
-		connection.query(query, (err, result) => {
+		connection.query(query, (err, result, fields) => {
 			if (err) {
 				console.log("Range Error", err);
 				callback(err);
 			} else {
+				// console.log(result);
 				callback(null, {
-					min: result[0].min,
-					max: result[0].max,
-					total: result[0].total
+					min: correctValue(result[0][0], fields[0]),
+					max: correctValue(result[0][1], fields[1]),
+					total: correctValue(result[0][2], fields[2])
 				});
 			}
-		});
+		}, {inRowMode: true});
 	}
 
 	function nibble(event, callback) {
@@ -223,16 +224,18 @@ module.exports = function (connection) {
 			FETCH NEXT 2 ROWS ONLY`;
 
 		console.log(`Nibble Query: ${query}`);
-		connection.query(query, (err, rows) => {
+		connection.query(query, (err, rows, fields) => {
 			if (err) {
 				console.log("Nibble Error", err);
 				callback(err);
 			} else {
-				data.current = rows[0] ? rows[0].id : null;
-				data.next = rows[1] ? rows[1].id : null;
+				// console.log('query', query);
+				// console.log(rows, fields);
+				data.current = rows[0] ? correctValue(rows[0][0], fields[0]) : null;
+				data.next = rows[1] ? correctValue(rows[1][0], fields[0]) : null;
 				callback(null, data)
 			}
-		});
+		}, {inRowMode: true});
 	}
 
 	function initialize(event, callback) {
@@ -296,7 +299,6 @@ module.exports = function (connection) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						console.log(f);
 						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type.id].toLowerCase()) !== -1) {
 							return `COALESCE(LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', FLOOR(CAST(DATEDIFF(s, '19700101', cast('${f.name}' AS datetime)) AS bigint))), 2)), " ")`;
 						}
@@ -391,5 +393,21 @@ module.exports = function (connection) {
 			return `(${joined})`;
 		}
 		return ""
+	}
+
+	/**
+	 * Convert bigint from string to integer for comparisons
+	 * @param value
+	 * @param metadata
+	 * @returns {*}
+	 */
+	function correctValue(value, metadata) {
+		switch (metadata.type.id) {
+			case 38:
+			case 127:
+				return parseInt(value);
+		}
+
+		return value;
 	}
 };
