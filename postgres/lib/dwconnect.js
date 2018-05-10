@@ -15,13 +15,14 @@ module.exports = function(config, columnConfig) {
 		dimColumnTransform: (column) => {
 			return `d_${column.replace(/_id$/,'')}`;
 		},
-		useSurrogateDateKeys: true
+		useSurrogateDateKeys: true,
+		stageSchema: 'public'
 	}, columnConfig || {});
 
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 
 	client.importFact = function(stream, table, ids, callback) {
-		const stagingTbl = `stage.staging_${table}`;
+		const stagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(ids)) {
 			ids = [ids];
@@ -92,7 +93,7 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback) {
-		const stagingTbl = `stage.staging_${table}`;
+		const stagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(nk)) {
 			nk = [nk];
