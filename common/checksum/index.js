@@ -585,7 +585,7 @@ module.exports = {
 						//logger.log(`${id} ${method}: ${JSON.stringify(result)}`);
 						resolve(result);
 					} catch (err) {
-						console.log(`${id} ${method} Error: ${err}`);
+						logger.log(`${id} ${method} Error: ${err}`);
 						reject(err);
 					}
 				});
