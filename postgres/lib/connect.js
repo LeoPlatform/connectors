@@ -149,7 +149,6 @@ function create(hash, pool, parentCache) {
 			let uniqueKeys = {};
 			let uniqueLookup = {};
 
-
 			client.query(`select c.column_name, pk.constraint_name, pk.constraint_type
 					FROM information_schema.columns c
 					LEFT JOIN (SELECT kc.column_name, kc.constraint_name, tc.constraint_type
@@ -162,7 +161,6 @@ function create(hash, pool, parentCache) {
    					c.table_name = $1 and c.table_schema = 'public';
 			`, [table], (err, results) => {
 				if (results.length === 0) noTable = true;
-				if (err) throw err;
 				columns = results.map(r => {
 					if (r.constraint_type) {
 						if (r.constraint_type.toLowerCase() == "primary key") {
