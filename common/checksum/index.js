@@ -17,6 +17,7 @@ const ls = leo.streams;
 const async = require("async");
 
 const tableName = leo.configuration.resources.LeoCron;
+let logger = require("leo-sdk/lib/logger")("leo-checksum");
 
 function saveProgress(systemId, botId, data) {
 	return new Promise((resolve, reject) => {
@@ -84,7 +85,7 @@ module.exports = {
 			return saveProgress(systemId, botId, emptySession)
 		} else {
 			return new Promise((resolve, reject) => {
-				console.log("Getting Session", systemId, botId);
+				logger.log("Getting Session", systemId, botId);
 				dynamodb.get(tableName, botId, function(err, result) {
 					if (err) {
 						reject(err)
@@ -104,8 +105,6 @@ module.exports = {
 		}
 	},
 	checksum: function(system, botId, master, slave, opts) {
-
-		console.log('in checksum');
 		return new Promise((resolve, reject) => {
 			function logError(err) {
 				console.log('logging error');
@@ -115,7 +114,7 @@ module.exports = {
 				}).then(d => reject(err)).catch(e => reject(err));
 			}
 			this.getSession(system, botId, opts).then((session) => {
-				console.log("Session:", session);
+				logger.log("Session:", session);
 				let tasks = [];
 				master.setSession(session.master);
 				slave.setSession(session.slave);
@@ -135,7 +134,7 @@ module.exports = {
 						opts.end = session.end || opts.end;
 						opts.total = session.total;
 						master.range = (opts) => {
-							console.log("Using Cached Range Value");
+							logger.log("Using Cached Range Value");
 							return Promise.resolve({
 								min: opts.min,
 								max: opts.max,
@@ -211,13 +210,11 @@ module.exports = {
 							total: nibble.total,
 							reset: null
 						});
-						console.log('saving progress 214');
 						// logger.log(JSON.stringify(data, null, 2));
 						saveProgress(system, botId, data).then(result => done(null, result), done);
 					};
 
 					opts.onSample = opts.sample && function(type, diff, done) {
-						console.log('ops onsample');
 						session.sample[type] = diff.concat(session.sample[type]).slice(0, 4);
 						if (done) {
 							done();
@@ -248,7 +245,6 @@ module.exports = {
 							streak: session.totals.streak
 						}
 					}).sync(opts, function(result, done) {
-						console.log('in sync');
 						if (stream) {
 							if (!stream.write(result)) {
 								stream.once('drain', done);
@@ -452,7 +448,7 @@ module.exports = {
 						})
 					});
 					req.on('error', function(e) {
-						console.error('problem with request: ' + e.message);
+						logger.error('problem with request: ' + e.message);
 						reject(e);
 					});
 
@@ -508,7 +504,7 @@ module.exports = {
 					done();
 				},
 				getChecksum: function(data, callback) {
-					console.log(" BATCH", settings.name, data, rand.batch)
+					logger.log(" BATCH", settings.name, data, rand.batch)
 					callback(null, {
 						qty: data.end - data.start + 1,
 						hash: [1, 2, 3, Math.round(Math.random() * rand.batch)],
@@ -530,11 +526,11 @@ module.exports = {
 							hash: "1-2-3-" + (Math.round(Math.random() * rand.single))
 						})
 					}
-					console.log(" INDIVIDUAL", settings.name, data)
+					logger.log(" INDIVIDUAL", settings.name, data)
 					callback(null, result)
 				},
 				sample: function(data, callback) {
-					console.log(" SAMPLE", settings.name, data);
+					logger.log(" SAMPLE", settings.name, data);
 					let result = {
 						qty: 0,
 						ids: [],
@@ -557,12 +553,12 @@ module.exports = {
 						max: settings.mock.max,
 						total: settings.mock.max - settings.mock.min + 1
 					};
-					console.log(" RANGE", settings.name, data, result)
+					logger.log(" RANGE", settings.name, data, result)
 					callback(null, result);
 				},
 				nibble: function(data, callback) {
 					setTimeout(function() {
-						console.log(" NIBBLE", settings.name, data);
+						logger.log(" NIBBLE", settings.name, data);
 						data.end = Math.min(data.start + data.limit - 1, settings.mock.max);
 						data.next = data.start + data.limit < settings.mock.max ? data.start + data.limit : null;
 						callback(null, data)
