@@ -2,7 +2,7 @@
 const uuid = require('uuid');
 const base = require("leo-connector-common/checksum/lib/handler.js");
 const moment = require("moment");
-const logger = require("leo-sdk/lib/logger")("leo-checksum");
+const logger = require("leo-sdk/lib/logger")("postgres-checksum-api");
 
 let fieldTypes = {
 	INT4: 23,
@@ -148,7 +148,7 @@ module.exports = function(connection, fieldsTable) {
 			logger.log("Sample Query", sampleQuery);
 			connection.query(sampleQuery, (err, rows) => {
 				if (err) {
-					logger.log("Sample Error", err);
+					logger.error("Sample Error", err);
 					callback(err);
 					return;
 				}
@@ -241,7 +241,7 @@ module.exports = function(connection, fieldsTable) {
 			let connection = getConnection(event.settings);
 			connection.query(`create table ${session.table} (${event.settings.table.sql})`, (err) => {
 				session.drop = !err;
-				err && console.error(err);
+				err && logger.error(err);
 				callback(err, session);
 			});
 		} else {
