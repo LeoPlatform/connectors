@@ -9,7 +9,7 @@
 	"author": "",
 	"license": "ISC",
 	"dependencies": {
-		"leo-connector-common": "1.0.15",
+		"leo-connector-common": "^1.0.18",
 		"leo-sdk": "^1.0.68",
 		"mssql": "^4.1.0",
 		"uuid": "^3.2.1"

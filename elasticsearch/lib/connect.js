@@ -46,6 +46,9 @@ module.exports = function(config) {
 		describeTable: function(table, callback) {
 			throw new Error("Not Implemented");
 		},
+		describeTables: function(callback) {
+			throw new Error("Not Implemented");
+		},
 		streamToTableFromS3: function(table, opts) {
 			throw new Error("Not Implemented");
 		},

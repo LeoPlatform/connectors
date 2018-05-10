@@ -21,7 +21,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 		async.doWhilst((done) => {
 			let buildIds = ids.splice(0, opts.limit);
 
-			if (buildIds) {
+			if (buildIds.length) {
 				buildEntities(buildIds, push, done);
 			}
 		}, () => ids.length >= opts.limit, (err) => {
@@ -105,6 +105,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	});
 
 	function buildEntities(ids, push, callback) {
+
 		let r = domainObj(ids, builder.createLoader);
 		if (typeof r.get == "function") {
 			r = r.get();
@@ -206,7 +207,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
+						} else if (!results.length) {
+							return done();
 						}
+
 						mapResults(results, fields, row => {
 							if (t.transform) {
 								row = t.transform(row);
@@ -223,7 +227,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
+						} else if (!results.length) {
+							return done();
 						}
+
 						mapResults(results, fields, row => {
 							if (row.length) {
 								if (t.transform) {

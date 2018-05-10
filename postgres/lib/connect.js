@@ -29,16 +29,23 @@ module.exports = function(config) {
 		database: 'test',
 		password: 'a',
 		port: 5432,
-	}, config));
+	}, config, {
+		max: 15
+	}));
 
 	return create(pool);
 };
 
-function create(pool) {
+function create(pool, parentCache) {
+	let cache = {
+		schema: Object.assign({}, parentCache && parentCache.schema || {}),
+		timestamp: parentCache && parentCache.timestamp || null
+	};
 	let client = {
-		connect: function() {
+		connect: function(opts) {
+			opts = opts || {};
 			return pool.connect().then(c => {
-				return create(c);
+				return create(c, opts.type == "isolated" ? {} : cache);
 			});
 		},
 		query: function(query, params, callback, opts = {}) {
@@ -73,11 +80,36 @@ function create(pool) {
 		},
 		disconnect: pool.end.bind(pool),
 		end: pool.end.bind(pool),
-		release: pool.release && pool.release.bind(pool),
+		release: (destroy) => {
+			pool.release && pool.release(destroy);
+		},
 		describeTable: function(table, callback) {
-			client.query("SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
-				callback(err, result);
+			if (cache.schema[table]) {
+				logger.info(`Table "${table}" schema from cache`, cache.timestamp);
+				callback(null, cache.schema[table] || []);
+			} else {
+				this.describeTables((err, schema) => {
+					callback(err, schema && schema[table] || []);
+				});
+			}
+		},
+		describeTables: function(callback) {
+			client.query("SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' order by ordinal_position asc", (err, result) => {
+				let schema = {};
+				result && result.map(r => {
+					if (!(r.table_name in schema)) {
+						schema[r.table_name] = [];
+					}
+					schema[r.table_name].push(r);
+				});
+				cache.schema = schema;
+				cache.timestamp = Date.now();
+				logger.info("Caching Schema Table", cache.timestamp);
+				callback(err, cache.schema);
 			});
+		},
+		getSchemaCache: function() {
+			return cache.schema || {};
 		},
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
@@ -233,7 +265,8 @@ function create(pool) {
 			let myClient = null;
 			let pending = null;
 			pool.connect().then(c => {
-				client.query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 order by ordinal_position asc", [table], (err, result) => {
+
+				client.describeTable(table, (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
 
@@ -283,7 +316,7 @@ function create(pool) {
 				}
 			}, (done, push) => {
 				stream.on('end', () => {
-					myClient.end();
+					myClient.release(true);
 					done();
 				});
 				stream.end();
