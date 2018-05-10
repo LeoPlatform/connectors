@@ -21,7 +21,6 @@ module.exports = function(config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 
 	client.importFact = function(stream, table, ids, callback) {
-		console.log("IMPORT FACT", table);
 		const stagingTbl = `stage.staging_${table}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(ids)) {
@@ -93,7 +92,6 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback) {
-		console.log("IMPORT DIM", table);
 		const stagingTbl = `stage.staging_${table}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(nk)) {
