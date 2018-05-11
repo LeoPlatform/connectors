@@ -4,6 +4,8 @@ const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
 const MAX = 5000;
 
+const moment = require('moment');
+
 module.exports = function(event, context, sdk) {
 	if (!event || !context || !sdk) {
 		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘leo-sdk’');
@@ -54,12 +56,6 @@ module.exports = function(event, context, sdk) {
 
 			joinOneToMany: function(name, pk, sql) {
 				joins[name] = {type: 'one_to_many', name: name, pk: pk, query: sql};
-
-				return this;
-			},
-
-			joinOneToOne: function(name, pk, sql) {
-				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: sql};
 
 				return this;
 			},
@@ -134,15 +130,11 @@ module.exports = function(event, context, sdk) {
 	 * @returns {exports}
 	 */
 	this.loadDWObjects = function (params) {
-		params = {
-			ls: params.ls,
-			logEvents: params.logEvents || 1000,
-			start: params.start || undefined
-		};
-
-		if (!params.ls) {
-			params.ls = sdk.streams;
-		}
+		params = Object.assign({
+			ls: sdk.streams,
+			logEvents: 1000,
+			start: undefined
+		}, params || {});
 
 		let entities = [];
 

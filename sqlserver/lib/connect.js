@@ -49,8 +49,6 @@ module.exports = function(config) {
 				stream: false
 			}, opts || {});
 
-
-
 			if (!isConnected) {
 				console.log("buffering query");
 				buffer.push({

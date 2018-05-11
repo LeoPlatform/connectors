@@ -1,13 +1,13 @@
 "use strict";
-var async = require("async");
-var createNibbler = require("./nibbler.js");
+const async = require("async");
+const createNibbler = require("./nibbler.js");
 
 let logger = require("leo-sdk/lib/logger")("leo-checksum.nibbler");
 
 module.exports = function(local, remote, opts) {
 
-	var nibbler = createNibbler(local, opts);
-	var data = Object.assign({
+	let nibbler = createNibbler(local, opts);
+	let data = Object.assign({
 		progress: 0,
 		totalCorrect: 0,
 		totalMissing: 0,
@@ -15,14 +15,14 @@ module.exports = function(local, remote, opts) {
 		totalExtra: 0,
 		streak: 0,
 	}, (opts || {}).totals);
-	//logger.log("START VALUES", data)
+	// logger.log("START VALUES", data);
 
 	// Add extra param to this sync;
-	var sync = nibbler.sync;
+	let sync = nibbler.sync;
 	nibbler.sync = function(opts, resultCallback, callback) {
-		var asyncMethod = opts.inSeries ? "mapSeries" : "map"
-		var fieldNames = opts.fieldNames || [];
-		var update = function(nibble, obj, results) {
+		let asyncMethod = opts.inSeries ? "mapSeries" : "map";
+		let fieldNames = opts.fieldNames || [];
+		let update = function(nibble, obj, results) {
 			obj.progress += results.qty;
 			obj.totalCorrect += results.correct;
 			obj.totalMissing += results.missing;
@@ -39,7 +39,7 @@ module.exports = function(local, remote, opts) {
 			nibbler.log(`Correct: ${results.correct}, Incorrect: ${results.incorrect}, Missing: ${results.missing}, Extra: ${results.extra}, Start: ${nibble.start}, End: ${nibble.end}`);
 		};
 
-		var compare = function(start, end, callback) {
+		let compare = function(start, end, callback) {
 			if (opts.skipBatch) {
 				return callback(true, {
 					errors: ["Skipping"],
@@ -68,7 +68,7 @@ module.exports = function(local, remote, opts) {
 				}
 				let localData = batchResults[0];
 				let remoteData = batchResults[1];
-				var result = {
+				let result = {
 					errors: []
 				};
 				result[local.name] = localData;
@@ -100,7 +100,7 @@ module.exports = function(local, remote, opts) {
 			});
 		};
 
-		var compareIndividual = function(start, end, callback) {
+		let compareIndividual = function(start, end, callback) {
 			// log("running individual", start, end);
 			nibbler.timeLog("Running Master & Slave Individual Checksum");
 			async [asyncMethod]([local, remote], (connector, done) => {
@@ -115,7 +115,7 @@ module.exports = function(local, remote, opts) {
 				}
 				let localData = indivData[0];
 				let remoteData = indivData[1];
-				var results = {
+				let results = {
 					missing: [],
 					extra: [],
 					incorrect: [],
@@ -123,8 +123,8 @@ module.exports = function(local, remote, opts) {
 					qty: localData.checksums.length
 				};
 
-				var localLookup = {};
-				var remoteLookup = {};
+				let localLookup = {};
+				let remoteLookup = {};
 				localData.checksums.map((o, i) => {
 					localLookup[o.id] = i;
 				});
@@ -153,7 +153,7 @@ module.exports = function(local, remote, opts) {
 				callback(null, results);
 			});
 		};
-		var sample = function(ids, callback) {
+		let sample = function(ids, callback) {
 			if (local.sample && remote.sample) {
 				nibbler.timeLog("Running Master & Slave Sample");
 
@@ -169,9 +169,9 @@ module.exports = function(local, remote, opts) {
 					// logger.log(JSON.stringify(responses, null, 2));
 					let localData = responses[0];
 					let remoteData = responses[1];
-					var diffs = [];
-					var paddedLocalName = local.name;
-					var paddedRemoteName = remote.name;
+					let diffs = [];
+					let paddedLocalName = local.name;
+					let paddedRemoteName = remote.name;
 					if (paddedRemoteName.length > paddedLocalName.length) {
 						paddedLocalName = paddedLocalName + " ".repeat(paddedRemoteName.length - paddedLocalName.length)
 					} else if (paddedLocalName.length > paddedRemoteName.length) {
@@ -179,14 +179,14 @@ module.exports = function(local, remote, opts) {
 					}
 					localData.ids = localData.ids.sort();
 					localData.checksums.forEach((l, i) => {
-						var diff = {};
-						var r = remoteData.checksums[i];
+						let diff = {};
+						let r = remoteData.checksums[i];
 						if (!r) {
 							return;
 						}
 						l.forEach((v, k) => {
 							if (r && v !== r[k]) {
-								var name = fieldNames[k - 1] || k;
+								let name = fieldNames[k - 1] || k;
 								diff[name] = {
 									[paddedLocalName]: v,
 									[paddedRemoteName]: r[k] || null
@@ -195,7 +195,7 @@ module.exports = function(local, remote, opts) {
 						});
 						r.forEach((v, k) => {
 							if (l && !(k in l)) {
-								var name = fieldNames[k - 1] || k;
+								let name = fieldNames[k - 1] || k;
 								diff[name] = {
 									[paddedLocalName]: null,
 									[paddedRemoteName]: v
@@ -222,9 +222,9 @@ module.exports = function(local, remote, opts) {
 
 		};
 
-		var until = opts.until;
-		var stopReason = null;
-		var nibblerOpts = {
+		let until = opts.until;
+		let stopReason = null;
+		let nibblerOpts = {
 			whilst: function(nibble) {
 				let streak = (!opts.stopOnStreak || data.streak < opts.stopOnStreak) ? false : "streak";
 				let other = (!until || until(nibble));
@@ -246,7 +246,7 @@ module.exports = function(local, remote, opts) {
 				if (nibble.limit <= 20000 || result.qty < 20000 || opts.skipBatch) { //It is small enough, we need to do individual checks
 					compareIndividual(nibble.start, nibble.end, (err, dataResult) => {
 						if (err) {
-							done(err)
+							done(err);
 							return;
 						}
 						//Submit them to be resent
@@ -265,7 +265,7 @@ module.exports = function(local, remote, opts) {
 								extra: dataResult.extra.length
 							});
 							if (opts.stats) {
-								var d = done;
+								let d = done;
 								done = function() {
 									opts.stats(nibble, dataResult, data, d);
 								}
@@ -329,7 +329,7 @@ module.exports = function(local, remote, opts) {
 						});
 
 						if (opts.stats) {
-							var d = done;
+							let d = done;
 							done = function() {
 								opts.stats(nibble, result, data, d);
 							}
@@ -345,7 +345,7 @@ module.exports = function(local, remote, opts) {
 		return sync(opts, function(err) {
 			callback(err, data, err || stopReason || "complete")
 		});
-	}
+	};
 
 	return nibbler;
 };
