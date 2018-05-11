@@ -316,7 +316,6 @@ function create(hash, pool, parentCache) {
 				client.describeTable(shortTable, (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
-					console.log("TABLE", table);
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
 					stream.on("error", function(err) {
 						console.log(err);
