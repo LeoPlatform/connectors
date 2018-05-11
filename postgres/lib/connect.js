@@ -149,16 +149,53 @@ function create(hash, pool, parentCache) {
 			let uniqueKeys = {};
 			let uniqueLookup = {};
 
-			client.query(`select c.column_name, pk.constraint_name, pk.constraint_type
-					FROM information_schema.columns c
-					LEFT JOIN (SELECT kc.column_name, kc.constraint_name, tc.constraint_type
-  						FROM information_schema.key_column_usage kc
-  						JOIN information_schema.table_constraints tc on kc.table_name = tc.table_name and kc.table_schema = tc.table_schema and kc.constraint_name = tc.constraint_name
-  						WHERE tc.table_name = $1
-    						and tc.table_schema = 'public'
-						) pk on pk.column_name = c.column_name
-					WHERE 
-   					c.table_name = $1 and c.table_schema = 'public';
+			client.query(`select
+					c.column_name,
+					pk.constraint_name,
+					pk.constraint_type
+				from
+					information_schema.columns c
+				left join(
+						select
+							kc.column_name,
+							kc.constraint_name,
+							tc.constraint_type
+						from
+							information_schema.key_column_usage kc
+						join information_schema.table_constraints tc on
+							kc.table_name = tc.table_name
+							and kc.table_schema = tc.table_schema
+							and kc.constraint_name = tc.constraint_name
+						where
+							tc.table_name = $1
+							and tc.table_schema = 'public'
+					) pk on
+					pk.column_name = c.column_name
+				where
+					c.table_name = $1
+					and c.table_schema = 'public'
+					and constraint_type is not null                     
+				union
+				select
+					a.attname as column_name,
+					i.relname as constraint_name,
+					case
+						when ix.indisprimary then 'PRIMARY KEY'
+						when ix.indisunique then 'UNIQUE'
+					end as constraint_type 
+				from
+					pg_class t,
+					pg_class i,
+					pg_index ix,
+					pg_attribute a
+				where
+					t.oid = ix.indrelid
+					and i.oid = ix.indexrelid
+					and a.attrelid = t.oid
+					and a.attnum = any(ix.indkey)
+					and t.relkind = 'r'
+					and t.relname = $1
+					and (ix.indisunique or ix.indisprimary);
 			`, [table], (err, results) => {
 				if (results.length === 0) noTable = true;
 				columns = results.map(r => {
