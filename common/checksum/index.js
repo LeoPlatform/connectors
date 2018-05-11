@@ -2,12 +2,12 @@ let leo = require("leo-sdk");
 const aws = require("aws-sdk");
 const checksum = require("./lib/checksumNibbler.js");
 let dynamodb = leo.aws.dynamodb;
-var cron = leo.bot;
+let cron = leo.bot;
 
 /** These are for file connector **/
-var httpsObj = require("https");
-var httpObj = require("http");
-var URL = require("url");
+let httpsObj = require("https");
+let httpObj = require("http");
+let URL = require("url");
 const crypto = require('crypto');
 
 const moment = require("moment");
@@ -39,7 +39,7 @@ function saveProgress(systemId, botId, data) {
 function stats(array, other) {
 	array = array || [];
 
-	var ids = array.slice(0).sort(() => {
+	let ids = array.slice(0).sort(() => {
 		return 0.5 - Math.random()
 	}).slice(0, 4);
 
@@ -105,7 +105,6 @@ module.exports = {
 		}
 	},
 	checksum: function(system, botId, master, slave, opts) {
-
 		return new Promise((resolve, reject) => {
 			function logError(err) {
 				saveProgress(system, botId, {
@@ -116,10 +115,10 @@ module.exports = {
 			this.getSession(system, botId, opts).then((session) => {
 				logger.log("Session:", session);
 				let tasks = [];
-				master.setSession(session);
-				slave.setSession(session);
+				master.setSession(session.master);
+				slave.setSession(session.slave);
 
-				if (session.status == 'initializing') {
+				if (session.status === 'initializing') {
 					tasks.push(Promise.all([
 						master.init({}),
 						slave.init({})
@@ -149,23 +148,23 @@ module.exports = {
 						map: {}
 					};
 					let loopStart = Date.now();
-					opts.until = function(nibble) {
-						var lastLoopDuration = Date.now() - loopStart;
+					opts.until = function() {
+						let lastLoopDuration = Date.now() - loopStart;
 						loopStart = Date.now();
-						var neededTime = lastLoopDuration * 1.33;
+						let neededTime = lastLoopDuration * 1.33;
 
 						//logger.log("Check", loopStart + neededTime >= opts.stop_at, loopStart + neededTime, opts.stop_at)
 						if (loopStart + neededTime >= opts.stop_at) {
 							return "Out Of Time";
-						} else {
-							return false;
 						}
+
+						return false;
 					};
 					opts.stats = function(nibble, result, total, done) {
-						var percent = (nibble.progress / nibble.total) * 100;
-						var fixed = percent.toFixed(2);
+						let percent = (nibble.progress / nibble.total) * 100;
+						let fixed = percent.toFixed(2);
 
-						if (fixed == "100.00" && percent < 100) {
+						if (fixed === "100.00" && percent < 100) {
 							fixed = 99.99;
 						}
 
@@ -178,7 +177,7 @@ module.exports = {
 							});
 						}
 
-						var data = Object.assign(session, {
+						let data = Object.assign(session, {
 							endTime: null,
 							lastUpdate: moment.now(),
 							status: "running",
@@ -252,10 +251,11 @@ module.exports = {
 							done();
 						}
 					}, function(err, data, stopReason) {
-						var status = err ? ("error") : (stopReason == "Out Of Time" ? "running" : "complete");
-						var tasks = [];
+						let status = err ? ("error") : (stopReason === "Out Of Time" ? "running" : "complete");
+						let tasks = [];
+						logger.log('stopReason', stopReason);
 
-						if (status == "complete") {
+						if (status === "complete") {
 							tasks.push(done => {
 								master.destroy({
 									status: status
@@ -266,14 +266,14 @@ module.exports = {
 									status: status
 								}).then(result => done(), done);
 							});
-						} else if (status == "running") {
+						} else if (status === "running") {
 							cron.runAgain();
 						}
 
 						stream.end((err) => {
 							saveProgress(system, botId,
 								Object.assign(session, {
-									endTime: status != "running" ? moment.now() : null,
+									endTime: status !== "running" ? moment.now() : null,
 									lastUpdate: moment.now(),
 									status: status,
 									statusReason: err ? err.toString() : stopReason
@@ -293,11 +293,9 @@ module.exports = {
 				}, logError);
 			}, logError)
 		});
-
-		return;
 	},
 	lambdaConnector: function(id, lambdaName, settings) {
-		var region = (lambdaName.match(/arn:aws:lambda:(.*?):/) || [])[1];
+		let region = (lambdaName.match(/arn:aws:lambda:(.*?):/) || [])[1];
 		const lambdaInvoker = new aws.Lambda({
 			region: region || this.configuration._meta.region,
 			credentials: this.configuration ? this.configuration.credentials : null
@@ -309,7 +307,6 @@ module.exports = {
 		function invoke(method) {
 			return (data) => {
 				return new Promise((resolve, reject) => {
-					var start = moment.now();
 					lambdaInvoker.invoke({
 						FunctionName: lambdaName,
 						InvocationType: 'RequestResponse',
@@ -327,15 +324,22 @@ module.exports = {
 						}),
 						Qualifier: qualifier
 					}, function(err, data) {
-						var payload = undefined;
+						let payload = undefined;
 						if (!err && data.FunctionError) {
 							err = data.Payload;
 						} else if (!err && data.Payload != undefined) {
-							var obj = JSON.parse(data.Payload);
+							let obj = JSON.parse(data.Payload);
 							if (obj.statusCode == 500) {
 								err = new Error(obj.body);
 							} else {
 								payload = obj.response;
+								if (obj.session) {
+									let o = {
+										id: session.id,
+										type: session.type
+									};
+									Object.assign(session, obj.session, o);
+								}
 							}
 						}
 						if (err) {
@@ -368,11 +372,11 @@ module.exports = {
 		let requestSettings = settings.request;
 		delete settings.request;
 
-		var urlMethod = (method) => `${settings.url}?method=${method}`;
+		let urlMethod = (method) => `${settings.url}?method=${method}`;
 		if (typeof settings.url === "function") {
 			urlMethod = settings.url;
 		}
-		var postProcessResponse = (method, postBody, data) => JSON.parse(data);
+		let postProcessResponse = (method, postBody, data) => JSON.parse(data);
 		if (settings.postProcessResponse) {
 			postProcessResponse = settings.postProcessResponse;
 		}
@@ -399,7 +403,6 @@ module.exports = {
 					http = httpsObj;
 				}
 				return new Promise((resolve, reject) => {
-					var start = moment.now();
 					//logger.log("URL:", url)
 					let requestOptions = Object.assign(URL.parse(url), {
 						method: 'POST',
@@ -407,19 +410,21 @@ module.exports = {
 							'Content-Type': 'application/json',
 						}
 					}, requestSettings);
+
 					let postBody = {
 						data: data,
 						settings: settings,
 						session: session
-					}
-					var req = http.request(requestOptions, function(res) {
+					};
+
+					let req = http.request(requestOptions, function(res) {
 						res.setEncoding('utf8');
-						var data = '';
+						let data = '';
 						res.on('data', function(chunk) {
 							data += chunk;
 						});
 						res.on('end', function() {
-							var payload = undefined;
+							let payload = undefined;
 							if (data) {
 								let obj = postProcessResponse(method, postBody, data);
 								payload = obj.response;
@@ -427,7 +432,7 @@ module.exports = {
 									payload = obj;
 								}
 								if (obj.session) {
-									var o = {
+									let o = {
 										id: session.id,
 										type: session.type
 									};
@@ -448,7 +453,7 @@ module.exports = {
 					req.end();
 				});
 			};
-		};
+		}
 
 		function empty() {
 			return (data) => {
@@ -474,8 +479,7 @@ module.exports = {
 	},
 	mockConnector: function(settings) {
 		return function(data, callback) {
-			var start = settings.mock.min;
-			var rand = Object.assign({
+			let rand = Object.assign({
 				batch: 10,
 				single: 10,
 				sample: 10
@@ -503,7 +507,7 @@ module.exports = {
 					})
 				},
 				getIndividualChecksums: function(data, callback) {
-					var result = {
+					let result = {
 						qty: 0,
 						start: data.start,
 						end: data.end,
@@ -522,7 +526,7 @@ module.exports = {
 				},
 				sample: function(data, callback) {
 					logger.log(" SAMPLE", settings.name, data);
-					var result = {
+					let result = {
 						qty: 0,
 						ids: [],
 						start: data.start,
@@ -606,7 +610,7 @@ module.exports = {
 				return data;
 			}),
 			getChecksum: invoke("batch", (data) => {
-				var result = {
+				let result = {
 					qty: 0,
 					ids: data.ids,
 					start: data.start,
@@ -620,12 +624,12 @@ module.exports = {
 					set = set.reverse();
 				}
 
-				var extract = (obj) => {
+				let extract = (obj) => {
 					return settings.fields.map(f => obj[f]);
 				};
 
 				set.map(obj => {
-					var allFields = "";
+					let allFields = "";
 					extract(obj).forEach(value => {
 						if (value instanceof Date) {
 							allFields += crypto.createHash('md5').update(Math.round(value.getTime() / 1000).toString()).digest('hex');
@@ -635,7 +639,7 @@ module.exports = {
 							allFields += " ";
 						}
 					});
-					var hash = crypto.createHash('md5').update(allFields).digest();
+					let hash = crypto.createHash('md5').update(allFields).digest();
 
 					result.hash[0] += hash.readUInt32BE(0);
 					result.hash[1] += hash.readUInt32BE(4);
@@ -652,11 +656,11 @@ module.exports = {
 					set = set.reverse();
 				}
 
-				var extract = (obj) => {
+				let extract = (obj) => {
 					return settings.fields.map(f => obj[f]);
 				};
 
-				var results = {
+				let results = {
 					ids: data.ids,
 					start: data.start,
 					end: data.end,
@@ -665,7 +669,7 @@ module.exports = {
 				};
 
 				set.map(obj => {
-					var allFields = "";
+					let allFields = "";
 
 					extract(obj).forEach(value => {
 						if (value instanceof Date) {
@@ -692,22 +696,22 @@ module.exports = {
 				data.ids.map(i => lookup[i] = true);
 				let set = db.filter(a => lookup[a[settings.id_column]]);
 
-				var results = {
+				let results = {
 					qty: 0,
 					ids: [],
 					checksums: []
 				};
 
-				var extract = (obj) => {
+				let extract = (obj) => {
 					return settings.fields.map(f => obj[f]);
 				};
 
 				set.map(obj => {
-					var out = [obj[settings.id_column]];
+					let out = [obj[settings.id_column]];
 					extract(obj).forEach(value => {
 						if (value instanceof Date) {
 							out.push(Math.round(value.getTime() / 1000) + "  " + moment(value).utc().format());
-						} else if (value && typeof value == "object" && value.toHexString) {
+						} else if (value && typeof value === "object" && value.toHexString) {
 							out.push(value.toString());
 						} else {
 							out.push(value);

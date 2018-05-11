@@ -3,7 +3,7 @@ const connect = require("./lib/connect.js");
 const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
-const checksum = require("leo-connector-common/checksum");
+const checksum = require("./lib/checksum");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
