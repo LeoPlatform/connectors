@@ -128,7 +128,7 @@ module.exports = function(config) {
 							FETCH NEXT 2 ROWS ONLY`;
 			}
 
-			client.query(sql, callback);
+			client.query(sql, callback, {inRowMode: false});
 		},
 		getIds: function(table, id, start, end, reverse, callback) {
 			if (reverse) {
@@ -141,7 +141,7 @@ module.exports = function(config) {
 					ORDER BY ${id} asc`;
 			}
 
-			client.query(sql, callback);
+			client.query(sql, callback, {inRowMode: false});
 		},
 		end: pool.close
 	};
