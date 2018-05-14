@@ -4,8 +4,8 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"test": "mocha ./test/unit/**/*.test.js",
-		"test:int": "mocha ./test/integration/**/*.test.js"
+		"test": "mocha test/unit/**/*.test.js",
+		"test:int": "mocha test/integration/**/*.test.js"
 	},
 	"author": "",
 	"license": "ISC",
@@ -17,7 +17,6 @@
 		"pg": "^7.4.1",
 		"pg-copy-streams": "^1.2.0",
 		"pg-format": "^1.0.4",
-		"pg-logical-replication": "^1.0.3",
 		"pg-native": "^2.2.0"
 	},
 	"devDependencies": {

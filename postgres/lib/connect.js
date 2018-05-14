@@ -18,7 +18,6 @@ require('pg').types.setTypeParser(1114, (val) => {
 	return moment(val).unix() + "  " + moment(val).utc().format();
 });
 
-
 const ls = require("leo-sdk").streams;
 const clients = {};
 
@@ -131,6 +130,41 @@ function create(hash, pool, parentCache) {
 		},
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
+		},
+		stripAllTriggers: function(callback) {
+			// see if strip_all_triggers() exists //select to_regproc('strip_all_triggers')
+			client.query('SELECT to_regproc(\'strip_all_triggers\');', (err, rows) => {
+				if (err) return callback(err);
+				const { to_regproc: stripAllTriggersExists } = rows[0];
+				if (stripAllTriggersExists) {
+					callback();
+				} else {
+					this.query(`
+						CREATE OR REPLACE FUNCTION strip_all_triggers() RETURNS text AS $$ DECLARE
+											triggNameRecord RECORD;
+									triggTableRecord RECORD;
+							BEGIN
+									FOR triggNameRecord IN select distinct(trigger_name) from information_schema.triggers where trigger_schema = 'public' LOOP
+											SELECT distinct(event_object_table) INTO triggTableRecord from information_schema.triggers where trigger_name = triggNameRecord.trigger_name;
+											RAISE NOTICE 'Dropping trigger: % on table: %', triggNameRecord.trigger_name, triggTableRecord.event_object_table;
+											EXECUTE 'DROP TRIGGER ' || triggNameRecord.trigger_name || ' ON ' || triggTableRecord.event_object_table || ';';
+									END LOOP;
+
+									RETURN 'done';
+							END;
+							$$ LANGUAGE plpgsql SECURITY DEFINER;
+						`, 
+					(err) => {
+						if (err) return callback(err);
+						this.query('SELECT strip_all_triggers();', (err, rows) => {
+							if (err) return callback(err);
+							const { strip_all_triggers: stripTriggersValue } = rows[0];
+							if (stripTriggersValue === 'done') return callback();
+							callback(new Error("strip_all_triggers ran unsuccessfully"));
+						});
+					});
+				}
+			});
 		},
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
