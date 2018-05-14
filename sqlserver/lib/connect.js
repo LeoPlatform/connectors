@@ -110,7 +110,7 @@ module.exports = function(config) {
 					max: result[0].max,
 					total: result[0].total
 				});
-			});
+			}, {inRowMode: false});
 		},
 		nibble: function(table, id, start, min, max, limit, reverse, callback) {
 			let sql;
