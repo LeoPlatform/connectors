@@ -173,8 +173,7 @@ function create(hash, pool, parentCache) {
 					pk.column_name = c.column_name
 				where
 					c.table_name = $1
-					and c.table_schema = 'public'
-					and constraint_type is not null                     
+					and c.table_schema = 'public'                    
 				union
 				select
 					a.attname as column_name,
