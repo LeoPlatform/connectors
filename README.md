@@ -82,6 +82,26 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
 	}
 ```
 
+For MySQL and Postgres, we need to dynamically add the node modules to the package.json.
+For MySQL, inside the config.leo object, add (make sure ../../ is the path to where your node_modules/mysql2 is located, relative to the connector bot):
+```json
+"build": {
+    "include": [
+        "../../node_modules/mysql2"
+    ]   
+}
+```
+
+For Postgres, inside the config.leo object, add (make sure ../../ is the path to where your node_modules/pg is located, relative to the connector bot):
+```json
+"build": {
+    "include": [
+        "../../node_modules/pg",
+        "../../node_modules/pg-format"
+    ]   
+}   
+```
+
 ### Step 2: Create a slave database connector.
 This will be your data warehouse or anything you want to compare against the master database.
 **Repeat step 1** for this bot but with the slave database connection information.
