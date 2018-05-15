@@ -3,11 +3,11 @@
 ### Step 1: Create a master database connector.
 If you already have a connector setup for this database connection, skip this step.
 
-Create an index.js file using the proper connector for your database type:
-Starting by requiring the proper connector for your database type:
+Create a new bot with an index.js and package.json.
+In the index.js file, use the proper connector for your database type:
 (i.e. leo-connector-sqlserver, leo-connector-postgres or leo-connector-mysql)
 
-Example **index.js**:
+Example **index.js** using leo-connector-mysql:
 ```javascript
 // use the connector for your database type:
 const connector = require('leo-connector-mysql');
@@ -24,9 +24,9 @@ module.exports = connector.checksum({
 Example **package.json**: (replace the name with your connector type)
 ```json
 {
-	"name": "mysqlConnector",
+	"name": "dw-mysql-checksum-connector",
 	"version": "1.0.0",
-	"description": "MySQL connector",
+	"description": "MySQL connector for the Data Warehouse checksum",
 	"main": "index.js",
 	"directories": {
 		"test": "test"
@@ -36,27 +36,49 @@ Example **package.json**: (replace the name with your connector type)
 	},
 	"config": {
 		"leo": {
-		"type": "bot",
-			"memory": 256,
-			"timeout": 300,
-			"role": "ApiRole"
-		}
+            "type": "bot",
+            "memory": 256,
+            "timeout": 300,
+            "role": "ApiRole",
+            "env": {
+                "DB_HOST": "dbhost.domain.com",
+                "DB_PORT": 3306,
+                "DB_NAME": "mydbname",
+                "DB_USER": "mydbuser",
+                "DB_PASSWORD": "mySuperSecretPassword"
+            }
+        }
 	}
 }
 ```
 
-If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig directly below "config" (replace the id's with those from your VPC):
+If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the config.leo object (replace the id's with those from your VPC):
 ```json
-    "VpcConfig": {
-        "SecurityGroupIds": [
-            "sg-123456fb"
-        ],
-        "SubnetIds": [
-            "subnet-abc12345",
-            "subnet-def67890",
-            "subnet-ghi45679"
-        ]
-    }
+	"config": {
+		"leo": {
+            "type": "bot",
+            "memory": 256,
+            "timeout": 300,
+            "role": "ApiRole",
+            "env": {
+                "DB_HOST": "dbhost.domain.com",
+                "DB_PORT": 3306,
+                "DB_NAME": "mydbname",
+                "DB_USER": "mydbuser",
+                "DB_PASSWORD": "mySuperSecretPassword"
+            },
+            "VpcConfig": {
+                "SecurityGroupIds": [
+                    "sg-123456ab"
+                ],
+                "SubnetIds": [
+                    "subnet-abc12345",
+                    "subnet-def67890",
+                    "subnet-ghi45679"
+                ]
+            }
+        }
+	}
 ```
 
 ### Step 2: Create a slave database connector.
@@ -65,7 +87,7 @@ This will be your data warehouse or anything you want to compare against the mas
 If your slave is not a database but an endpoint, see the custom URL connector section (in-progress).
 
 ### Step 3: Deploy the bots
-In your service, be sure to install the connector NPM's for the connectors you're using.
+In your service, be sure to install the NPM modules for the connectors you are using.
 #### Available Connectors:
 1. leo-connector-mysql:
 `npm install leo-connector-mysql`
