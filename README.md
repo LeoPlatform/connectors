@@ -17,7 +17,8 @@ module.exports = connector.checksum({
 	user: process.env.DB_USER,
 	port: process.env.DB_PORT,
 	database: process.env.DB_NAME,
-	password: process.env.KMS_DB_PASSWORD
+	password: process.env.KMS_DB_PASSWORD,
+	connectTimeout: 20000 // set the connection timeout to 20 seconds
 });
 ```
 
