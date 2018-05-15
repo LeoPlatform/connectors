@@ -8,7 +8,7 @@ Starting by requiring the proper connector for your database type:
 (i.e. leo-connector-sqlserver, leo-connector-postgres or leo-connector-mysql)
 
 Example index.js:
-```
+```javascript
 // use the connector for your database type:
 const connector = require('leo-connector-mysql');
 
@@ -23,7 +23,7 @@ module.exports = connector.checksum({
 
 Then create a package.json:
 Use this for the package.json, replace the name with your connector type:
-```
+```json
 {
 	"name": "mysqlConnector",
 	"version": "1.0.0",
@@ -47,7 +47,7 @@ Use this for the package.json, replace the name with your connector type:
 ```
 
 If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig directly below "config" (replace the id's with those from your VPC):
-```
+```json
     "VpcConfig": {
         "SecurityGroupIds": [
             "sg-123456fb"
