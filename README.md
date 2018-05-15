@@ -7,7 +7,7 @@ Create an index.js file using the proper connector for your database type:
 Starting by requiring the proper connector for your database type:
 (i.e. leo-connector-sqlserver, leo-connector-postgres or leo-connector-mysql)
 
-Example index.js:
+Example **index.js**:
 ```javascript
 // use the connector for your database type:
 const connector = require('leo-connector-mysql');
@@ -22,7 +22,7 @@ module.exports = connector.checksum({
 ```
 
 Then create a package.json:
-Use this for the package.json, replace the name with your connector type:
+Use this for the **package.json**, replace the name with your connector type:
 ```json
 {
 	"name": "mysqlConnector",
@@ -62,12 +62,19 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
 
 ### Step 2: Create a slave database connector.
 This will be your data warehouse or anything you want to compare against the master database.
-Repeat step 1 for this bot but with the slave database connection information.
+**Repeat step 1** for this bot but with the slave database connection information.
 If your slave is not a database but an endpoint, see the custom URL connector section (in-progress).
 
 ### Step 3: Deploy the bots
-In your service, be sure have run `npm install` for each connector you're using.
-(e.g. `npm install leo-connector-mysql`)
+In your service, be sure to install the connector NPM's for the connectors you're using.
+#### Available Connectors:
+1. leo-connector-mysql:
+`npm install leo-connector-mysql`
+2. leo-connector-postgres:
+`npm install leo-connector-postgres`
+3. leo-connector-sqlserver:
+`npm install leo-connector-sqlserver`
+
 Now publish and deploy the bots.
 
 Congratulations! You now have connectors setup to run a checksum. Next we'll need to create a checksum runner.
