@@ -25,7 +25,7 @@
 	},
 	"dependencies": {
 		"async": "^2.6.0",
-		"leo-sdk": "^1.0.67",
+		"leo-sdk": "^1.0.72",
 		"moment": "^2.22.1"
 	}
 }
