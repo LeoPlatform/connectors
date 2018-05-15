@@ -21,8 +21,7 @@ module.exports = connector.checksum({
 });
 ```
 
-Then create a package.json:
-Use this for the **package.json**, replace the name with your connector type:
+Example **package.json**: (replace the name with your connector type)
 ```json
 {
 	"name": "mysqlConnector",
