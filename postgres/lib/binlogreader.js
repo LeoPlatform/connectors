@@ -73,13 +73,19 @@ module.exports = {
 				logger.debug(`(${config.database}) Trying to connect.`);
 				if (err) return dieError(err);
 				if (opts.recoverWal && requestedWalSegmentAlreadyRemoved) {
+					console.log(`RECOVER FROM WAL SEGMENT ALREADY REMOVED. (removing slot ${opts.slot_name})`);
 					const dropSlotPromise = new Promise((resolve, reject) => {
-						wrapperClient.query(`SELECT pg_drop_replication_slot($1);`, [opts.slot_name], (err, result) => {
+						wrapperClient.query(`SELECT pg_drop_replication_slot($1);`, [opts.slot_name], (err) => {
 							if (err) return reject(err);
-							resolve(result);
+							resolve();
 						});
 					});
-					await dropSlotPromise;
+					try {
+						await dropSlotPromise;
+						console.log(`SLOT ${opts.slot_name} REMOVED`);
+					} catch (err) {
+						dieError(err);
+					}
 				}
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 					logger.debug(`(${config.database}) Trying to get replication slot ${opts.slot_name}.`);
