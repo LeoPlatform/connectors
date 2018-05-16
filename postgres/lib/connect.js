@@ -5,6 +5,7 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
 const async = require('async');
+const chunk = require('lodash/fp/chunk');
 
 // require("leo-sdk/lib/logger").configure(true);
 
@@ -169,6 +170,7 @@ function create(hash, pool, parentCache) {
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000,
+				removeRecordsBatch: 300,
 				useReplaceInto: false,
 				useOnDuplicateUpdate: false,
 				ignoreDestinationMissingTable: false
@@ -323,9 +325,12 @@ function create(hash, pool, parentCache) {
 						tasks.push(done => client.query("BEGIN", done));
 						tasks.push(done => client.query(format("ALTER TABLE %I DISABLE TRIGGER ALL", table), done));
 						Object.keys(uniqueKeys).forEach(constraint => {
-							tasks.push(done => {
-								//Let's delete the offending records and try again
-								client.query(format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, uniqueKeys[constraint], toRemoveRecords[constraint]), done);
+							const manageableChuncks = chunk(opts.removeRecordsBatch, toRemoveRecords[constraint]);
+							manageableChuncks.forEach(ch => {
+								tasks.push(done => {
+									//Let's delete the offending records and try again
+									client.query(format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, uniqueKeys[constraint], ch), done);
+								});
 							});
 						});
 						async.series(tasks, err => {
