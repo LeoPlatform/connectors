@@ -1,4 +1,9 @@
-# Deploying a checksum runner:
+# Creating a checksum bot:
+
+## Create Database connectors:
+
+#### Assumptions:
+For this tutorial, it is assumed that you know how to create bots in the Leo Platform. If you don't, check out the README at: https://github.com/LeoPlatform/cli
 
 ### Step 1: Create a master database connector.
 If you already have a connector setup for this database connection, skip this step.
@@ -13,30 +18,29 @@ Example **index.js** using leo-connector-mysql:
 const connector = require('leo-connector-mysql');
 
 module.exports = connector.checksum({
-	host: process.env.DB_HOST, // use server instead of host when using sqlserver. 
-	user: process.env.DB_USER,
-	port: process.env.DB_PORT,
-	database: process.env.DB_NAME,
-	password: process.env.KMS_DB_PASSWORD,
-	connectTimeout: 20000 // set the connection timeout to 20 seconds
+    host: process.env.DB_HOST, // use server instead of host when using sqlserver. 
+    user: process.env.DB_USER,
+    port: process.env.DB_PORT,
+    database: process.env.DB_NAME,
+    password: process.env.KMS_DB_PASSWORD
 });
 ```
 
 Example **package.json**: (replace the name with your connector type)
 ```json
 {
-	"name": "dw-mysql-checksum-connector",
-	"version": "1.0.0",
-	"description": "MySQL connector for the Data Warehouse checksum",
-	"main": "index.js",
-	"directories": {
-		"test": "test"
-	},
-	"scripts": {
-		"test": "leo-cli test . "
-	},
-	"config": {
-		"leo": {
+    "name": "dw-mysql-checksum-connector",
+    "version": "1.0.0",
+    "description": "MySQL connector for the Data Warehouse checksum",
+    "main": "index.js",
+    "directories": {
+        "test": "test"
+    },
+    "scripts": {
+        "test": "leo-cli test . "
+    },
+    "config": {
+        "leo": {
             "type": "bot",
             "memory": 256,
             "timeout": 300,
@@ -49,37 +53,37 @@ Example **package.json**: (replace the name with your connector type)
                 "DB_PASSWORD": "mySuperSecretPassword"
             }
         }
-	}
+    }
 }
 ```
 
 If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the config.leo object (replace the id's with those from your VPC):
 ```json
-	"config": {
-		"leo": {
-            "type": "bot",
-            "memory": 256,
-            "timeout": 300,
-            "role": "ApiRole",
-            "env": {
-                "DB_HOST": "dbhost.domain.com",
-                "DB_PORT": 3306,
-                "DB_NAME": "mydbname",
-                "DB_USER": "mydbuser",
-                "DB_PASSWORD": "mySuperSecretPassword"
-            },
-            "VpcConfig": {
-                "SecurityGroupIds": [
-                    "sg-123456ab"
-                ],
-                "SubnetIds": [
-                    "subnet-abc12345",
-                    "subnet-def67890",
-                    "subnet-ghi45679"
-                ]
-            }
+"config": {
+    "leo": {
+        "type": "bot",
+        "memory": 256,
+        "timeout": 300,
+        "role": "ApiRole",
+        "env": {
+            "DB_HOST": "dbhost.domain.com",
+            "DB_PORT": 3306,
+            "DB_NAME": "mydbname",
+            "DB_USER": "mydbuser",
+            "DB_PASSWORD": "mySuperSecretPassword"
+        },
+        "VpcConfig": {
+            "SecurityGroupIds": [
+                "sg-123456ab"
+            ],
+            "SubnetIds": [
+                "subnet-abc12345",
+                "subnet-def67890",
+                "subnet-ghi45679"
+            ]
         }
-	}
+    }
+}
 ```
 
 For MySQL and Postgres, we need to dynamically add the node modules to the package.json.
@@ -121,3 +125,63 @@ Now publish and deploy the bots.
 
 Congratulations! You now have connectors setup to run a checksum. Next we'll need to create a checksum runner.
 
+## Create a checksum runner (bot)
+
+#### 1. Add the required modules:
+```javascript
+const leo = require('leo-sdk');
+const checksum = require('leo-connector-common/checksum');
+const moment = require('moment');
+```
+
+#### 2. Connect to the master and slave connectors.
+Use lambdaConnector to connect to the 2 database connectors you created in the previous section and build out the
+data you want to compare between the 2 connectors.
+For this example, I'm using a MySQL connector for the master, and the Postgres for the slave. We're going to compare id
+and status from the orders tables in both databases. 
+```javascript
+exports.handler = function(event, context, callback) {
+    let db1 = checksum.lambdaConnector('MySQL DB Lead checksum', process.env.mysql_lambda, {
+        sql: `SELECT id, status FROM orders`,
+        table: 'orders',
+        id_column: 'id',
+        key_column: 'primary'
+    });
+    let db2 = checksum.lambdaConnector('Postgres DB Lead checksum', process.env.postgres_lambda, {
+        sql: `SELECT id, status FROM orders`,
+        table: 'orders',
+        id_column: 'id',
+        key_column: 'primary'
+    });
+    
+    // checksum code in step 3 (below) goes here
+}
+```
+
+#### 3. Setup the checksum.
+Now create the checksum with parameters.
+```javascript
+let system = 'default';
+checksum.checksum(system, event.botId, db1, db2, {
+    stopOnStreak: 1750000, // Set the number of records that if the checksum finds in sequence that are identical, it will stop and mark itself as completed.
+    stop_at: moment().add({minutes: 4}), // Lambda has a 5-minute limit, so we set this to 4 so the bot has time to cleanup. It will restart right after this and continue where it left off.
+    limit: 20000, // the number of records to start comparing between the 2 databases.
+    maxLimit: 500000, // If a "block" 20,000 or more records are identical, increase the comparison block size from limit to this max limit
+    shouldDelete: false, // set this to true if you want records that exist in the slave database but not in master to be deleted.
+    loadSize: 50000, // this is the recommended load size
+    reverse: true, // Processes records from highest to lowest. Set to false to process from lowest to highest.
+    sample: true, // 
+    queue: { // this controls the queue where the ID's go that are marked as missing from the slave database
+        name: event.destination, // queue name.
+        transform: leo.streams.through((obj, done) => { // How to transform the ID's before sending into the queue.
+            done(null, {
+                Orders: obj.missing.concat(obj.incorrect)
+            });
+        })
+    }
+    //skipBatch: true, // only set to true if you need to 2 connectors to compare individual records insteadof batches
+    //showOutput: false
+})
+.then(data=>{ console.log(data); callback()})
+.catch(callback);
+```
