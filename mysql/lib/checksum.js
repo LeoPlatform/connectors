@@ -32,6 +32,7 @@ let fieldTypes = {
 	VAR_STRING: 253,
 	YEAR: 13
 };
+
 let fieldIds = {};
 Object.keys(fieldTypes).forEach(key => {
 	fieldIds[fieldTypes[key]] = key;
@@ -292,6 +293,11 @@ module.exports = function(connection) {
 
 		if (!event.settings.sql) {
 			let tableName = getTable(event);
+
+			if (!event.settings.fields) {
+				event.settings.fields = [event.settings.id_column];
+			}
+
 			event.settings.sql = `SELECT ${settings.fields.map(field => {
 				if(field.match(/^\*/)) {
 					return escapeId(field.slice(1));
@@ -311,7 +317,7 @@ module.exports = function(connection) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type].toLowerCase()) !== -1) {
+						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.columnType].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(UNIX_TIMESTAMP(\`${f.name}\`))), " ")`
 						}
 
