@@ -226,11 +226,68 @@ module.exports = function(config, columnConfig) {
 		});
 	};
 
+	client.insertMissingDimensions = function(usedTables, tableConfig, tableSks, tableNks, callback) {
+		let unions = {};
+		let isDate = {
+			d_datetime: true,
+			datetime: true,
+			dim_datetime: true,
+			d_date: true,
+			date: true,
+			dim_date: true,
+			d_time: true,
+			time: true,
+			dim_time: true
+		};
+		Object.keys(usedTables).map(table => {
+			Object.keys(tableConfig[table].structure).map(column => {
+				let field = tableConfig[table].structure[column];
+				if (field.dimension && !isDate[field.dimension]) {
+					if (!(unions[field.dimension])) {
+						unions[field.dimension] = [];
+					}
+					let dimTableNk = tableNks[field.dimension][0];
+					unions[field.dimension].push(`select ${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${column} where ${field.dimension}.${dimTableNk} is null`);
+				}
+			});
+		});
+		let missingDimTasks = Object.keys(unions).map(table => {
+			let sk = tableSks[table];
+			let nk = tableNks[table][0];
+			return (callback) => {
+				let done = (err, data) => {
+					trx && trx.release();
+					callback(err, data);
+				};
+				let trx;
+				client.connect().then(transaction => {
+					trx = transaction;
+					transaction.query(`select max(${sk}) as maxid, max(${columnConfig._auditdate}) as _auditdate from ${table}`, (err, results) => {
+						if (err) {
+							return done(err);
+						}
+						let rowId = results[0].maxid || 10000;
+						let _auditdate = results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
+						let unionQuery = unions[table].join("\nUNION\n");
+						transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
+							done(err);
+						});
+					});
+				}).catch(done);
+			};
+		});
+		async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
+			console.log(`Missing Dimensions ${!missingDimError && "Inserted"} ----------------------------`, missingDimError || "");
+			callback(missingDimError);
+		});
+
+	};
+
 	client.linkDimensions = function(table, links, nk, callback) {
 		client.describeTable(table, (err, result) => {
 			let tasks = [];
 			let sets = [];
-			tasks.push(done => client.query(`analyze ${table}`, done));
+			//tasks.push(done => client.query(`analyze ${table}`, done));
 			tasks.push(done => {
 				let joinTables = links.map(link => {
 					if (link.table == "d_datetime" || link.table == "datetime" || link.table == "dim_datetime") {
@@ -258,11 +315,12 @@ module.exports = function(config, columnConfig) {
 
 				if (sets.length) {
 					client.query(`Update ${table} dm
-						SET  ${sets.join(', ')}
-						FROM ${table} t
-						${joinTables.join("\n")}
-						where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
-					`, done);
+                        SET  ${sets.join(', ')}
+                        FROM ${table} t
+                        ${joinTables.join("\n")}
+                        where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
+                            AND dm.${columnConfig._auditdate} = (SELECT MAX(${columnConfig._auditdate}) FROM ${table}) AND t.${columnConfig._auditdate} = (SELECT MAX(${columnConfig._auditdate}) FROM ${table})
+                    `, done);
 				} else {
 					done();
 				}

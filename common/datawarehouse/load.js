@@ -24,11 +24,12 @@ module.exports = function(client, tableConfig, stream, callback) {
 	});
 
 
-
+	let usedTables = {};
 	ls.pipe(stream, combine(tableNks), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
+				usedTables[t] = true;
 				tasks.push(done => {
 					let config = tableConfig[t];
 					let sk = null;
@@ -63,59 +64,62 @@ module.exports = function(client, tableConfig, stream, callback) {
 			if (err) {
 				done(err);
 			} else {
-				let tasks = [];
-				Object.keys(obj).forEach(t => {
-					let config = tableConfig[t];
-					let sk = null;
-					let nk = [];
-					let scds = {
-						0: [],
-						1: [],
-						2: [],
-						6: []
-					};
-					let links = [];
-					//if (!config || !config.structure) console.log(t);
-					config && config.structure && Object.keys(config.structure).forEach(f => {
-						let field = config.structure[f];
+				client.insertMissingDimensions(usedTables, tableConfig, tableSks, tableNks, (missingDimError) => {
+					if (missingDimError) {
+						return done(missingDimError);
+					}
+					let tasks = [];
+					Object.keys(obj).forEach(t => {
+						let config = tableConfig[t];
+						let sk = null;
+						let nk = [];
+						let scds = {
+							0: [],
+							1: [],
+							2: [],
+							6: []
+						};
+						let links = [];
+						//if (!config || !config.structure) console.log(t);
+						config && config.structure && Object.keys(config.structure).forEach(f => {
+							let field = config.structure[f];
 
-						if (field == "sk" || field.sk) {
-							sk = f;
-						} else if (field.nk) {
-							nk.push(f);
-						} else if (field.scd !== undefined) {
-							scds[field.scd].push(f);
-						}
-						if (field.dimension) {
-							let link = {};
-							if (typeof field.dimension == "string") {
-								link = {
-									table: field.dimension,
-									source: f
-								};
-								let nks = tableNks[field.dimension];
-								if (nks && nks.length == 1) {
-									link.on = nks[0];
-								}
+							if (field == "sk" || field.sk) {
+								sk = f;
+							} else if (field.nk) {
+								nk.push(f);
+							} else if (field.scd !== undefined) {
+								scds[field.scd].push(f);
 							}
-							links.push(Object.assign({
-								table: null,
-								on: f,
-								destination: client.getDimensionColumn(f),
-								link_date: "_auditdate",
-								sk: tableSks[link.table]
-							}, link));
+							if (field.dimension) {
+								let link = {};
+								if (typeof field.dimension == "string") {
+									link = {
+										table: field.dimension,
+										source: f
+									};
+									let nks = tableNks[field.dimension];
+									if (nks && nks.length == 1) {
+										link.on = nks[0];
+									}
+								}
+								links.push(Object.assign({
+									table: null,
+									on: f,
+									destination: client.getDimensionColumn(f),
+									link_date: "_auditdate",
+									sk: tableSks[link.table]
+								}, link));
+							}
+						});
+						if (links.length) {
+							tasks.push(done => client.linkDimensions(t, links, nk, done));
 						}
 					});
-					if (links.length) {
-						tasks.push(done => client.linkDimensions(t, links, nk, done));
-					}
-				});
-
-				async.parallelLimit(tasks, 10, (err) => {
-					console.log("HERE------------------------------", err);
-
-					done(err);
+					async.parallelLimit(tasks, 10, (err) => {
+						console.log("HERE------------------------------", err);
+						done(err);
+					});
 				});
 			}
 		});

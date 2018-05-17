@@ -206,7 +206,7 @@ function create(pool, parentCache) {
 						${f} = EXCLUDED.${f}
 					`);
 				}
-				let insertQuery = format(cmd, table, columns, values, columns, );
+				let insertQuery = format(cmd, table, columns, values, columns);
 				client.query(insertQuery, function(err) {
 					if (err) {
 						let tasks = [];
