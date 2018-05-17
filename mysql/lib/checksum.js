@@ -289,26 +289,24 @@ module.exports = function(connection) {
 	}
 
 	function getFields(connection, event) {
-		let settings = event.settings;
 
-		if (!event.settings.sql) {
-			let tableName = getTable(event);
+		return new Promise((resolve, reject) => {
+			if (!event.settings.fields && !event.settings.sql) {
+				reject("Missing required object parameter: 'sql', in the MySQL lambdaConnector.");
+			} else if (!event.settings.sql) {
+				let tableName = getTable(event);
 
-			if (!event.settings.fields) {
-				event.settings.fields = [event.settings.id_column];
+				event.settings.sql = `SELECT ${event.settings.fields.map(field => {
+					if(field.match(/^\*/)) {
+						return escapeId(field.slice(1));
+					} else {
+						return escapeId(field);
+					}
+				})}
+				FROM ${tableName}
+				where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
 			}
 
-			event.settings.sql = `SELECT ${settings.fields.map(field => {
-				if(field.match(/^\*/)) {
-					return escapeId(field.slice(1));
-				} else {
-					return escapeId(field);
-				}
-			})}
-			FROM ${tableName}
-			where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
-		}
-		return new Promise((resolve, reject) => {
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between 1 and 0`), (err, rows, fields) => {
 				if (err) {
 					reject(err);
