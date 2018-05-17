@@ -4,6 +4,8 @@ const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
 const MAX = 5000;
 
+const moment = require('moment');
+
 module.exports = function(event, context, sdk) {
 	if (!event || !context || !sdk) {
 		throw new Error('Required parameters for the helperFactor are: ‘event’, ‘context’, ‘leo-sdk’');
@@ -58,12 +60,6 @@ module.exports = function(event, context, sdk) {
 				return this;
 			},
 
-			joinOneToOne: function(name, pk, sql) {
-				joins[name] = {type: 'one_to_one', name: name, pk: pk, query: sql};
-
-				return this;
-			},
-
 			// do stuff to build the domain objects
 			run: function (callback) {
 				let readParams = {};
@@ -84,7 +80,7 @@ module.exports = function(event, context, sdk) {
 
 									// split the ID's up into no more than 5k for each query
 									let ids = obj[table].splice(0, MAX);
-									objArray.push(tables[table].replace(/\?/g, ids.join()));
+									objArray.push(tables[table].replace(/\?/g, ids.filter((id) => {return id;}).join()));
 									done();
 								}, () => obj[table].length);
 							} else {
@@ -97,7 +93,7 @@ module.exports = function(event, context, sdk) {
 					done(null, objArray);
 				},
 				function (ids, builder) {
-					let idsList = ids.join();
+					let idsList = ids.filter((id) => {return id;}).join();
 					let builderSql = builder(params.pk, sqlQuery.replace(/\?/g, idsList));
 
 					// build the joins
@@ -134,15 +130,11 @@ module.exports = function(event, context, sdk) {
 	 * @returns {exports}
 	 */
 	this.loadDWObjects = function (params) {
-		params = {
-			ls: params.ls,
-			logEvents: params.logEvents || 1000,
-			start: params.start || undefined
-		};
-
-		if (!params.ls) {
-			params.ls = sdk.streams;
-		}
+		params = Object.assign({
+			ls: sdk.streams,
+			logEvents: 1000,
+			start: undefined
+		}, params || {});
 
 		let entities = [];
 
@@ -303,5 +295,5 @@ module.exports = function(event, context, sdk) {
 					});
 			}
 		}
-	}
+	};
 };

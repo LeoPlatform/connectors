@@ -4,6 +4,7 @@ const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
+const checksum = require("./lib/checksum.js");
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
@@ -55,7 +56,6 @@ module.exports = {
 		let offset = parts[1] || 0;
 
 		let sqlTables = Object.keys(tables).map(t => {
-			obj.payload[t] = [];
 			let query = `SELECT '${t}' as tableName, ${tables[t]} as id, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
 					 FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT  
 					 where SYS_CHANGE_VERSION > ${version} OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${offset})`;
@@ -66,6 +66,10 @@ module.exports = {
 			logger.log(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc');
 			if (!err) {
 				result.forEach(r => {
+					if (!obj.payload[r.tableName]) {
+						obj.payload[r.tableName] = [];
+					}
+
 					let eid = `${r.__SYS_CHANGE_VERSION}.${r.id}`;
 					obj.correlation_id.units++;
 					obj.correlation_id.start = obj.correlation_id.start || eid;
@@ -100,6 +104,9 @@ module.exports = {
 				return stats.checkpoint(callback);
 			});
 		}
+	},
+	checksum: function(config) {
+		return checksum(connect(config));
 	},
 	connect: connect
 };

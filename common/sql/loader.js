@@ -20,7 +20,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	function submit(push, done) {
 		async.doWhilst((done) => {
 			let buildIds = ids.splice(0, opts.limit);
-			buildEntities(buildIds, push, done);
+
+			if (buildIds.length) {
+				buildEntities(buildIds, push, done);
+			}
 		}, () => ids.length >= opts.limit, (err) => {
 			if (err) {
 				done(err);
@@ -102,6 +105,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	});
 
 	function buildEntities(ids, push, callback) {
+
 		let r = domainObj(ids, builder.createLoader);
 		if (typeof r.get == "function") {
 			r = r.get();
@@ -203,7 +207,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
+						} else if (!results.length) {
+							return done();
 						}
+
 						mapResults(results, fields, row => {
 							if (t.transform) {
 								row = t.transform(row);
@@ -220,12 +227,17 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
 							return done(err);
+						} else if (!results.length) {
+							return done();
 						}
+
 						mapResults(results, fields, row => {
-							if (t.transform) {
-								row = t.transform(row);
+							if (row.length) {
+								if (t.transform) {
+									row = t.transform(row);
+								}
+								domains[row[t.on]][name] = row;
 							}
-							domains[row[t.on]][name] = row;
 						});
 						done();
 					}, {
@@ -238,7 +250,6 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 			if (err) {
 				callback(err);
 			} else {
-				let needsDrained = false;
 				let getEid = opts.getEid || ((id, obj, stats) => stats.end);
 				ids.forEach((id, i) => {
 					// skip the domain if there is no data with it
