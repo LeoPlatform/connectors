@@ -315,7 +315,7 @@ module.exports = function(connection) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.columnType].toLowerCase()) !== -1) {
+						if (fieldIds[f.columnType] && ['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.columnType].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(UNIX_TIMESTAMP(\`${f.name}\`))), " ")`
 						}
 

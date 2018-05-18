@@ -287,7 +287,7 @@ module.exports = function(connection, fieldsTable) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.dataTypeID].toLowerCase()) !== -1) {
+						if (fieldIds[f.dataTypeID] && ['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.dataTypeID].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(extract(epoch from ${f.name}))::text), ' ')`;
 						}
 

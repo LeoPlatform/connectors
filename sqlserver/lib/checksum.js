@@ -297,7 +297,7 @@ module.exports = function (connection) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type.id].toLowerCase()) !== -1) {
+						if (fieldIds[f.type.id] && ['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type.id].toLowerCase()) !== -1) {
 							return `COALESCE(LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', FLOOR(CAST(DATEDIFF(s, '19700101', cast('${f.name}' AS datetime)) AS bigint))), 2)), " ")`;
 						}
 
