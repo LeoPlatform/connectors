@@ -5,7 +5,7 @@
 #### Assumptions:
 For this tutorial, it is assumed that you know how to create bots in the Leo Platform. If you don't, check out the README at: https://github.com/LeoPlatform/cli
 
-### 1: Create a master database connector.
+### 1: Create database connectors
 If you already have a connector setup for this database connection, skip this step.
 
 Create a new bot with an index.js and package.json.
@@ -125,7 +125,7 @@ Now publish and deploy the bots.
 
 Congratulations! You now have connectors setup to run a checksum. Next we'll need to create a checksum runner.
 
-## Create a checksum runner (bot)
+## Create a checksum runner (bot) with database connectors.
 
 #### 1. Add the required modules:
 ```javascript
@@ -142,13 +142,13 @@ and status from the orders tables in both databases.
 ```javascript
 exports.handler = function(event, context, callback) {
     let db1 = checksum.lambdaConnector('MySQL DB Lead checksum', process.env.mysql_lambda, {
-        sql: `SELECT id, status FROM orders __IDCOLUMNLIMIT__`,
+        sql: `SELECT id, status FROM orders WHERE id __IDCOLUMNLIMIT__`,
         table: 'orders',
         id_column: 'id',
         key_column: 'primary'
     });
     let db2 = checksum.lambdaConnector('Postgres DB Lead checksum', process.env.postgres_lambda, {
-        sql: `SELECT id, status FROM orders __IDCOLUMNLIMIT__`,
+        sql: `SELECT id, status FROM orders WHERE id __IDCOLUMNLIMIT__`,
         table: 'orders',
         id_column: 'id',
         key_column: 'primary'
@@ -271,3 +271,5 @@ Publish and deploy the checksum runner. Make sure the checksum runner is not in 
 You can either wait for the checksum to run from the cron time set, or you can force it to run through botmon.
 Once the bot runs once, when you open it up in botmon, the checksum tab will appear and you can see the current status,
 if it's running, or the results from the last run.
+
+
