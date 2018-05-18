@@ -142,13 +142,13 @@ and status from the orders tables in both databases.
 ```javascript
 exports.handler = function(event, context, callback) {
     let db1 = checksum.lambdaConnector('MySQL DB Lead checksum', process.env.mysql_lambda, {
-        sql: `SELECT id, status FROM orders`,
+        sql: `SELECT id, status FROM orders __IDCOLUMNLIMIT__`,
         table: 'orders',
         id_column: 'id',
         key_column: 'primary'
     });
     let db2 = checksum.lambdaConnector('Postgres DB Lead checksum', process.env.postgres_lambda, {
-        sql: `SELECT id, status FROM orders`,
+        sql: `SELECT id, status FROM orders __IDCOLUMNLIMIT__`,
         table: 'orders',
         id_column: 'id',
         key_column: 'primary'
@@ -233,7 +233,7 @@ Skip this step if you already have this set.
 In your cloudformation.json, search for the configuration for the role you're using. In the package.json example above, we're using "ApiRole".
 Find the ApiRole in the Resources:
 
-```json
+```
   "Resources": {
     "ApiRole": {
       "Type": "AWS::IAM::Role",
