@@ -271,14 +271,14 @@ module.exports = function (connection) {
 	}
 
 	function getFields(connection, event) {
-		if (!event.settings.sql) {
-			let tableName = getTable(event);
 
-			if (!event.settings.fields) {
-				event.settings.fields = [event.settings.id_column];
-			}
+		return new Promise((resolve, reject) => {
+			if (!event.settings.fields && !event.settings.sql) {
+				reject("Missing required object parameter: 'sql', in the SQL Server lambdaConnector.");
+			} else if (!event.settings.sql) {
+				let tableName = getTable(event);
 
-			event.settings.sql = `SELECT ${event.settings.fields.map(field => {
+				event.settings.sql = `SELECT ${event.settings.fields.map(field => {
 					if (field.match(/^\*/)) {
 						return field.slice(1).replace(/[\'\"\`]/g, '');
 					} else {
@@ -287,15 +287,13 @@ module.exports = function (connection) {
 				})}
 				FROM ${tableName}
 				WHERE ${event.settings.id_column} __IDCOLUMNLIMIT__`;
-		}
+			}
 
-		return new Promise((resolve, reject) => {
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` BETWEEN 1 AND 0`), (err, rows, fields) => {
 				if (err) {
 					reject(err);
 					return;
 				}
-
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {

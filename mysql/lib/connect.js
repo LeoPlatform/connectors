@@ -48,11 +48,22 @@ module.exports = function(c) {
 			m.query({
 				sql: query,
 				rowsAsArray: opts.inRowMode
-			}, params, function(err, result, fields) {
+			}, params, function(err, result, dbfields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					log.error("Had error #${queryId}", query, err);
 				}
+
+				// make fields interchangeable between mysql and mysql2 node modules
+				let fields = Object.assign(dbfields, {
+					type: dbfields.type || dbfields.columnType,
+					columnType: dbfields.columnType || dbfields.type,
+					db: dbfields.db || dbfields.schema,
+					schema: dbfields.schema || dbfields.db,
+					length: dbfields.length || dbfields.columnLength,
+					columnLength: dbfields.columnLength || dbfields.length,
+				});
+
 				callback(err, result, fields);
 			});
 		},
