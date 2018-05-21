@@ -32,6 +32,7 @@ let fieldTypes = {
 	VAR_STRING: 253,
 	YEAR: 13
 };
+
 let fieldIds = {};
 Object.keys(fieldTypes).forEach(key => {
 	fieldIds[fieldTypes[key]] = key;
@@ -288,21 +289,24 @@ module.exports = function(connection) {
 	}
 
 	function getFields(connection, event) {
-		let settings = event.settings;
 
-		if (!event.settings.sql) {
-			let tableName = getTable(event);
-			event.settings.sql = `SELECT ${settings.fields.map(field => {
-				if(field.match(/^\*/)) {
-					return escapeId(field.slice(1));
-				} else {
-					return escapeId(field);
-				}
-			})}
-			FROM ${tableName}
-			where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
-		}
 		return new Promise((resolve, reject) => {
+			if (!event.settings.fields && !event.settings.sql) {
+				reject("Missing required object parameter: 'sql', in the MySQL lambdaConnector.");
+			} else if (!event.settings.sql) {
+				let tableName = getTable(event);
+
+				event.settings.sql = `SELECT ${event.settings.fields.map(field => {
+					if(field.match(/^\*/)) {
+						return escapeId(field.slice(1));
+					} else {
+						return escapeId(field);
+					}
+				})}
+				FROM ${tableName}
+				where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
+			}
+
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between 1 and 0`), (err, rows, fields) => {
 				if (err) {
 					reject(err);
@@ -311,7 +315,7 @@ module.exports = function(connection) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.type].toLowerCase()) !== -1) {
+						if (fieldIds[f.columnType] && ['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.columnType].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(UNIX_TIMESTAMP(\`${f.name}\`))), " ")`
 						}
 
