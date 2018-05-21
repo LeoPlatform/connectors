@@ -40,19 +40,19 @@ function stats(array, other) {
 	array = array || [];
 
 	let ids = array.slice(0).sort(() => {
-		return 0.5 - Math.random()
+		return 0.5 - Math.random();
 	}).slice(0, 4);
 
 	if (ids.length < 4 && other && other.length) {
 		ids = ids.concat(other.slice(-1000).slice(0).sort(() => {
-			return 0.5 - Math.random()
+			return 0.5 - Math.random();
 		}).filter(id => ids.indexOf(id) == -1).slice(0, 4 - ids.length));
 	}
 
 	return {
 		count: array.length,
 		ids: ids
-	}
+	};
 }
 
 module.exports = {
@@ -82,20 +82,20 @@ module.exports = {
 			}
 		};
 		if (opts.restart) {
-			return saveProgress(systemId, botId, emptySession)
+			return saveProgress(systemId, botId, emptySession);
 		} else {
 			return new Promise((resolve, reject) => {
 				logger.log("Getting Session", systemId, botId);
 				dynamodb.get(tableName, botId, function(err, result) {
 					if (err) {
-						reject(err)
+						reject(err);
 					} else {
 						try {
 							let session = emptySession;
 							if (result && result.checksum && result.checksum.restart !== true && result.checksum.status !== 'complete') {
 								session = result.checksum;
 							}
-							resolve(session)
+							resolve(session);
 						} catch (err) {
 							reject(err);
 						}
@@ -173,7 +173,7 @@ module.exports = {
 						ids.extra = ids.extra.concat(result.extra || []);
 						if (result.map) {
 							Object.keys(result.map).forEach(k => {
-								ids.map[k] = result.map[k]
+								ids.map[k] = result.map[k];
 							});
 						}
 
@@ -291,7 +291,7 @@ module.exports = {
 						});
 					});
 				}, logError);
-			}, logError)
+			}, logError);
 		});
 	},
 	lambdaConnector: function(id, lambdaName, settings) {
@@ -440,7 +440,7 @@ module.exports = {
 								}
 							}
 							resolve(payload);
-						})
+						});
 					});
 					req.on('error', function(e) {
 						logger.error('problem with request: ' + e.message);
@@ -458,7 +458,7 @@ module.exports = {
 		function empty() {
 			return (data) => {
 				return Promise.resolve({});
-			}
+			};
 		}
 
 		return {
@@ -499,12 +499,12 @@ module.exports = {
 					done();
 				},
 				getChecksum: function(data, callback) {
-					logger.log(" BATCH", settings.name, data, rand.batch)
+					logger.log(" BATCH", settings.name, data, rand.batch);
 					callback(null, {
 						qty: data.end - data.start + 1,
 						hash: [1, 2, 3, Math.round(Math.random() * rand.batch)],
 						duration: 1000
-					})
+					});
 				},
 				getIndividualChecksums: function(data, callback) {
 					let result = {
@@ -519,10 +519,10 @@ module.exports = {
 						result.checksums.push({
 							id: i,
 							hash: "1-2-3-" + (Math.round(Math.random() * rand.single))
-						})
+						});
 					}
-					logger.log(" INDIVIDUAL", settings.name, data)
-					callback(null, result)
+					logger.log(" INDIVIDUAL", settings.name, data);
+					callback(null, result);
 				},
 				sample: function(data, callback) {
 					logger.log(" SAMPLE", settings.name, data);
@@ -540,7 +540,7 @@ module.exports = {
 						result.qty++;
 					});
 
-					callback(null, result)
+					callback(null, result);
 				},
 				range: function(data, callback) {
 					var result = {
@@ -548,7 +548,7 @@ module.exports = {
 						max: settings.mock.max,
 						total: settings.mock.max - settings.mock.min + 1
 					};
-					logger.log(" RANGE", settings.name, data, result)
+					logger.log(" RANGE", settings.name, data, result);
 					callback(null, result);
 				},
 				nibble: function(data, callback) {
@@ -556,12 +556,12 @@ module.exports = {
 						logger.log(" NIBBLE", settings.name, data);
 						data.end = Math.min(data.start + data.limit - 1, settings.mock.max);
 						data.next = data.start + data.limit < settings.mock.max ? data.start + data.limit : null;
-						callback(null, data)
-					}, settings.mock.timeout || 2000)
+						callback(null, data);
+					}, settings.mock.timeout || 2000);
 
 				}
 			});
-		}
+		};
 	},
 	fileConnector: function(id, file, settings) {
 		let reverse = settings.reverse ? -1 : 1;
@@ -598,7 +598,7 @@ module.exports = {
 					min: db[0].id,
 					max: db[db.length - 1].id,
 					total: db.length
-				}
+				};
 			}),
 			nibble: invoke("nibble", (data) => {
 				let set = db.filter(a => a[settings.id_column] >= data.start && a[settings.id_column] <= data.end);
@@ -725,6 +725,68 @@ module.exports = {
 				return results;
 
 			}),
+			delete: invoke("delete"),
+			setSession: (s) => {
+				session = s;
+			}
+		};
+	},
+	basicConnector: function(id, settings, handlers) {
+		let basicConnector = require("./lib/basicConnector")(handlers);
+
+		let session = null;
+
+		function invoke(method) {
+			return (data) => {
+				return new Promise((resolve, reject) => {
+					basicConnector.handler({
+						params: {
+							querystring: {
+								method: method
+							}
+						},
+						body: {
+							data: data,
+							settings: settings,
+							session: session
+						}
+					}, {}, function(err, data) {
+						let payload = undefined;
+						if (!err && data.response != undefined) {
+							let obj = typeof data === "string" ? JSON.parse(data) : data;
+							if (obj.statusCode == 500) {
+								err = new Error(obj.body || obj.response);
+							} else {
+								payload = obj.body || obj.response;
+								if (obj.session) {
+									let o = {
+										id: session.id,
+										type: session.type
+									};
+									Object.assign(session, obj.session, o);
+								}
+							}
+						}
+
+						if (err) {
+							reject(err);
+						} else {
+							resolve(payload);
+						}
+					});
+				});
+			};
+		}
+		return {
+			id: id,
+			name: id,
+			init: invoke("initialize"),
+			range: invoke("range"),
+			nibble: invoke("nibble"),
+			getChecksum: invoke("batch"),
+			getIndividualChecksums: invoke("individual"),
+			destroy: invoke("destroy"),
+			sample: invoke("sample"),
 			delete: invoke("delete"),
 			setSession: (s) => {
 				session = s;
