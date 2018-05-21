@@ -56,6 +56,35 @@ function readArray(array) {
 	return stream;
 }
 module.exports = function(opts) {
+
+	opts = Object.assign({
+		batch: () => {
+			return Promise.reject("Batch Not Implemented");
+		},
+		individual: () => {
+			return Promise.reject("Individual Not Implemented");
+		},
+		sample: () => {
+			return Promise.reject("Sample Not Implemented");
+		},
+		nibble: () => {
+			return Promise.reject("Nibble Not Implemented");
+		},
+		range: () => {
+			return Promise.reject("Range Not Implemented");
+		},
+		initialize: () => {
+			return Promise.resolve({});
+		},
+		destroy: () => {
+			return Promise.resolve({});
+		},
+		delete: () => {
+			return Promise.reject("Delete Not Implemented");
+		}
+	}, opts);
+
+
 	let wrap = opts.wrap || ((handler, base) => {
 		return function(event, callback) {
 			base(event, handler, callback);
@@ -69,6 +98,7 @@ module.exports = function(opts) {
 		range: wrap(opts.range, range),
 		initialize: wrap(opts.initialize, initialize),
 		destroy: wrap(opts.destroy, destroy),
+		delete: wrap(opts.delete, deleteFn)
 	});
 
 	function batch(event, handler, callback) {
@@ -285,5 +315,13 @@ module.exports = function(opts) {
 			settings: event.settings,
 			session: event.session
 		}, event.data).then(() => callback()).catch(callback);
+	}
+
+	function deleteFn(event, handler, callback) {
+		console.log("Calling Delete", event);
+		promisify(handler, 1).call({
+			settings: event.settings,
+			session: event.session
+		}, event.data.ids).then(() => callback()).catch(callback);
 	}
 };

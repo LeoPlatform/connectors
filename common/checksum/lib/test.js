@@ -1,8 +1,5 @@
-let basicConnector = require("./basicConnector");
-
 var db1 = {};
 var db2 = {};
-
 [{
 	id: 1,
 	id2: 99,
@@ -37,7 +34,9 @@ var db2 = {};
 });
 
 
-require("../").basicConnector("id1", {}, {
+require("../").basicConnector("connector_id", {
+	id_column: "id"
+}, {
 	// Respond to start and end
 	// Return Stream, Array, or a Hash
 	batch: function(start, end, done) {
@@ -96,7 +95,7 @@ require("../").basicConnector("id1", {}, {
 		let db = this.settings.id_column == "id2" ? db2 : db1;
 		Object.keys(db).map(id => {
 			id = db[id][this.settings.id_column];
-			if ((start === undefined || id >= start) && (end === undefined || id <= end)) {
+			if ((start == undefined || id >= start) && (end == undefined || id <= end)) {
 				total++;
 				if (min == null || id < min) {
 					min = id;
@@ -133,7 +132,6 @@ require("../").basicConnector("id1", {}, {
 			let v = db[i];
 			if (v !== undefined) {
 				cnt++;
-				console.log(cnt, limit);
 				if (cnt >= limit) {
 					if (!current) {
 						current = v[this.settings.id_column];
@@ -160,13 +158,25 @@ require("../").basicConnector("id1", {}, {
 	// Called With data
 	destroy: function(data) {
 		return Promise.resolve();
+	},
+
+	// Respond to ids
+	// No return
+	delete: function(ids) {
+		let db = this.settings.id_column == "id2" ? db2 : db1;
+		ids.map(id => {
+			if (id in db) {
+				delete db[id];
+			}
+		});
+		return Promise.resolve();
 	}
-}).getChecksum({
-	reverse: true,
+}).delete({
+	//reverse: true,
 	limit: 3,
 	start: 0,
 	end: 100000,
-	ids: [1, 5, 7, 99, 2456]
+	ids: [1]
 }).then(data => {
 	console.log("cool", data);
 }).catch(err => {
