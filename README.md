@@ -46,7 +46,7 @@ exports.handler = async function(event, context, callback) {
 };
 ```
 
-Example **package.json**: (replace the name with your connector type)
+Example **package.json**: (replace the name with your connector type and add your secret key name)
 ```json
 {
     "name": "dw-mysql-checksum-connector",
@@ -66,7 +66,7 @@ Example **package.json**: (replace the name with your connector type)
             "timeout": 300,
             "role": "ApiRole",
             "env": {
-                "secret": "mysql_test_secret"
+                "secret": "secret_key_name"
             }
         }
     }
