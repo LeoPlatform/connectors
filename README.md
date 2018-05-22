@@ -7,6 +7,11 @@
  * You know how to create AWS permissions.
  * You know how to do AWS networking.
  
+#### NPM requirements :
+ * leo-sdk: 1.0.74+
+ * leo-connector-common: 1.1.1+
+ * leo-connector-(mysql|postgres|sqlserver): 1.2.1+
+ 
 ### 1: Create a secret key
 If using the AWS secrets manager, create secret keys for your databases. The secret names will be used in step 2.
 
