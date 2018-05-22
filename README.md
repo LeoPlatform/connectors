@@ -66,7 +66,7 @@ Example **package.json**: (replace the name with your connector type and add you
             "timeout": 300,
             "role": "ApiRole",
             "env": {
-                "secret": "secret_key_name"
+                "secret": "database_secret_key_name"
             }
         }
     }
