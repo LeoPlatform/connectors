@@ -327,7 +327,7 @@ module.exports = {
 						let payload = undefined;
 						if (!err && data.FunctionError) {
 							err = data.Payload;
-						} else if (!err && data.Payload != undefined) {
+						} else if (!err && data.Payload != undefined && data.Payload != 'null') {
 							let obj = JSON.parse(data.Payload);
 							if (obj.statusCode == 500) {
 								err = new Error(obj.body);
