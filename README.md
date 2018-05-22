@@ -284,3 +284,206 @@ Publish and deploy the checksum runner. Make sure the checksum runner is not in 
 You can either wait for the checksum to run from the cron time set, or you can force it to run through botmon.
 Once the bot runs once, when you open it up in botmon, the checksum tab will appear and you can see the current status,
 if it's running, or the results from the last run.
+
+## Custom Connector
+If one of your endpoints is not a database (e.g. API), or not a database we support, you can create a custom
+connector using `basicConnector`. A custom connector differs from a database connector in that you don't create a
+specific connector for it, instead you add this directly into the runner.
+    
+You can create a custom connector either as the master and use a database connector for the slave; use a database
+connector for the master and a custom connector for the slave; or use a custom connect for both the master and the slave.
+    
+##### Example of the structure of a basic connector
+```javascript
+let customConnector = checksum.basicConnector('< Checksum name >', {
+    id_column: 'id'
+}, {
+    // custom handlers go here
+});
+```
+
+Now add the handlers to handle the data.
+### Available handlers for a master connector
+##### Required handlers:
+ * batch
+ * individual
+ * range
+ * nibble
+ * delete
+ 
+##### Optional handlers:
+ * sample (required if sample is set to true)
+ * initialize
+ * destroy
+
+### Available handlers for a slave connector
+##### Required handlers:
+ * batch
+ * individual
+ * delete
+ 
+##### Optional handlers:
+ * sample (required if sample is set to true)
+ * initialize
+ * destroy
+ * range
+ * nibble
+ 
+### Handlers
+
+##### Initialize:
+Called when checksum starts (does not include restarts after a lambda 5-minute timeout)
+```javascript
+/**
+ * Called when checksum starts.
+ * Used for situations such as when your endpoint requires authorization.
+ * Called with data, return a session
+ */
+initialize: function(data) {
+    return Promise.resolve({});
+}
+```
+##### Range:
+Called after initialize. Range gets the max and min id's, as well as the total number of id's. This is stored in the
+session until the checksum completes. Each restart of checksum after a lambda timeout will use the range stored in
+the session.
+```javascript
+/**
+ * @int start
+ * @int end
+ * @object options (optional)
+ * @return object {min: int, max: int, total: int}
+ */
+// Respond to start and end -- options
+// Return object with min, max, total
+range: function(start, end) {
+    let min = null;
+    let max = null;
+    let total = 0;
+    
+    /************************************************
+    * Begin example code to get min, max, and total.*
+    * This example loops through records returned   *
+    * into “db” and creates a start and end from    *
+    * the greatest and least id’s.                  *
+    *************************************************/
+    let db = '<API or other endpoint to get min, max, and total>';
+    Object.keys(db).map(id => {
+        id = db[id][this.settings.id_column];
+        if ((start === undefined || id >= start) && (end === undefined || id <= end)) {
+            total++;
+            if (min == null || id < min) {
+                min = id;
+            }
+            if (max == null || id > max) {
+                max = id;
+            }
+        }
+    });
+    /**********************************************
+    * End example code to get min, max, and total *
+    ***********************************************/
+    
+    // return a min, max and total
+    return Promise.resolve({
+        min,
+        max,
+        total
+    });
+}
+```
+##### Batch:
+Gets a chunk of data between a specified start and end to compare against a master or slave set of data.
+```javascript
+/**
+ * Respond to a start and end, and build an array of data returned into “db”
+ * 
+ * @int start
+ * @int end
+ * @return mixed (Stream|Array|hash)
+ */
+batch: function(start, end) {
+    let data = [];
+    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    
+    /***********************************************************************************
+     * Example code to put together an array of data using the data returned from “db” *
+     ***********************************************************************************/
+    for (v of db) {
+        data.push(v);
+    }
+    
+    /**********************************************************************************************************
+    * Alternatively, if you cannot pass in a start and end and just get a chunk of data back, build an array *
+    * with the data having id’s between start and end                                                         *
+    ***********************************************************************************************************/
+    for (let i = start; i <= end; i++) {
+        if (typeof db[i] !== 'undefined') {
+            data.push(db[i]);
+        }
+    }
+    
+    // return the array of data
+    return Promise.resolve(data);
+}
+```
+##### Nibble
+```javascript
+/**
+ * Nibble handler: Uses a start, end, limit, and reverse; and gives a “next” and “current” to continue checking data
+ * @int start
+ * @int end
+ * @int limit
+ * @bool reverse
+ */
+// Responds to start, end, limit, reverse
+// Returns object with next, current
+nibble: function(start, end, limit, reverse) {
+    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    let current = null;
+    let next = null;
+    let dir = 1;
+    let ostart = start;
+    let oend = end;
+    if (reverse) {
+        start = end;
+        end = ostart;
+        dir = -1;
+    }
+    let cnt = 0;
+    for (let i = start; i >= ostart && i <= oend; i += dir) {
+        if (typeof db[i] !== undefined) {
+            let v = db[i];
+            cnt++;
+            if (cnt >= limit) {
+                if (!current) {
+                    current = v[this.settings.id_column];
+                } else {
+                    next = v[this.settings.id_column];
+                    break;
+                }
+            }
+        }
+    }
+
+    return Promise.resolve({
+        current,
+        next
+    });
+}
+```
+##### Individual
+The code required is the same as “batch” above. If you have created batch, just call batch in the return and you're done here.
+If you don't already have batch, follow the example for batch, but use individual.
+```javascript
+individual: function(start, end) {
+    return this.batch(start, end);
+}
+```
+
+##### Delete
+Coming soon.
+##### Sample
+Coming soon.
+##### Destroy
+Coming soon.
