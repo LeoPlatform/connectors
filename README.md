@@ -82,11 +82,7 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
         "timeout": 300,
         "role": "ApiRole",
         "env": {
-            "DB_HOST": "dbhost.domain.com",
-            "DB_PORT": 3306,
-            "DB_NAME": "mydbname",
-            "DB_USER": "mydbuser",
-            "DB_PASSWORD": "mySuperSecretPassword"
+            "secret": "database_secret_key_name"
         },
         "VpcConfig": {
             "SecurityGroupIds": [
