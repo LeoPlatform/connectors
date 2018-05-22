@@ -270,7 +270,15 @@ module.exports = {
 							cron.runAgain();
 						}
 
-						stream.end((err) => {
+						let streamEnd = (done) => {
+							if (!stream) {
+								return done();
+							}
+
+							stream.end(done);
+						};
+
+						streamEnd((err) => {
 							saveProgress(system, botId,
 								Object.assign(session, {
 									endTime: status !== "running" ? moment.now() : null,
