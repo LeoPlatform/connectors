@@ -2,10 +2,15 @@
 
 ## Create Database connectors:
 
-#### Assumptions:
-For this tutorial, it is assumed that you know how to create bots in the Leo Platform. If you don't, check out the README at: https://github.com/LeoPlatform/cli
+#### Prerequisites :
+ * You know how to create bots in the Leo Platform. (https://github.com/LeoPlatform/cli)
+ * You know how to create AWS permissions.
+ * You know how to do AWS networking.
+ 
+### 1: Create a secret key
+If using the AWS secrets manager, create secret keys for your databases. The secret names will be used in step 2.
 
-### 1: Create database connectors
+### 2: Create database connectors
 If you already have a connector setup for this database connection, skip this step.
 
 Create a new bot with an index.js and package.json.
@@ -17,13 +22,23 @@ Example **index.js** using leo-connector-mysql:
 // use the connector for your database type:
 const connector = require('leo-connector-mysql');
 
-module.exports = connector.checksum({
-    host: process.env.DB_HOST, // use server instead of host when using sqlserver. 
-    user: process.env.DB_USER,
-    port: process.env.DB_PORT,
-    database: process.env.DB_NAME,
-    password: process.env.KMS_DB_PASSWORD
-});
+// include leo and secrets if using the AWS secrets manager to store the database credentials (recommended)
+const leo = require('leo-sdk');
+const secrets = require('leo-sdk/lib/secretsManager')(leo.configuration);
+
+// use an async handler and wait for the database credentials before trying to connect
+exports.handler = async function(event, context, callback) {
+    let secret = await secrets.getSecret(process.env.secret);
+    
+    // creates the checksum connector
+    connector.checksum({
+        host: secret.host,
+        user: secret.username,
+        port: secret.port,
+        database: secret.dbname,
+        password: secret.password
+    }).handler(event, context, callback);
+};
 ```
 
 Example **package.json**: (replace the name with your connector type)
@@ -46,11 +61,7 @@ Example **package.json**: (replace the name with your connector type)
             "timeout": 300,
             "role": "ApiRole",
             "env": {
-                "DB_HOST": "dbhost.domain.com",
-                "DB_PORT": 3306,
-                "DB_NAME": "mydbname",
-                "DB_USER": "mydbuser",
-                "DB_PASSWORD": "mySuperSecretPassword"
+                "secret": "mysql_test_secret"
             }
         }
     }
@@ -106,13 +117,14 @@ For Postgres, inside the config.leo object, add (make sure ../../ is the path to
 }   
 ```
 
-### 2: Create a slave database connector.
+### 3: Create a slave database connector.
 This will be your data warehouse or anything you want to compare against the master database.
 **Repeat step 1** for this bot but with the slave database connection information.
 If your slave is not a database but an endpoint, see the custom URL connector section (in-progress).
 
-### 3: Deploy the bots
+### 4: Deploy the bots
 In your service, be sure to install the NPM modules for the connectors you are using.
+
 #### Available Connectors:
 1. leo-connector-mysql:
 `npm install leo-connector-mysql`
@@ -271,5 +283,3 @@ Publish and deploy the checksum runner. Make sure the checksum runner is not in 
 You can either wait for the checksum to run from the cron time set, or you can force it to run through botmon.
 Once the bot runs once, when you open it up in botmon, the checksum tab will appear and you can see the current status,
 if it's running, or the results from the last run.
-
-
