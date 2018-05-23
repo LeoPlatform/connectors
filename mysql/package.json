@@ -13,5 +13,14 @@
 		"leo-connector-common": "^1.1.0",
 		"leo-sdk": "^1.0.72",
 		"mysql2": "^1.5.3"
+	},
+	"config": {
+		"leo": {
+			"build": {
+				"include": [
+					"mysql2"
+				]
+			}
+		}
 	}
 }
