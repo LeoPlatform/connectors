@@ -16,7 +16,7 @@
 			"timeout": 10,
 			"role": "ApiRole",
 			"env": {
-				"dbsecret":"mysql_secret_key"
+				"dbsecret":"postgres_secret_key"
 			}
 		}
 	}
