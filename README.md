@@ -8,9 +8,9 @@
  * You know how to do AWS networking.
  
 #### NPM requirements :
- * leo-sdk: 1.0.74+
- * leo-connector-common: 1.1.1+
- * leo-connector-(mysql|postgres|sqlserver): 1.2.1+
+ * leo-sdk: 1.1.0+
+ * leo-connector-common: 1.1.2+
+ * leo-connector-(mysql|postgres|sqlserver): 1.3.0+
  
 ### 1: Create a secret key
 If using the AWS secrets manager, create secret keys for your databases. The secret names will be used in step 2.
@@ -18,62 +18,23 @@ If using the AWS secrets manager, create secret keys for your databases. The sec
 ### 2: Create database connectors
 If you already have a connector setup for this database connection, skip this step.
 
-Create a new bot with an index.js and package.json.
-In the index.js file, use the proper connector for your database type:
-(i.e. leo-connector-sqlserver, leo-connector-postgres or leo-connector-mysql)
-
-Example **index.js** using leo-connector-mysql:
-```javascript
-// use the connector for your database type:
-const connector = require('leo-connector-mysql');
-
-// include leo and secrets if using the AWS secrets manager to store the database credentials (recommended)
-const leo = require('leo-sdk');
-const secrets = require('leo-sdk/lib/secretsManager')(leo.configuration);
-
-// use an async handler and wait for the database credentials before trying to connect
-exports.handler = async function(event, context, callback) {
-    let secret = await secrets.getSecret(process.env.secret);
-    
-    // creates the checksum connector
-    connector.checksum({
-        host: secret.host,
-        user: secret.username,
-        port: secret.port,
-        database: secret.dbname,
-        password: secret.password
-    }).handler(event, context, callback);
-};
+Using the CLI, create a connector bot using the connector for your database type. Example:
+#####Syntax
+```bash
+leo-cli create leo-connector-{connector type} checksum {bot name}
 ```
 
-Example **package.json**: (replace the name with your connector type and add your secret key name)
-```json
-{
-    "name": "dw-mysql-checksum-connector",
-    "version": "1.0.0",
-    "description": "MySQL connector for the Data Warehouse checksum",
-    "main": "index.js",
-    "directories": {
-        "test": "test"
-    },
-    "scripts": {
-        "test": "leo-cli test . "
-    },
-    "config": {
-        "leo": {
-            "type": "bot",
-            "memory": 256,
-            "timeout": 300,
-            "role": "ApiRole",
-            "env": {
-                "secret": "database_secret_key_name"
-            }
-        }
-    }
-}
+#####Example:
+```bash
+leo-cli create leo-connector-sqlserver checksum mysqlConnector
 ```
 
-If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the config.leo object (replace the id's with those from your VPC):
+Now browse to your new bot (bots/mysqlConnector) and open up **package.json** and replace the `dbsecret` key name
+with the one you created in AWS Secrets Manager.
+
+If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the
+**package.json* under config.leo object.
+#####Example (config object only, from package.json):
 ```json
 "config": {
     "leo": {
@@ -82,7 +43,7 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
         "timeout": 300,
         "role": "ApiRole",
         "env": {
-            "secret": "database_secret_key_name"
+            "dbsecret": "database_secret_key_name"
         },
         "VpcConfig": {
             "SecurityGroupIds": [
@@ -98,30 +59,10 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
 }
 ```
 
-For MySQL and Postgres, we need to dynamically add the node modules to the package.json.
-For MySQL, inside the config.leo object, add (make sure ../../ is the path to where your node_modules/mysql2 is located, relative to the connector bot):
-```json
-"build": {
-    "include": [
-        "../../node_modules/mysql2"
-    ]   
-}
-```
-
-For Postgres, inside the config.leo object, add (make sure ../../ is the path to where your node_modules/pg is located, relative to the connector bot):
-```json
-"build": {
-    "include": [
-        "../../node_modules/pg",
-        "../../node_modules/pg-format"
-    ]   
-}   
-```
-
 ### 3: Create a slave database connector.
 This will be your data warehouse or anything you want to compare against the master database.
 **Repeat step 1** for this bot but with the slave database connection information.
-If your slave is not a database but an endpoint, see the custom URL connector section (in-progress).
+If your slave is not a database but an endpoint, see the basicConnector section.
 
 ### 4: Deploy the bots
 In your service, be sure to install the NPM modules for the connectors you are using.
@@ -258,7 +199,7 @@ Find the ApiRole in the Resources:
     },
 ```
 
-If your policy doesn't allow you to invoke lambda, modify, or add a new policy to the Policies array.
+Add policies to invoke lambda, connect to kms, and secrets manager.
 Example:
 ```json
 {
@@ -274,11 +215,64 @@ Example:
             }
         ]
     }
+},
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret"
+            ],
+            "Resource": "arn:aws:secretsmanager:*:*:secret:*"
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": "secretsmanager:ListSecrets",
+            "Resource": "*"
+        }
+    ]
+},
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "kms:GetParametersForImport",
+                "kms:ListKeyPolicies",
+                "kms:GetKeyRotationStatus",
+                "kms:ListRetirableGrants",
+                "kms:GetKeyPolicy",
+                "kms:DescribeKey",
+                "kms:ListResourceTags",
+                "kms:ListGrants",
+                "kms:Decrypt"
+            ],
+            "Resource": "arn:aws:kms:*:*:key/*"
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": [
+                "kms:ListKeys",
+                "kms:GenerateRandom",
+                "kms:ListAliases",
+                "kms:ReEncryptTo",
+                "kms:ReEncryptFrom"
+            ],
+            "Resource": "*"
+        }
+    ]
 }
 ```
 
 #### 6. Deploy
-Publish and deploy the checksum runner. Make sure the checksum runner is not in a VPC.
+Make sure the checksum runner is not in a VPC (No VpcConfig in the package.json). Publish and deploy the checksum runner.
 
 #### 7. Running the checksum
 You can either wait for the checksum to run from the cron time set, or you can force it to run through botmon.
@@ -367,7 +361,8 @@ range: function(start, end) {
     * into “db” and creates a start and end from    *
     * the greatest and least id’s.                  *
     *************************************************/
-    let db = '<API or other endpoint to get min, max, and total>';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     Object.keys(db).map(id => {
         id = db[id][this.settings.id_column];
         if ((start === undefined || id >= start) && (end === undefined || id <= end)) {
@@ -404,7 +399,8 @@ Gets a chunk of data between a specified start and end to compare against a mast
  */
 batch: function(start, end) {
     let data = [];
-    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     
     /***********************************************************************************
      * Example code to put together an array of data using the data returned from “db” *
@@ -439,7 +435,8 @@ batch: function(start, end) {
 // Responds to start, end, limit, reverse
 // Returns object with next, current
 nibble: function(start, end, limit, reverse) {
-    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     let current = null;
     let next = null;
     let dir = 1;
@@ -482,8 +479,45 @@ individual: function(start, end) {
 ```
 
 ##### Delete
-Coming soon.
+Delete records in the slave database that do not exist in the master database.
+This only runs if `shouldDelete` is set to true.
+```javascript
+delete: function(ids) {
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
+    ids.map(id => {
+        if (id in db) {
+            delete db[id];
+        }
+    });
+    return Promise.resolve();
+}
+```
+
 ##### Sample
-Coming soon.
+Used to return a sample of ID that are different between the master and slave.
+```javascript
+// Respond to ids
+// Return Stream, Array
+sample: function(ids) {
+    let data = [];
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
+    ids.map(id => {
+        let v = db[id];
+        if (v !== undefined) {
+            data.push(v);
+            console.log(v);
+        }
+    });
+
+    return Promise.resolve(data);
+}
+```
 ##### Destroy
-Coming soon.
+Destroy runs once on checksum completion. Use this if you need to shutdown a session or add additional logging.
+```javascript
+destroy: function(data) {
+    return Promise.resolve();
+}
+```
