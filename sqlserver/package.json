@@ -10,7 +10,7 @@
 	"license": "ISC",
 	"dependencies": {
 		"leo-connector-common": "^1.1.0",
-		"leo-sdk": "^1.0.72",
+		"leo-sdk": "^1.1.0",
 		"mssql": "^4.1.0",
 		"uuid": "^3.2.1"
 	},
