@@ -499,7 +499,31 @@ delete: function(ids) {
     return Promise.resolve();
 }
 ```
+
 ##### Sample
-Coming soon.
+Used to return a sample of ID that are different between the master and slave.
+```javascript
+// Respond to ids
+// Return Stream, Array
+sample: function(ids) {
+	let data = [];
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
+	ids.map(id => {
+		let v = db[id];
+		if (v !== undefined) {
+			data.push(v);
+			console.log(v);
+		}
+	});
+
+	return Promise.resolve(data);
+}
+```
 ##### Destroy
-Coming soon.
+Destroy runs once on checksum completion. Use this if you need to shutdown a session or add additional logging.
+```javascript
+destroy: function(data) {
+	return Promise.resolve();
+}
+```
