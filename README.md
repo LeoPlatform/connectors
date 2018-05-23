@@ -367,7 +367,8 @@ range: function(start, end) {
     * into “db” and creates a start and end from    *
     * the greatest and least id’s.                  *
     *************************************************/
-    let db = '<API or other endpoint to get min, max, and total>';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     Object.keys(db).map(id => {
         id = db[id][this.settings.id_column];
         if ((start === undefined || id >= start) && (end === undefined || id <= end)) {
@@ -404,7 +405,8 @@ Gets a chunk of data between a specified start and end to compare against a mast
  */
 batch: function(start, end) {
     let data = [];
-    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     
     /***********************************************************************************
      * Example code to put together an array of data using the data returned from “db” *
@@ -439,7 +441,8 @@ batch: function(start, end) {
 // Responds to start, end, limit, reverse
 // Returns object with next, current
 nibble: function(start, end, limit, reverse) {
-    let db = '<API or other endpoint to get data using “start” and “end” as parameters for starting and ending id’s >';
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
     let current = null;
     let next = null;
     let dir = 1;
@@ -482,7 +485,20 @@ individual: function(start, end) {
 ```
 
 ##### Delete
-Coming soon.
+Delete records in the slave database that do not exist in the master database.
+This only runs if `shouldDelete` is set to true.
+```javascript
+delete: function(ids) {
+    // db: object containing records to compare
+    let db = [{id: 1, name: 'foo', etc: 'etc'}, {...}];
+    ids.map(id => {
+        if (id in db) {
+            delete db[id];
+        }
+    });
+    return Promise.resolve();
+}
+```
 ##### Sample
 Coming soon.
 ##### Destroy
