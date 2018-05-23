@@ -19,12 +19,12 @@ If using the AWS secrets manager, create secret keys for your databases. The sec
 If you already have a connector setup for this database connection, skip this step.
 
 Using the CLI, create a connector bot using the connector for your database type. Example:
-#####Syntax
+##### Syntax
 ```bash
 leo-cli create leo-connector-{connector type} checksum {bot name}
 ```
 
-#####Example:
+##### Example:
 ```bash
 leo-cli create leo-connector-sqlserver checksum mysqlConnector
 ```
@@ -34,7 +34,7 @@ with the one you created in AWS Secrets Manager.
 
 If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the
 **package.json* under config.leo object.
-#####Example (config object only, from package.json):
+##### Example (config object only, from package.json):
 ```json
 "config": {
     "leo": {
@@ -141,7 +141,7 @@ checksum.checksum(system, event.botId, db1, db2, {
 ```
 
 #### 4. Configure the checksum bot package.json
-Example package.json:
+##### Example package.json:
 ```json
 {
     "name": "OrdersChecksum",
@@ -200,7 +200,7 @@ Find the ApiRole in the Resources:
 ```
 
 Add policies to invoke lambda, connect to kms, and secrets manager.
-Example:
+##### Example:
 ```json
 {
     "PolicyName": "Invoke_Lambda",
