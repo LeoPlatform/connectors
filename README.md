@@ -1,30 +1,75 @@
-# Creating a checksum bot:
+# Index
+ * [Creating a checksum bot](#creating-a-checksum-bot)
+    * [Prerequisites](#prerequisites)
+    * [NPM Requirements](#npm-requirements)
+    * [Available Connectors](#available-connectors)
+	* [Create Database connectors](#create-database-connectors)
+		1. [Create a secret key](#1-create-a-secret-key)
+		2. [Create a database connector](#2-create-a-database-connector)
+		3. [Deploy the connectors](#3-deploy-the-connectors)
+	* [Create a checksum runner (bot) with database connectors](#create-a-checksum-runner-bot-with-database-connectors)
+		1. [Add the required modules](#1-add-the-required-modules)
+		2. [Connect to the master and slave connectors](#2-connect-to-the-master-and-slave-connectors)
+		3. [Setup the checksum](#3-setup-the-checksum)
+		4. [Configure the checksum bot package.json](#4-configure-the-checksum-bot-packagejson)
+		5. [Edit your cloudformation.json](#5-edit-your-cloudformationjson)
+		6. [Deploy the checksum runner](#6-deploy-the-checksum-runner)
+		7. [Running the checksum](#7-running-the-checksum)
+	* [Custom Connector](#custom-connector)
+		* [Available handlers for a master connector](#available-handlers-for-a-master-connector)
+			* [Required handlers](#required-handlers)
+			* [Optional handlers](#optional-handlers)
+		* [Available handlers for a slave connector](#available-handlers-for-a-slave-connector)
+			* [Required handlers](#required-handlers-1)
+			* [Optional handlers](#optional-handlers-1)
+		* [Handlers](#handlers)
+			* [Initialize](#initialize)
+			* [Range](#range)
+			* [Batch](#batch)
+			* [Nibble](#nibble)
+			* [Individual](#individual)
+			* [Delete](#delete)
+			* [Sample](#sample)
+			* [Destroy](#destroy)
+ * [Support](#support)
+		
 
-## Create Database connectors:
+# Creating a checksum bot
 
-#### Prerequisites :
+#### Prerequisites
  * You know how to create bots in the Leo Platform. (https://github.com/LeoPlatform/cli)
  * You know how to create AWS permissions.
  * You know how to do AWS networking.
  
-#### NPM requirements :
+#### NPM requirements
  * leo-sdk: 1.1.0+
  * leo-connector-common: 1.1.2+
  * leo-connector-(mysql|postgres|sqlserver): 1.3.0+
  
+#### Available Connectors
+1. leo-connector-mysql:
+`npm install leo-connector-mysql`
+2. leo-connector-postgres:
+`npm install leo-connector-postgres`
+3. leo-connector-sqlserver:
+`npm install leo-connector-sqlserver`
+ 
+## Create Database connectors
+
 ### 1: Create a secret key
 If using the AWS secrets manager, create secret keys for your databases. The secret names will be used in step 2.
 
-### 2: Create database connectors
+### 2: Create a database connector
 If you already have a connector setup for this database connection, skip this step.
 
-Using the CLI, create a connector bot using the connector for your database type. Example:
+Using the CLI, create a connector bot for each database you need to connect to. If one or more of your connections are
+an endpoint or a database type we don't support, see the basicConnector section.
 ##### Syntax
 ```bash
 leo-cli create leo-connector-{connector type} checksum {bot name}
 ```
 
-##### Example:
+##### Example
 ```bash
 leo-cli create leo-connector-mysql checksum mysqlConnector
 ```
@@ -34,7 +79,7 @@ with the one you created in AWS Secrets Manager.
 
 If you are using a VPC for access to your database, or are using an AWS RDS instance, add the VpcConfig to the
 **package.json* under config.leo object.
-##### Example (config object only, from package.json):
+##### Example (config object only, from package.json)
 ```json
 "config": {
     "leo": {
@@ -58,37 +103,25 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
     }
 }
 ```
+Repeat this step for each master or slave database you will run a checksum against.
 
-### 3: Create a slave database connector.
-This will be your data warehouse or anything you want to compare against the master database.
-**Repeat step 1** for this bot but with the slave database connection information.
-If your slave is not a database but an endpoint, see the basicConnector section.
-
-### 4: Deploy the bots
+### 3: Deploy the connectors
 In your service, be sure to install the NPM modules for the connectors you are using.
-
-#### Available Connectors:
-1. leo-connector-mysql:
-`npm install leo-connector-mysql`
-2. leo-connector-postgres:
-`npm install leo-connector-postgres`
-3. leo-connector-sqlserver:
-`npm install leo-connector-sqlserver`
 
 Now publish and deploy the bots.
 
 Congratulations! You now have connectors setup to run a checksum. Next we'll need to create a checksum runner.
 
-## Create a checksum runner (bot) with database connectors.
+## Create a checksum runner (bot) with database connectors
 
-#### 1. Add the required modules:
+#### 1. Add the required modules
 ```javascript
 const leo = require('leo-sdk');
 const checksum = require('leo-connector-common/checksum');
 const moment = require('moment');
 ```
 
-#### 2. Connect to the master and slave connectors.
+#### 2. Connect to the master and slave connectors
 Use lambdaConnector to connect to the 2 database connectors you created in the previous section and build out the
 data you want to compare between the 2 connectors.
 For this example, I'm using a MySQL connector for the master, and the Postgres for the slave. We're going to compare id
@@ -112,7 +145,7 @@ exports.handler = function(event, context, callback) {
 }
 ```
 
-#### 3. Setup the checksum.
+#### 3. Setup the checksum
 Now create the checksum with parameters.
 ```javascript
 let system = 'default';
@@ -141,7 +174,7 @@ checksum.checksum(system, event.botId, db1, db2, {
 ```
 
 #### 4. Configure the checksum bot package.json
-##### Example package.json:
+##### Example package.json
 ```json
 {
     "name": "OrdersChecksum",
@@ -200,7 +233,7 @@ Find the ApiRole in the Resources:
 ```
 
 Add policies to invoke lambda, connect to kms, and secrets manager.
-##### Example:
+##### Example
 ```json
 {
     "PolicyName": "Invoke_Lambda",
@@ -271,7 +304,7 @@ Add policies to invoke lambda, connect to kms, and secrets manager.
 }
 ```
 
-#### 6. Deploy
+#### 6. Deploy the checksum runner
 Make sure the checksum runner is not in a VPC (No VpcConfig in the package.json). Publish and deploy the checksum runner.
 
 #### 7. Running the checksum
@@ -298,25 +331,25 @@ let customConnector = checksum.basicConnector('< Checksum name >', {
 
 Now add the handlers to handle the data.
 ### Available handlers for a master connector
-##### Required handlers:
+##### Required handlers
  * batch
  * individual
  * range
  * nibble
  * delete
  
-##### Optional handlers:
+##### Optional handlers
  * sample (required if sample is set to true)
  * initialize
  * destroy
 
 ### Available handlers for a slave connector
-##### Required handlers:
+##### Required handlers
  * batch
  * individual
  * delete
  
-##### Optional handlers:
+##### Optional handlers
  * sample (required if sample is set to true)
  * initialize
  * destroy
@@ -325,7 +358,7 @@ Now add the handlers to handle the data.
  
 ### Handlers
 
-##### Initialize:
+##### Initialize
 Called when checksum starts (does not include restarts after a lambda 5-minute timeout)
 ```javascript
 /**
@@ -337,7 +370,7 @@ initialize: function(data) {
     return Promise.resolve({});
 }
 ```
-##### Range:
+##### Range
 Called after initialize. Range gets the max and min id's, as well as the total number of id's. This is stored in the
 session until the checksum completes. Each restart of checksum after a lambda timeout will use the range stored in
 the session.
@@ -387,7 +420,7 @@ range: function(start, end) {
     });
 }
 ```
-##### Batch:
+##### Batch
 Gets a chunk of data between a specified start and end to compare against a master or slave set of data.
 ```javascript
 /**
@@ -522,5 +555,5 @@ destroy: function(data) {
 }
 ```
 
-## Support:
+## Support
 Want to hire an expert, or need technical support? Reach out to the Leo team: https://leoinsights.com/contact
