@@ -521,3 +521,6 @@ destroy: function(data) {
     return Promise.resolve();
 }
 ```
+
+## Support:
+Want to hire an expert, or need technical support? Reach out to the Leo team: https://leoinsights.com/contact
