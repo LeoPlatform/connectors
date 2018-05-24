@@ -26,7 +26,7 @@ leo-cli create leo-connector-{connector type} checksum {bot name}
 
 ##### Example:
 ```bash
-leo-cli create leo-connector-sqlserver checksum mysqlConnector
+leo-cli create leo-connector-mysql checksum mysqlConnector
 ```
 
 Now browse to your new bot (bots/mysqlConnector) and open up **package.json** and replace the `dbsecret` key name
