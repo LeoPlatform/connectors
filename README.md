@@ -5,9 +5,34 @@
     * [Available Connectors](#available-connectors)
 	* [Create Database connectors](#create-database-connectors)
 		1. [Create a secret key](#1-create-a-secret-key)
-		2. [Create a “master” database connector](#2-create-a-database-connector)
-		3. [Create a “slave” database connector](#3-create-a-slave-database-connector)
-		4. [Deploy the connectors](#4-deploy-the-connectors)
+		2. [Create a database connector](#2-create-a-database-connector)
+		3. [Deploy the connectors](#3-deploy-the-connectors)
+	* [Create a checksum runner (bot) with database connectors](#create-a-checksum-runner-bot-with-database-connectors)
+		1. [Add the required modules](#1-add-the-required-modules)
+		2. [Connect to the master and slave connectors](#2-connect-to-the-master-and-slave-connectors)
+		3. [Setup the checksum](#3-setup-the-checksum)
+		4. [Configure the checksum bot package.json](#4-configure-the-checksum-bot-packagejson)
+		5. [Edit your cloudformation.json](#5-edit-your-cloudformationjson)
+		6. [Deploy the checksum runner](#6-deploy-the-checksum-runner)
+		7. [Running the checksum](#7-running-the-checksum)
+	* [Custom Connector](#custom-connector)
+		* [Available handlers for a master connector](#available-handlers-for-a-master-connector)
+			* [Required handlers](#required-handlers)
+			* [Optional handlers](#optional-handlers)
+		* [Available handlers for a slave connector](#available-handlers-for-a-slave-connector)
+			* [Required handlers](#required-handlers-1)
+			* [Optional handlers](#optional-handlers-1)
+		* [Handlers](#handlers)
+			* [Initialize](#initialize)
+			* [Range](#range)
+			* [Batch](#batch)
+			* [Nibble](#nibble)
+			* [Individual](#individual)
+			* [Delete](#delete)
+			* [Sample](#sample)
+			* [Destroy](#destroy)
+ * [Support](#support)
+		
 
 # Creating a checksum bot:
 
@@ -279,7 +304,7 @@ Add policies to invoke lambda, connect to kms, and secrets manager.
 }
 ```
 
-#### 6. Deploy
+#### 6. Deploy the checksum runner
 Make sure the checksum runner is not in a VPC (No VpcConfig in the package.json). Publish and deploy the checksum runner.
 
 #### 7. Running the checksum
