@@ -1,4 +1,4 @@
-# Index:
+# Index
  * [Creating a checksum bot](#creating-a-checksum-bot)
     * [Prerequisites](#prerequisites)
     * [NPM Requirements](#npm-requirements)
@@ -34,7 +34,7 @@
  * [Support](#support)
 		
 
-# Creating a checksum bot:
+# Creating a checksum bot
 
 #### Prerequisites
  * You know how to create bots in the Leo Platform. (https://github.com/LeoPlatform/cli)
