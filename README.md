@@ -1,13 +1,13 @@
 # Index:
-[Creating a checksum bot](#creating-a-checksum-bot)
-    * [Prerequisites](#prerequisites-)
-    * [NPM Requirements](#npm-requirements-)
+ * [Creating a checksum bot](#creating-a-checksum-bot)
+    * [Prerequisites](#prerequisites)
+    * [NPM Requirements](#npm-requirements)
     * [Available Connectors](#available-connectors)
- * [Create Database connectors](#create-database-connectors)
-    1. [Create a secret key](#1-create-a-secret-key)
-    2. [Create a “master” database connector](#2-create-a-database-connector)
-    3. [Create a “slave” database connector](#3-create-a-slave-database-connector)
-    4. [Deploy the connectors](#4-deploy-the-connectors)
+	* [Create Database connectors](#create-database-connectors)
+		1. [Create a secret key](#1-create-a-secret-key)
+		2. [Create a “master” database connector](#2-create-a-database-connector)
+		3. [Create a “slave” database connector](#3-create-a-slave-database-connector)
+		4. [Deploy the connectors](#4-deploy-the-connectors)
 
 # Creating a checksum bot:
 
@@ -28,7 +28,6 @@
 `npm install leo-connector-postgres`
 3. leo-connector-sqlserver:
 `npm install leo-connector-sqlserver`
-
  
 ## Create Database connectors
 
@@ -38,7 +37,8 @@ If using the AWS secrets manager, create secret keys for your databases. The sec
 ### 2: Create a database connector
 If you already have a connector setup for this database connection, skip this step.
 
-Using the CLI, create a connector bot using the connector for your database type. Example:
+Using the CLI, create a connector bot for each database you need to connect to. If one or more of your connections are
+an endpoint or a database type we don't support, see the basicConnector section.
 ##### Syntax
 ```bash
 leo-cli create leo-connector-{connector type} checksum {bot name}
@@ -78,13 +78,9 @@ If you are using a VPC for access to your database, or are using an AWS RDS inst
     }
 }
 ```
+Repeat this step for each master or slave database you will run a checksum against.
 
-### 3: Create a slave database connector
-This will be your data warehouse or anything you want to compare against the master database.
-**Repeat steps 1 and 2** for this bot but with the slave database connection information.
-If your slave is not a database but an endpoint, see the basicConnector section.
-
-### 4: Deploy the connectors
+### 3: Deploy the connectors
 In your service, be sure to install the NPM modules for the connectors you are using.
 
 Now publish and deploy the bots.
