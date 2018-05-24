@@ -12,6 +12,10 @@
 	},
 	"author": "",
 	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/LeoPlatform/connectors/issues"
+	},
+	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
 		"chai": "^4.1.2",
 		"leo-connector-common": "^1.1.2",

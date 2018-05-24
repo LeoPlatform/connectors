@@ -13,6 +13,10 @@
 	},
 	"author": "",
 	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/LeoPlatform/connectors/issues"
+	},
+	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
 		"aws-sdk": "^2.213.1",
 		"fast-csv": "^2.4.1",

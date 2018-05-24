@@ -1,7 +1,7 @@
 {
 	"name": "leo-connector-common",
 	"version": "1.1.2",
-	"description": "",
+	"description": "Common package for all Leo Platform database connectors",
 	"main": "index.js",
 	"directories": {},
 	"scripts": {
@@ -25,7 +25,7 @@
 	},
 	"dependencies": {
 		"async": "^2.6.0",
-		"leo-sdk": "^1.0.72",
+		"leo-sdk": "^1.1.0",
 		"moment": "^2.22.1"
 	}
 }
