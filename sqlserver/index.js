@@ -86,7 +86,7 @@ module.exports = {
 			}
 
 			stream.end();
-		});
+		}, {inRowMode: false});
 
 		return stream;
 	},
