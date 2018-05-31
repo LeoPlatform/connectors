@@ -1,7 +1,11 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "1.2.1",
-	"description": "",
+	"version": "1.3.1",
+	"description": "A Postgres database connector for use with Leo Platform",
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/LeoPlatform/connectors.git"
+	},
 	"main": "index.js",
 	"scripts": {
 		"test": "mocha ./test/unit/**/*.test.js",
@@ -9,11 +13,15 @@
 	},
 	"author": "",
 	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/LeoPlatform/connectors/issues"
+	},
+	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
 		"aws-sdk": "^2.213.1",
 		"fast-csv": "^2.4.1",
-		"leo-connector-common": "^1.1.0",
-		"leo-sdk": "^1.0.72",
+		"leo-connector-common": "^1.1.3",
+		"leo-sdk": "^1.1.0",
 		"pg": "^7.4.1",
 		"pg-copy-streams": "^1.2.0",
 		"pg-format": "^1.0.4",
@@ -25,5 +33,15 @@
 		"eslint": "^4.19.1",
 		"mocha": "^5.0.5",
 		"sinon": "^4.4.8"
+	},
+	"config": {
+		"leo": {
+			"build": {
+				"include": [
+					"pg",
+					"pg-format"
+				]
+			}
+		}
 	}
 }

@@ -270,7 +270,15 @@ module.exports = {
 							cron.runAgain();
 						}
 
-						stream.end((err) => {
+						let streamEnd = (done) => {
+							if (!stream) {
+								return done();
+							}
+
+							stream.end(done);
+						};
+
+						streamEnd((err) => {
 							saveProgress(system, botId,
 								Object.assign(session, {
 									endTime: status !== "running" ? moment.now() : null,
@@ -327,7 +335,7 @@ module.exports = {
 						let payload = undefined;
 						if (!err && data.FunctionError) {
 							err = data.Payload;
-						} else if (!err && data.Payload != undefined) {
+						} else if (!err && data.Payload != undefined && data.Payload != 'null') {
 							let obj = JSON.parse(data.Payload);
 							if (obj.statusCode == 500) {
 								err = new Error(obj.body);

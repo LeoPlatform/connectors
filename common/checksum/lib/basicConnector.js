@@ -6,7 +6,6 @@ require("moment-timezone");
 
 const Stream = require('stream').Stream;
 
-
 function promisify(method, arity) {
 	if (method.length > arity) {
 		return function(...args) {
@@ -24,7 +23,7 @@ function promisify(method, arity) {
 }
 
 function readArray(array) {
-	var stream = new Stream(),
+	let stream = new Stream(),
 		i = 0,
 		paused = false,
 		ended = false;
@@ -38,7 +37,7 @@ function readArray(array) {
 	stream.resume = function() {
 		if (ended) return;
 		paused = false;
-		var l = array.length;
+		let l = array.length;
 		while (i < l && !paused && !ended) {
 			stream.emit('data', array[i++]);
 		}
@@ -84,7 +83,6 @@ module.exports = function(opts) {
 		}
 	}, opts);
 
-
 	let wrap = opts.wrap || ((handler, base) => {
 		return function(event, callback) {
 			base(event, handler, callback);
@@ -104,8 +102,8 @@ module.exports = function(opts) {
 	function batch(event, handler, callback) {
 		console.log("Calling Batch", event);
 
-		var startTime = moment.now();
-		var data = event.data;
+		let startTime = moment.now();
+		let data = event.data;
 
 		promisify(handler, 2).call({
 			settings: event.settings,
@@ -122,7 +120,7 @@ module.exports = function(opts) {
 			}
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
 
-			var result = {
+			let result = {
 				qty: 0,
 				ids: data.ids,
 				start: data.start,
@@ -137,7 +135,7 @@ module.exports = function(opts) {
 				console.log("Batch On Error", err);
 				callback(err);
 			}).on("data", (obj) => {
-				var allFields = "";
+				let allFields = "";
 				Object.keys(obj).forEach(key => {
 					let value = obj[key];
 					if (value instanceof Date) {
@@ -149,7 +147,7 @@ module.exports = function(opts) {
 					}
 				});
 
-				var hash = crypto.createHash('md5').update(allFields).digest();
+				let hash = crypto.createHash('md5').update(allFields).digest();
 
 				result.hash[0] += hash.readUInt32BE(0);
 				result.hash[1] += hash.readUInt32BE(4);
@@ -162,8 +160,8 @@ module.exports = function(opts) {
 
 	function individual(event, handler, callback) {
 		console.log("Calling Individual", event);
-		var startTime = moment.now();
-		var data = event.data;
+		let startTime = moment.now();
+		let data = event.data;
 
 		promisify(handler, 2).call({
 			settings: event.settings,
@@ -180,7 +178,7 @@ module.exports = function(opts) {
 			}
 
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
-			var results = {
+			let results = {
 				ids: data.ids,
 				start: data.start,
 				end: data.end,
@@ -195,7 +193,7 @@ module.exports = function(opts) {
 				console.log("Individual On Error", err);
 				callback(err);
 			}).on("data", (obj) => {
-				var allFields = "";
+				let allFields = "";
 
 				Object.keys(obj).forEach(key => {
 					let value = obj[key];
@@ -207,7 +205,7 @@ module.exports = function(opts) {
 						allFields += " ";
 					}
 				});
-				var hash = crypto.createHash('md5').update(allFields).digest('hex');
+				let hash = crypto.createHash('md5').update(allFields).digest('hex');
 				results.checksums.push({
 					id: obj[event.settings.id_column],
 					_id: event.settings._id_column ? obj[event.settings._id_column] : undefined,
@@ -221,7 +219,7 @@ module.exports = function(opts) {
 
 	function sample(event, handler, callback) {
 		console.log("Calling Sample", event);
-		var data = event.data;
+		let data = event.data;
 
 		promisify(handler, 1).call({
 			settings: event.settings,
@@ -239,7 +237,7 @@ module.exports = function(opts) {
 
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
 
-			var results = {
+			let results = {
 				qty: 0,
 				ids: [],
 				start: data.start,
@@ -247,14 +245,13 @@ module.exports = function(opts) {
 				checksums: []
 			};
 
-
 			stream.on("end", function() {
 				callback(null, results);
 			}).on("err", function(err) {
 				console.log("error");
 				throw err;
 			}).on("data", function(obj) {
-				var out = [];
+				let out = [];
 				Object.keys(obj).forEach(key => {
 					let value = obj[key];
 					if (value instanceof Date) {
@@ -277,7 +274,7 @@ module.exports = function(opts) {
 	function range(event, handler, callback) {
 		console.log("Calling Range", event);
 
-		var data = event.data;
+		let data = event.data;
 		promisify(handler, 2).call({
 			settings: event.settings,
 			session: event.session
@@ -289,7 +286,7 @@ module.exports = function(opts) {
 	function nibble(event, handler, callback) {
 		console.log("Calling Nibble", event);
 
-		var data = event.data;
+		let data = event.data;
 		promisify(handler, 4).call({
 			settings: event.settings,
 			session: event.session

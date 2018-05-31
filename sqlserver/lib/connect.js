@@ -6,6 +6,11 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
 // 	all: true
 // });
 module.exports = function(config) {
+	// make the config parameters the same as the other database types.
+	if (config.host && typeof config.server === 'undefined') {
+		config.server = config.host;
+	}
+
 	const pool = new mssql.ConnectionPool(Object.assign({
 		user: 'root',
 		password: 'test',
