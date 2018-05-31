@@ -14,10 +14,11 @@ module.exports = {
 			slot_name: 'leo_replication',
 			keepalive: 1000 * 3,
 			failAfter: 100,
+			recoverWal: false,
 			event: 'logical_replication'
 		}, opts || {});
 		let lastLsn;
-
+		let requestedWalSegmentAlreadyRemoved = false;
 		let pass = new PassThrough({
 			objectMode: true
 		});
@@ -68,9 +69,24 @@ module.exports = {
 				}
 			};
 			client.on('error', dieError);
-			client.connect(function(err) {
+			client.connect(async function(err) {
 				logger.debug(`(${config.database}) Trying to connect.`);
 				if (err) return dieError(err);
+				if (opts.recoverWal && requestedWalSegmentAlreadyRemoved) {
+					console.log(`RECOVER FROM WAL SEGMENT ALREADY REMOVED. (removing slot ${opts.slot_name})`);
+					const dropSlotPromise = new Promise((resolve, reject) => {
+						wrapperClient.query(`SELECT pg_drop_replication_slot($1);`, [opts.slot_name], (err) => {
+							if (err) return reject(err);
+							resolve();
+						});
+					});
+					try {
+						await dropSlotPromise;
+						console.log(`SLOT ${opts.slot_name} REMOVED`);
+					} catch (err) {
+						dieError(err);
+					}
+				}
 				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
 					logger.debug(`(${config.database}) Trying to get replication slot ${opts.slot_name}.`);
 					if (err) return dieError(err);
@@ -94,9 +110,11 @@ module.exports = {
 					}
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
-
 						client.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}  ("include-xids" 'on' , "include-timestamp" 'on')`, (err, result) => {
-							if (err) return dieError(err); //wal error comes here
+							if (err) {
+								if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
+								return dieError(err);
+							} 
 						});
 						let [upper, lower] = lastLsn.split('/');
 						lastLsn = {

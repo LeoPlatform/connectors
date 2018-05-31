@@ -5,6 +5,7 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
 const async = require('async');
+const chunk = require('lodash/fp/chunk');
 
 // require("leo-sdk/lib/logger").configure(true);
 
@@ -17,7 +18,6 @@ require('pg').types.setTypeParser(1114, (val) => {
 	console.log(val);
 	return moment(val).unix() + "  " + moment(val).utc().format();
 });
-
 
 const ls = require("leo-sdk").streams;
 const clients = {};
@@ -132,9 +132,45 @@ function create(hash, pool, parentCache) {
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
 		},
+		stripAllTriggers: function(callback) {
+			// see if strip_all_triggers() exists //select to_regproc('strip_all_triggers')
+			client.query('SELECT to_regproc(\'strip_all_triggers\');', (err, rows) => {
+				if (err) return callback(err);
+				const { to_regproc: stripAllTriggersExists } = rows[0];
+				if (stripAllTriggersExists) {
+					callback();
+				} else {
+					this.query(`
+						CREATE OR REPLACE FUNCTION strip_all_triggers() RETURNS text AS $$ DECLARE
+											triggNameRecord RECORD;
+									triggTableRecord RECORD;
+							BEGIN
+									FOR triggNameRecord IN select distinct(trigger_name) from information_schema.triggers where trigger_schema = 'public' LOOP
+											SELECT distinct(event_object_table) INTO triggTableRecord from information_schema.triggers where trigger_name = triggNameRecord.trigger_name;
+											RAISE NOTICE 'Dropping trigger: % on table: %', triggNameRecord.trigger_name, triggTableRecord.event_object_table;
+											EXECUTE 'DROP TRIGGER ' || triggNameRecord.trigger_name || ' ON ' || triggTableRecord.event_object_table || ';';
+									END LOOP;
+
+									RETURN 'done';
+							END;
+							$$ LANGUAGE plpgsql SECURITY DEFINER;
+						`, 
+					(err) => {
+						if (err) return callback(err);
+						this.query('SELECT strip_all_triggers();', (err, rows) => {
+							if (err) return callback(err);
+							const { strip_all_triggers: stripTriggersValue } = rows[0];
+							if (stripTriggersValue === 'done') return callback();
+							callback(new Error("strip_all_triggers ran unsuccessfully"));
+						});
+					});
+				}
+			});
+		},
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000,
+				removeRecordsBatch: 300,
 				useReplaceInto: false,
 				useOnDuplicateUpdate: false,
 				ignoreDestinationMissingTable: false
@@ -289,9 +325,12 @@ function create(hash, pool, parentCache) {
 						tasks.push(done => client.query("BEGIN", done));
 						tasks.push(done => client.query(format("ALTER TABLE %I DISABLE TRIGGER ALL", table), done));
 						Object.keys(uniqueKeys).forEach(constraint => {
-							tasks.push(done => {
-								//Let's delete the offending records and try again
-								client.query(format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, uniqueKeys[constraint], toRemoveRecords[constraint]), done);
+							const manageableChuncks = chunk(opts.removeRecordsBatch, toRemoveRecords[constraint]);
+							manageableChuncks.forEach(ch => {
+								tasks.push(done => {
+									//Let's delete the offending records and try again
+									client.query(format('DELETE FROM %I WHERE ROW(%I) in (%L)', table, uniqueKeys[constraint], ch), done);
+								});
 							});
 						});
 						async.series(tasks, err => {

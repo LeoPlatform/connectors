@@ -4,8 +4,8 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"test": "mocha ./test/unit/**/*.test.js",
-		"test:int": "mocha ./test/integration/**/*.test.js"
+		"test": "mocha test/unit/**/*.test.js",
+		"test:int": "mocha test/integration/**/*.test.js"
 	},
 	"author": "",
 	"license": "ISC",
@@ -14,10 +14,10 @@
 		"fast-csv": "^2.4.1",
 		"leo-connector-common": "^1.1.0",
 		"leo-sdk": "^1.0.72",
+		"lodash": "^4.17.10",
 		"pg": "^7.4.1",
 		"pg-copy-streams": "^1.2.0",
 		"pg-format": "^1.0.4",
-		"pg-logical-replication": "^1.0.3",
 		"pg-native": "^2.2.0"
 	},
 	"devDependencies": {
