@@ -5,6 +5,7 @@ const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
 module.exports = function(client, tableConfig, stream, callback) {
+	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
 	Object.keys(tableConfig).forEach(t => {
@@ -52,9 +53,19 @@ module.exports = function(client, tableConfig, stream, callback) {
 						}
 					});
 					if (tableConfig[t].isDimension) {
-						client.importDimension(obj[t].stream, t, sk, nk, scds, done);
+						client.importDimension(obj[t].stream, t, sk, nk, scds, (err, tableInfo) => {
+							if (!err && tableInfo && tableInfo.count === 0) {
+								tableStatuses[t] = "First Load";
+							}
+							done(err);
+						});
 					} else {
-						client.importFact(obj[t].stream, t, nk, done);
+						client.importFact(obj[t].stream, t, nk, (err, tableInfo) => {
+							if (!err && tableInfo && tableInfo.count === 0) {
+								tableStatuses[t] = "First Load";
+							}
+							done(err);
+						});
 					}
 				});
 			}
@@ -113,7 +124,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							}
 						});
 						if (links.length) {
-							tasks.push(done => client.linkDimensions(t, links, nk, done));
+							tasks.push(done => client.linkDimensions(t, links, nk, done, tableStatuses[t] || "Unmodified"));
 						}
 					});
 					async.parallelLimit(tasks, 10, (err) => {

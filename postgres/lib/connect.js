@@ -288,6 +288,8 @@ function create(pool, parentCache) {
 			function nonNull(v) {
 				if (v === "" || v === null || v === undefined) {
 					return "\\N";
+				} else if (typeof v === "string" && v.search(/\r/) !== -1) {
+					return v.replace(/\r\n?/g, "\n");
 				} else {
 					return v;
 				}
