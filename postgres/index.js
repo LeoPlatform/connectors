@@ -32,7 +32,8 @@ module.exports = {
 			}, callback);
 		} else {
 			let stream = leo.read(bot_id, opts.inQueue, {
-				start: opts.start
+				start: opts.start,
+				maxOverride: opts.terminateAt
 			});
 			let stats = ls.stats(bot_id, opts.inQueue);
 			let destination = (opts.devnull) ? ls.devnull('here') : leo.load(bot_id, opts.outQueue || dbConfig.table);
