@@ -261,16 +261,14 @@ module.exports = function(connection, fieldsTable) {
 	}
 
 	function getFields(connection, event) {
-		let settings = event.settings;
 
-		if (!event.settings.sql) {
-			let tableName = getTable(event);
+		return new Promise((resolve, reject) => {
+			if (!event.settings.fields && !event.settings.sql) {
+				reject("Missing required object parameter: 'sql', in the Postgres lambdaConnector.");
+			} else if (!event.settings.sql) {
+				let tableName = getTable(event);
 
-			if (!event.settings.fields) {
-				event.settings.fields = [event.settings.id_column];
-			}
-
-			event.settings.sql = `SELECT ${settings.fields.map(field => {
+				event.settings.sql = `SELECT ${event.settings.fields.map(field => {
 					if (field.match(/^\*/)) {
 						return field.slice(1).replace(/[\'\"\`]/g, '');
 					} else {
@@ -279,9 +277,8 @@ module.exports = function(connection, fieldsTable) {
 				})}
 				FROM ${tableName}
 				where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
-		}
+			}
 
-		return new Promise((resolve, reject) => {
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between 1 and 0 LIMIT 0`), (err, rows, fields) => {
 				if (err) {
 					reject(err);
@@ -290,7 +287,7 @@ module.exports = function(connection, fieldsTable) {
 				resolve({
 					sql: event.settings.sql,
 					fieldCalcs: fields.map(f => {
-						if (['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.dataTypeID].toLowerCase()) !== -1) {
+						if (fieldIds[f.dataTypeID] && ['date', 'timestamp', 'datetime'].indexOf(fieldIds[f.dataTypeID].toLowerCase()) !== -1) {
 							return `coalesce(md5(floor(extract(epoch from ${f.name}))::text), ' ')`;
 						}
 

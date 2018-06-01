@@ -25,7 +25,7 @@ module.exports = function(tableIds, opts) {
 		}
 		let payload = obj.payload;
 		let table = transform.parseTable(payload);
-		if (table == undefined) {
+		if (table == undefined || tableIds[table] == undefined) {
 			return done(null);
 		}
 

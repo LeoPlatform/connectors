@@ -79,7 +79,7 @@ module.exports = function(event, context, sdk) {
 								async.doWhilst((done) => {
 
 									// split the ID's up into no more than 5k for each query
-									let ids = obj[table].splice(0, MAX);
+									let ids = obj[table].splice(0, params.limit || MAX);
 									objArray.push(tables[table].replace(/\?/g, ids.filter((id) => {return id;}).join()));
 									done();
 								}, () => obj[table].length);
@@ -112,7 +112,8 @@ module.exports = function(event, context, sdk) {
 					snapshot: params.snapshot,
 					inQueue: event.source,
 					outQueue: event.destination,
-					start: params.start || null
+					start: params.start || null,
+					limit: params.limit || MAX
 				},
 				callback);
 			}
