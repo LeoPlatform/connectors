@@ -279,7 +279,7 @@ module.exports = function(connection, fieldsTable) {
 				where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
 			}
 
-			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between 1 and 0 LIMIT 0`), (err, rows, fields) => {
+			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between '1' and '0' LIMIT 0`), (err, rows, fields) => {
 				if (err) {
 					reject(err);
 					return;
