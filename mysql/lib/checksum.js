@@ -190,37 +190,45 @@ module.exports = function(connection) {
 	}
 
 	function range(event, callback) {
+		logger.log("Calling Range", event);
 
 		let data = event.data;
 		let settings = event.settings;
 		let tableName = getTable(event);
 		let connection = getConnection(settings);
 
-		let where = [];
+		let wheres = [];
 		let whereStatement = "";
 		if (data.min) {
-			where.push(`${settings.id_column} >= ${escape(data.min)}`);
+			wheres.push(`${settings.id_column} >= ${escape(data.min)}`);
 		}
 		if (data.max) {
-			where.push(`${settings.id_column} <= ${escape(data.max)}`);
+			wheres.push(`${settings.id_column} <= ${escape(data.max)}`);
 		}
-		if (where.length) {
-			whereStatement = ` where ${where.join(" and ")} `;
+		if (wheres.length) {
+			whereStatement = ` where ${wheres.join(" and ")} `;
 		}
-		let query = `select MIN(${settings.id_column}) as min, MAX(${settings.id_column}) as max, count(${settings.id_column}) total from ${tableName}${whereStatement}`;
-		console.log(`Range Query: ${query}`);
-		connection.query(query, (err, result) => {
-			if (err) {
-				console.log("Range Error", err);
-				callback(err);
+		getFields(connection, event).then((table) => {
+			let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total `;
+			if (!table.sql) {
+				query += `FROM ${tableName}${whereStatement}`;
 			} else {
-				callback(null, {
-					min: result[0].min,
-					max: result[0].max,
-					total: result[0].total
-				});
+				query += `FROM (${table.sql.replace('__IDCOLUMNLIMIT__', ' IS NOT NULL AND ' + where(data, settings))}) i ${whereStatement}`;
 			}
-		});
+			logger.log(`Range Query: ${query}`);
+			connection.query(query, (err, result) => {
+				if (err) {
+					logger.log("Range Error", err);
+					callback(err);
+				} else {
+					callback(null, {
+						min: result[0].min,
+						max: result[0].max,
+						total: result[0].total
+					});
+				}
+			});
+		}).catch(callback);
 	}
 
 	function nibble(event, callback) {

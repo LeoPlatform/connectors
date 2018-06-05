@@ -182,31 +182,38 @@ module.exports = function (connection) {
 		let tableName = getTable(event);
 		let connection = getConnection(settings);
 
-		let where = [];
+		let wheres = [];
 		let whereStatement = "";
 		if (data.min) {
-			where.push(`${settings.id_column} >= ${escape(data.min)}`);
+			wheres.push(`${settings.id_column} >= ${escape(data.min)}`);
 		}
 		if (data.max) {
-			where.push(`${settings.id_column} <= ${escape(data.max)}`);
+			wheres.push(`${settings.id_column} <= ${escape(data.max)}`);
 		}
-		if (where.length) {
-			whereStatement = ` where ${where.join(" and ")} `;
+		if (wheres.length) {
+			whereStatement = ` where ${wheres.join(" and ")} `;
 		}
-		let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total FROM ${tableName}${whereStatement}`;
-		logger.log(`Range Query: ${query}`);
-		connection.query(query, (err, result, fields) => {
-			if (err) {
-				logger.log("Range Error", err);
-				callback(err);
+		getFields(connection, event).then((table) => {
+			let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total `;
+			if (!table.sql) {
+				query += `FROM ${tableName}${whereStatement}`;
 			} else {
-				callback(null, {
-					min: correctValue(result[0][0], fields[0]),
-					max: correctValue(result[0][1], fields[1]),
-					total: correctValue(result[0][2], fields[2])
-				});
+				query += `FROM (${table.sql.replace('__IDCOLUMNLIMIT__', ' IS NOT NULL AND ' + where(data, settings))}) i ${whereStatement}`;
 			}
-		}, {inRowMode: true});
+			logger.log(`Range Query: ${query}`);
+			connection.query(query, (err, result, fields) => {
+				if (err) {
+					logger.log("Range Error", err);
+					callback(err);
+				} else {
+					callback(null, {
+						min: correctValue(result[0][0], fields[0]),
+						max: correctValue(result[0][1], fields[1]),
+						total: correctValue(result[0][2], fields[2])
+					});
+				}
+			}, {inRowMode: true});
+		}).catch(callback);
 	}
 
 	function nibble(event, callback) {
