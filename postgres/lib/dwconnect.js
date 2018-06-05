@@ -3,7 +3,6 @@ const postgres = require("./connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
 
-
 module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 
@@ -439,13 +438,21 @@ module.exports = function(config, columnConfig) {
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._startdate} timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._enddate} timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._current} boolean`, done));
-			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.concat(columnConfig._current).join(',')})`, done));
-			tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat(columnConfig._startdate).join(',')})`, done));
-			tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
+
+			// redshift doesn't support create index
+			if (config.version != "redshift") {
+				tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.concat(columnConfig._current).join(',')})`, done));
+				tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat(columnConfig._startdate).join(',')})`, done));
+				tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
+			}
 		} else {
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
-			tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
-			tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
+
+			// redshift doesn't support create index
+			if (config.version != "redshift") {
+				tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
+				tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
+			}
 		}
 
 
@@ -483,10 +490,170 @@ module.exports = function(config, columnConfig) {
 			}
 			fields.push(`"${f}" ${field.type}`);
 		});
-		let sql = `alter table  ${table} 
+		let sqls = [`alter table  ${table} 
 				add column ${fields.join(',\n add column ')}
-			`;
-		client.query(sql, callback);
+			`];
+
+		// redshift doesn't support multi 'add column' in one query
+		if (config.version == "redshift") {
+			sqls = fields.map(f => `alter table  ${table} add column ${f}`);
+		}
+
+		async.eachSeries(sqls, function(sql, done) {
+			client.query(sql, done);
+		}, callback);
+	};
+
+	client.findAuditDate = function(table, callback) {
+		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ${client.escapeId(table)}`, (err, auditdate) => {
+			if (err) {
+				callback(err);
+			} else {
+				let audit = auditdate && auditdate[0].max;
+				let auditdateCompare = audit != null ? `date_trunc('second',${columnConfig._auditdate}) = ${client.escapeValue(audit)}` : `${columnConfig._auditdate} is null`;
+				client.query(`select count(*) as count FROM ${client.escapeId(table)} where ${auditdateCompare}`, (err, count) => {
+					callback(err, {
+						auditdate: audit,
+						count: count && count[0].count
+					});
+				});
+			}
+		});
+	};
+
+	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
+		let auditdateCompare = remoteAuditdate.auditdate != null ? `date_trunc('second',${columnConfig._auditdate}) = ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
+		client.query(`select count(*) as count FROM ${client.escapeId(table)} WHERE ${auditdateCompare}`, (err, result) => {
+			let where = "";
+
+			let mysqlAuditDate = parseInt(result[0].count);
+
+			if (remoteAuditdate.auditdate && mysqlAuditDate <= remoteAuditdate.count) {
+				where = `WHERE date_trunc('second', ${columnConfig._auditdate}) > ${client.escapeValue(remoteAuditdate.auditdate)}`;
+			} else if (remoteAuditdate.auditdate && mysqlAuditDate > remoteAuditdate.count) {
+				where = `WHERE date_trunc('second', ${columnConfig._auditdate}) >= ${client.escapeValue(remoteAuditdate.auditdate)}`;
+			}
+			client.query(`select to_char(min(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as oldest, count(*) as count
+        FROM ${client.escapeId(table)}
+        ${where}
+        `, (err, result) => {
+
+				if (result[0].count) {
+					let totalCount = parseInt(result[0].count);
+					let needs = {
+						[columnConfig._auditdate]: true,
+						[columnConfig._current]: opts.isDimension,
+						[columnConfig._startdate]: opts.isDimension,
+						[columnConfig._enddate]: opts.isDimension
+
+					};
+					var f = fields.map(f => {
+						needs[f] = false;
+						return `"${f}"`;
+					});
+					Object.keys(needs).map(key => {
+						if (needs[key]) {
+							f.push(`"${key}"`);
+						}
+					});
+
+					if (config.version == "redshift") {
+						let fileBase = `s3://${opts.bucket}${opts.file}/${table}`;
+						let query = `UNLOAD ('select ${f} from ${client.escapeId(table)} ${where}') to '${fileBase}' MANIFEST OVERWRITE ESCAPE iam_role '${opts.role}';`;
+						client.query(query, (err) => {
+							callback(err, fileBase + ".manifest", totalCount, result[0].oldest);
+						});
+					} else {
+						let file = `${opts.file}/${table}.csv`;
+						ls.pipe(client.streamFromTable(table, {
+							columns: f,
+							header: false,
+							delimeter: "|",
+							where: where
+						}), ls.toS3(opts.bucket, file), (err) => {
+							err && console.log("Stream From table Error:", err);
+							callback(err, "s3://" + opts.bucket + "/" + file, totalCount, result[0].oldest);
+						});
+					}
+				} else {
+					callback(null, null, 0, null);
+				}
+			});
+		});
+	};
+
+	client.importChanges = function(file, table, fields, opts, callback) {
+		if (typeof opts === "function") {
+			callback = opts;
+			opts = {};
+		}
+		opts = Object.assign({
+			role: null
+		}, opts);
+		var tableName = table.identifier;
+		var tasks = [];
+		let loadCount = 0;
+		let stageTable = `staging_${tableName}`;
+		tasks.push((done) => {
+			client.query(`drop table if exists ${stageTable}`, done);
+		});
+		tasks.push((done) => {
+			client.query(`create /*temporary*/ table ${stageTable} (like ${tableName})`, done);
+		});
+		tasks.push((done) => {
+			let needs = {
+				[columnConfig._auditdate]: true,
+				[columnConfig._current]: opts.isDimension,
+				[columnConfig._startdate]: opts.isDimension,
+				[columnConfig._enddate]: opts.isDimension
+
+			};
+			var f = fields.map(f => {
+				needs[f] = false;
+				return `"${f}"`;
+			});
+			Object.keys(needs).map(key => {
+				if (needs[key]) {
+					f.push(`"${key}"`);
+				}
+			});
+			if (config.version == "redshift") {
+				let manifest = "";
+				if (file.match(/\.manifest$/)) {
+					manifest = "MANIFEST";
+				}
+				client.query(`copy ${stageTable} (${f})
+          from '${file}' ${manifest} ${opts.role?`credentials 'aws_iam_role=${opts.role}'`: ""}
+		  NULL AS '\\\\N' ACCEPTINVCHARS TRUNCATECOLUMNS ESCAPE ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
+			} else {
+				done("Postgres importChanges Not Implemented Yet");
+			}
+		});
+		if (table.isDimension) {
+			tasks.push((done) => {
+				client.query(`delete from ${tableName} using ${stageTable} where ${stageTable}.${table.sk}=${tableName}.${table.sk}`, done);
+			});
+		} else {
+			tasks.push((done) => {
+				let ids = table.nks.map(nk => `${stageTable}.${nk}=${tableName}.${nk}`).join(' and ');
+				client.query(`delete from ${tableName} using ${stageTable} where ${ids}`, done);
+			});
+		}
+		tasks.push(function(done) {
+			client.query(`insert into ${tableName} select * from ${stageTable}`, done);
+		});
+		tasks.push(function(done) {
+			client.query(`select count(*) from ${stageTable}`, (err, result) => {
+				loadCount = result && parseInt(result[0].count);
+				done(err);
+			});
+		});
+		tasks.push(function(done) {
+			client.query(`drop table if exists ${stageTable}`, done);
+		});
+		async.series(tasks, (err) => {
+			callback(err, loadCount);
+		});
 	};
 
 	return client;
