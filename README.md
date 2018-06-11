@@ -1,3 +1,5 @@
+Quick Start Guide: https://github.com/LeoPlatform/Leo
+
 # Index
  * [Creating a checksum bot](#creating-a-checksum-bot)
     * [Prerequisites](#prerequisites)
