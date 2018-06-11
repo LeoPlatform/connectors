@@ -51,11 +51,11 @@ module.exports = function(config, columnConfig) {
 					//The following code relies on the fact that now() will return the same time during all transaction events
 					tasks.push(done => client.query(`Begin Transaction`, done));
 					tasks.push(done => {
-						client.query(`select count(*) as total from ${table}`, (err, results) => {
+						client.query(`select 1 as total from ${table} limit 1`, (err, results) => {
 							if (err) {
 								return done(err);
 							}
-							totalRecords = parseInt(results[0].total);
+							totalRecords = results.length;
 							done();
 						});
 					});
@@ -175,12 +175,12 @@ module.exports = function(config, columnConfig) {
 						let rowId = null;
 						let totalRecords = 0;
 						tasks.push(done => {
-							client.query(`select max(${sk}) as maxid, count(${sk}) as total from ${table}`, (err, results) => {
+							client.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
 								if (err) {
 									return done(err);
 								}
 								rowId = results[0].maxid || 10000;
-								totalRecords = parseInt(results[0].total);
+								totalRecords = (rowId - 10000);
 								done();
 							});
 						});
@@ -261,7 +261,7 @@ module.exports = function(config, columnConfig) {
 						unions[field.dimension] = [];
 					}
 					let dimTableNk = tableNks[field.dimension][0];
-					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null`);
+					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = (select max(${columnConfig._auditdate}) from ${table})`);
 				}
 			});
 		});
