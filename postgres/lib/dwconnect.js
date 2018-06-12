@@ -34,8 +34,9 @@ module.exports = function(config, columnConfig) {
 
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
-		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
+		tasks.push(done => client.query(`analyze staging_${table}`, done));
 
 		client.describeTable(table, (err, result) => {
 			let columns = result.filter(f => !f.column_name.match(/^_/)).map(f => `"${f.column_name}"`);
@@ -112,9 +113,10 @@ module.exports = function(config, columnConfig) {
 		let tasks = [];
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
-		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
 		tasks.push(done => client.query(`alter table staging_${table} drop column ${sk}`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
+		tasks.push(done => client.query(`analyze staging_${table}`, done));
 
 		client.describeTable(table, (err, result) => {
 			client.connect().then(client => {
