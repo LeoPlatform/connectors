@@ -1,0 +1,175 @@
+{
+	"name": "____DIRNAME____",
+	"version": "1.0.0",
+	"description": "",
+	"main": "app.js",
+	"scripts": {},
+	"config": {
+		"leo": {
+			"type": "microservice",
+			"subtype": "entity-table",
+			"stacks": [
+				"leosdk"
+			],
+			"Resources": {
+				"LeoEventMapping": {
+					"Type": "AWS::Lambda::EventSourceMapping",
+					"Properties": {
+						"BatchSize": 500,
+						"Enabled": true,
+						"StartingPosition": "TRIM_HORIZON",
+						"EventSourceArn": {
+							"Fn::Sub": "${Entities.StreamArn}"
+						},
+						"FunctionName": {
+							"Fn::Sub": "${EntityTableProcessor}"
+						}
+					}
+				},
+				"AutoScalingRole": {
+					"Type": "AWS::IAM::Role",
+					"Properties": {
+						"AssumeRolePolicyDocument": {
+							"Version": "2012-10-17",
+							"Statement": [{
+								"Effect": "Allow",
+								"Principal": {
+									"Service": [
+										"application-autoscaling.amazonaws.com"
+									]
+								},
+								"Action": [
+									"sts:AssumeRole"
+								]
+							}]
+						},
+						"Path": "/",
+						"Policies": [{
+							"PolicyName": "root",
+							"PolicyDocument": {
+								"Version": "2012-10-17",
+								"Statement": [{
+									"Effect": "Allow",
+									"Action": [
+										"dynamodb:DescribeTable",
+										"dynamodb:UpdateTable",
+										"cloudwatch:PutMetricAlarm",
+										"cloudwatch:DescribeAlarms",
+										"cloudwatch:GetMetricStatistics",
+										"cloudwatch:SetAlarmState",
+										"cloudwatch:DeleteAlarms"
+									],
+									"Resource": "*"
+								}]
+							}
+						}]
+					}
+				},
+				"Entities": {
+					"Type": "AWS::DynamoDB::Table",
+					"Properties": {
+						"AttributeDefinitions": [{
+								"AttributeName": "partition",
+								"AttributeType": "S"
+							},
+							{
+								"AttributeName": "id",
+								"AttributeType": "N"
+							}
+						],
+						"KeySchema": [{
+								"AttributeName": "partition",
+								"KeyType": "HASH"
+							},
+							{
+								"AttributeName": "id",
+								"KeyType": "RANGE"
+							}
+						],
+						"ProvisionedThroughput": {
+							"ReadCapacityUnits": 1000,
+							"MinReadCapacityUnits": 1000,
+							"MaxReadCapacityUnits": 7000,
+							"TargetReadCapacity": {
+								"TargetValue": 70
+							},
+							"WriteCapacityUnits": 2000,
+							"MinWriteCapacityUnits": 2000,
+							"MaxWriteCapacityUnits": 9000,
+							"TargetWriteCapacity": 70
+						},
+						"StreamSpecification": {
+							"StreamViewType": "NEW_AND_OLD_IMAGES"
+						}
+					}
+				},
+				"LeoEntitiesChangesRole": {
+					"Type": "AWS::IAM::Role",
+					"Properties": {
+						"AssumeRolePolicyDocument": {
+							"Version": "2012-10-17",
+							"Statement": [{
+								"Effect": "Allow",
+								"Principal": {
+									"Service": [
+										"lambda.amazonaws.com"
+									],
+									"AWS": {
+										"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root"
+									}
+								},
+								"Action": [
+									"sts:AssumeRole"
+								]
+							}]
+						},
+						"ManagedPolicyArns": [
+							"arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+							{
+								"Fn::ImportValue": {
+									"Fn::Sub": "${leosdk}-Policy"
+								}
+							}
+						],
+						"Policies": [{
+							"PolicyName": "Leo_Entities",
+							"PolicyDocument": {
+								"Version": "2012-10-17",
+								"Statement": [{
+										"Effect": "Allow",
+										"Action": [
+											"dynamodb:Scan",
+											"dynamodb:PutItem",
+											"dynamodb:BatchWriteItem",
+											"dynamodb:BatchGetItem",
+											"dynamodb:UpdateItem",
+											"dynamodb:Query"
+										],
+										"Resource": [{
+											"Fn::Sub": "${Entities.Arn}"
+										}]
+									},
+									{
+										"Effect": "Allow",
+										"Action": [
+											"dynamodb:GetRecords",
+											"dynamodb:GetShardIterator",
+											"dynamodb:DescribeStream",
+											"dynamodb:ListStreams"
+										],
+										"Resource": [{
+											"Fn::Sub": "${Entities.StreamArn}"
+										}]
+									}
+								]
+							}
+						}]
+					}
+				}
+			}
+		}
+	},
+	"dependencies": {
+		"leo-connector-entity-table": "^1.0.0"
+	}
+}

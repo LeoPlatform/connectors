@@ -1,0 +1,24 @@
+{
+	"name": "____DIRNAME_____processor",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"directories": {
+		"test": "test"
+	},
+	"scripts": {
+		"test": "leo-cli test . "
+	},
+	"config": {
+		"leo": {
+			"type": "bot",
+			"memory": 256,
+			"timeout": 30,
+			"role": "LeoEntitiesChangesRole",
+			"env": {},
+			"cron": {
+				"settings": {}
+			}
+		}
+	}
+}
