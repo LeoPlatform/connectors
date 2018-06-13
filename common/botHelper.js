@@ -99,11 +99,7 @@ module.exports = function(event, context, sdk) {
 					// build the joins
 					Object.keys(joins).forEach((name) => {
 						let join = joins[name];
-						if (join.type === 'one_to_many') {
-							builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
-						} else if (join.type === 'one_to_one') {
-							builderSql.join(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
-						}
+						builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
 					});
 
 					return builderSql;
