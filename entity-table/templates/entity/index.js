@@ -3,17 +3,20 @@
 let config = require("leo-config");
 let entityTable = require("leo-connector-entity-table");
 
-exports.handler = function(event, context, callback) {
+exports.handler = require("leo-sdk/wrappers/cron")(function(event, context, callback) {
 	let table = config.entityTableName;
-	let queue = "____ENTITY____";
+	let queue = "Order";
 
-	entityTable.loadFromQueue(table, queue, obj => obj.id, {
+	entityTable.loadFromQueue(table, queue, obj => {
+		return Object.assign(obj.fullobj, {
+			partition: 'Order',
+			id: obj.fullobj._id,
+		});
+	}, {
 		botId: context.botId,
-		data_field: obj => obj,
-		batchRecords: 25,
 		merge: false
 	}).then(() => {
 		console.log(`Completed. Remaining Time:`, context.getRemainingTimeInMillis());
 		callback();
 	}).catch(callback);
-}
+});
