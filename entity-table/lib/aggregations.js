@@ -52,7 +52,6 @@ function processUpdate(newData, existing, reversal, prev = {}) {
 					existing[key].val -= func.val;
 				}
 			}
-
 		} else {
 			existing[key] = existing[key] || {};
 			processUpdate(func, existing[key], reversal);
