@@ -3,14 +3,35 @@ const ls = leo.streams;
 const moment = require("moment");
 const extend = require("extend");
 const dynamodb = leo.aws.dynamodb;
+const merge = require("lodash.merge");
 
 let start = null;
 var aggregations = {};
 
-function processUpdate(newData, existing, reversal, prev = {}) {
+let bucketAliases = {
+	'alltime': '',
+	'monthly': 'YYYY-MM',
+	'daily': 'YYYY-MM-DD',
+	'weekly': 'YYYY-W',
+	'quarterly': 'YYYY-Q'
+};
+let defaultTypes = {
+	'sum': {
+		val: 0
+	},
+	'min': {
+		val: null
+	},
+	'max': {
+		val: null
+	}
+};
+
+function processUpdate(newData, existing, reversal) {
 	for (let key in newData) {
 		let func = newData[key];
 		if (func._type) {
+			func = merge({}, defaultTypes[func._type], func);
 			if (!reversal) {
 				if (!(key in existing)) {
 					existing[key] = func;
@@ -40,7 +61,6 @@ function processUpdate(newData, existing, reversal, prev = {}) {
 						existing[key].prev = func.prev;
 					}
 				}
-
 			} else { //reversal
 				if (!(key in existing) && ["sum"].indexOf(func._type) !== -1) {
 					existing[key] = {
@@ -59,52 +79,54 @@ function processUpdate(newData, existing, reversal, prev = {}) {
 	}
 }
 
-function myProcess(e, reversal, prev) {
+function myProcess(ns, e, reversal) {
 	var id = e.entity + "-" + e.id;
-	var groups = [];
-	if (!e.bucket) {
-		groups = [{
+	if (ns) {
+		ns = "-" + ns;
+	}
+	var buckets = [];
+	if (!e.aggregate) {
+		buckets = [{
 			cat: "all",
 			range: ""
 		}];
 	} else {
-		var d = moment(e.bucket.date);
-		e.bucket.groups.forEach((g) => {
-			if (g == "") {
-				groups.push({
+		var d = moment(e.aggregate.timestamp);
+		e.aggregate.buckets.forEach((bucket) => {
+			if (bucket == "" || bucket == "alltime" || bucket == "all") {
+				buckets.push({
 					cat: "all",
 					range: ""
 				});
 			} else {
-				groups.push({
-					cat: g,
-					range: d.format(g)
+				if (bucket.toLowerCase() in bucketAliases) {
+					bucket = bucketAliases[bucket.toLowerCase()];
+				}
+				buckets.push({
+					cat: bucket,
+					range: d.format(bucket)
 				});
 			}
 		});
 	}
-
-	//@todo do a proper clone or figure out what this should be
-	var tempData = JSON.stringify(e.data);
-
-	groups.forEach((g) => {
-		var data = JSON.parse(tempData);
-		var newId = id + "-" + g.cat;
-		let bucket = g.range;
-		if (g.cat == "all") {
+	buckets.forEach((bucket) => {
+		var data = merge({}, e.data);
+		var newId = id + "-" + bucket.cat;
+		let range = bucket.range + ns;
+		if (bucket.cat == "all") {
 			newId = id;
-			bucket = "all";
+			range = "all" + ns;
 		}
 
-		let fullHash = newId + bucket;
+		let fullHash = newId + range;
 		if (!(fullHash in aggregations)) {
 			aggregations[fullHash] = {
 				id: newId,
-				bucket: bucket,
+				bucket: range,
 				d: {}
 			};
 		}
-		processUpdate(data, aggregations[fullHash].d, reversal, prev);
+		processUpdate(data, aggregations[fullHash].d, reversal);
 	});
 }
 
@@ -117,6 +139,10 @@ module.exports = {
 	}),
 	min: (val) => ({
 		_type: 'min',
+		val: val
+	}),
+	max: (val) => ({
+		_type: 'max',
 		val: val
 	}),
 	countChanges: (val) => ({
@@ -141,7 +167,11 @@ module.exports = {
 		});
 		return hash;
 	},
-	pr: function(t) {
+	aggregator: function(ns, t) {
+		if (!t) {
+			t = ns;
+			ns = "";
+		}
 		return ls.bufferBackoff(function each(obj, done) {
 				if (!start) start = obj.eid;
 
@@ -149,16 +179,12 @@ module.exports = {
 				let changes = {};
 				if (obj.old) {
 					t(obj.old).forEach((e) => {
-						if (e.valid) {
-							myProcess(e, true);
-						}
+						myProcess(ns, e, true);
 					});
 				}
 				if (obj.new) {
 					t(obj.new).forEach((e) => {
-						if (e.valid) {
-							myProcess(e, false);
-						}
+						myProcess(ns, e, false);
 					});
 				}
 				done();
@@ -172,7 +198,7 @@ module.exports = {
 						bucket: aggregations[i].bucket
 					});
 				}
-				console.log(ids);
+				// console.log(ids);
 				let stream = leo.streams.toDynamoDB("aggregations");
 				let seenHashes = {};
 
@@ -195,8 +221,8 @@ module.exports = {
 						if (!(i in seenHashes)) {
 							aggregations[i].p = {};
 							aggregations[i].start = start;
-							console.log("---aggregations");
-							console.log(aggregations[i]);
+							// console.log("---aggregations");
+							// console.log(aggregations[i]);
 							stream.write(aggregations[i]);
 						}
 					}

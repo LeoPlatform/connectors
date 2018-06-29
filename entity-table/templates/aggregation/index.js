@@ -5,38 +5,61 @@ const ls = leo.streams;
 const {
 	sum,
 	min,
+	max,
 	last,
 	first,
 	hash,
 	countChanges,
-	pr
+	aggregator
 } = require("leo-connector-entity-table/lib/aggregations.js");
 
 exports.handler = require("leo-sdk/wrappers/cron")(function(event, context, callback) {
 	let settings = Object.assign({
 		source: 'Order_changes'
 	}, event);
-	let t = function($) {
-		return [{
-			entity: 'order',
-			id: $.id,
-			bucket: {
-				date: $._dates.created,
-				groups: ["", "YYYY-MM"]
-			},
-			valid: ["refunded", "cancelled", "pending", "pending_with_errors"].indexOf($.status) === -1,
-			data: {
-				order: {
-					count: sum(1),
-					days_to_arrive: sum($.days_to_arrive),
+
+
+	ls.pipe(leo.read(context.botId, settings.source), aggregator('order', ($) => {
+		let aggregates = [];
+
+		//Should this order be aggregated?
+		if (!["refunded", "cancelled", "pending", "pending_with_errors"].includes($.status)) {
+
+			//I want to track how many times the delivery estimate changes per order
+			aggregates.push({
+				entity: 'order',
+				id: $.id,
+				aggregate: {
+					timestamp: $._dates.created,
+					buckets: ["alltime"]
+				},
+				data: {
 					count_changes: countChanges($.days_to_arrive)
 				}
-			}
-		}];
-	}
-	ls.pipe(leo.read(context.botId, settings.source, {
-		start: 'z/2018/06/28/13/13/1530191603845-0000001'
-	}), pr(t), (err) => {
+			});
+
+			//I want to track user ordering statistics
+			aggregates.push({
+				entity: 'user',
+				id: $.id,
+				aggregate: {
+					timestamp: $._dates.shipped,
+					buckets: ["alltime", "weekly"]
+				},
+				data: {
+					order: {
+						count: sum(1),
+						total: sum($.total),
+						lastOrder: last($._dates.shipped, {
+							id: $.id,
+							total: $.total
+						})
+					}
+				}
+			});
+		}
+		return aggregates;
+	}), (err) => {
 		console.log("DONE");
 		callback(err);
 	});
