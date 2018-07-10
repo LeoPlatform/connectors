@@ -1,4 +1,6 @@
 # Documentation
+Quick Start Guide: https://github.com/LeoPlatform/Leo
+
 Documentation for the connectors can be found here: https://github.com/LeoPlatform/connectors
 
 # Support

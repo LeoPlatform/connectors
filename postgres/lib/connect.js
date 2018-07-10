@@ -9,8 +9,9 @@ const chunk = require('lodash/fp/chunk');
 
 // require("leo-sdk/lib/logger").configure(true);
 
-const copyFrom = require('pg-copy-streams').from;
-const csv = require('fast-csv');
+var copyFrom = require('pg-copy-streams').from;
+var copyTo = require('pg-copy-streams').to;
+let csv = require('fast-csv');
 // var TIMESTAMP_OID = 1114;
 
 require('pg').types.setTypeParser(1114, (val) => {
@@ -409,6 +410,8 @@ function create(hash, pool, parentCache) {
 			function nonNull(v) {
 				if (v === "" || v === null || v === undefined) {
 					return "\\N";
+				} else if (typeof v === "string" && v.search(/\r/) !== -1) {
+					return v.replace(/\r\n?/g, "\n");
 				} else {
 					return v;
 				}
@@ -442,6 +445,67 @@ function create(hash, pool, parentCache) {
 				});
 				stream.end();
 			}));
+		},
+		streamFromTable: function(table, opts) {
+
+			function clean(v) {
+				let i = v.search(/(\r|\n)/);
+				if (i !== -1 && i < v.length - 1) {
+					// Escape any newlines in the middle of the row
+					return v.substr(0, v.length - 1).replace(/\n/g, `\\n`) + v[v.length - 1];
+				}
+				return v;
+			}
+
+			opts = Object.assign({
+				headers: false,
+				delimiter: "|",
+				null: "\\N",
+				encoding: "utf-8",
+				format: "csv",
+				columns: null,
+				where: null
+			}, opts);
+
+			//let columns = [];
+			var stream;
+			let count = 0;
+			let pass = ls.through((row, done) => {
+				count++;
+				if (count % 10000 == 0) {
+					console.log(table + ": " + count);
+				}
+				done(null, clean(row.toString()));
+			});
+			let myClient = null;
+			pool.connect().then(c => {
+				//client.describeTable(table, (err, result) => {
+				//	columns = result.map(f => f.column_name);
+				myClient = c;
+				let columnsList = "";
+				if (Array.isArray(opts.columns)) {
+					columnsList = opts.columns.join(",");
+				} else if (typeof opts.columns === "string") {
+					columnsList = opts.columns;
+				}
+				let query = `COPY ${opts.where ? `(select ${columnsList ? columnsList : "*"} from ${table} ${opts.where})` : `${table} (${columnsList})`} TO STDOUT (format ${opts.format}, null '${opts.null}', encoding '${opts.encoding}', DELIMITER '${opts.delimiter}', HEADER ${opts.headers})`;
+
+				logger.log(query);
+				stream = myClient.query(copyTo(query));
+				stream.on("error", function(err) {
+					console.log(err);
+				});
+				stream.on("end", function() {
+					console.log("Copy stream ended", table);
+					myClient.release(true);
+				});
+				ls.pipe(stream, pass);
+				//});
+			}, err => {
+				console.log(err);
+				pass.emit("error", err);
+			});
+			return pass;
 		},
 		range: function(table, id, opts, callback) {
 			if (Array.isArray(id)) {
@@ -581,6 +645,30 @@ function create(hash, pool, parentCache) {
 						ORDER BY ${id} asc`;
 				}
 				client.query(sql, callback);
+			}
+		},
+		escapeId: function(field) {
+			return '"' + field.replace('"', '').replace(/\.([^.]+)$/, '"."$1') + '"';
+		},
+		escape: function(value) {
+			if (value.replace) {
+				return '"' + value.replace('"', '') + '"';
+			} else {
+				return value;
+			}
+		},
+		escapeValue: function(value) {
+			if (value.replace) {
+				return "'" + value.replace("'", "\\'").toLowerCase() + "'";
+			} else {
+				return value;
+			}
+		},
+		escapeValueNoToLower: function(value) {
+			if (value.replace) {
+				return "'" + value.replace("'", "\\'") + "'";
+			} else {
+				return value;
 			}
 		}
 	};

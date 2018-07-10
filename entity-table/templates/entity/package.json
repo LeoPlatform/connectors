@@ -1,0 +1,31 @@
+{
+	"name": "____DIRNAME_____to_entity",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"directories": {
+		"test": "test"
+	},
+	"scripts": {
+		"test": "leo-cli test . "
+	},
+	"config": {
+		"leo": {
+			"type": "cron",
+			"memory": 128,
+			"timeout": 300,
+			"role": "LeoEntitiesChangesRole",
+			"env": {
+				"Resources": {
+					"entityTableName": {
+						"Fn::Sub": "${Entities}"
+					}
+				}
+			},
+			"cron": {
+				"settings": {},
+				"triggers": ["____DIRNAME____"]
+			}
+		}
+	}
+}

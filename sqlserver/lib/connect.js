@@ -1,17 +1,16 @@
+'use strict';
+
 require("./tediousAsRow.js");
 const mssql = require("mssql");
 const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
+let connections = {};
 
-// require("leo-sdk/lib/logger").configure(/.*/, {
-// 	all: true
-// });
 module.exports = function(config) {
 	// make the config parameters the same as the other database types.
 	if (config.host && typeof config.server === 'undefined') {
 		config.server = config.host;
 	}
-
-	const pool = new mssql.ConnectionPool(Object.assign({
+	config = Object.assign({
 		user: 'root',
 		password: 'test',
 		server: 'localhost',
@@ -21,25 +20,36 @@ module.exports = function(config) {
 		pool: {
 			max: 1
 		}
-	}, config));
+	}, config);
 
-	let buffer = [];
+	let connectionHash = JSON.stringify(config);
+	let pool;
 	let isConnected = false;
+	let buffer = [];
 
-	pool.connect(err => {
-		//console.log("Got a connection thing", err, buffer.length)
+	if (!(connectionHash in connections)) {
+		console.log("CREATING NEW SQLSERVER CONNECTION");
+		pool = connections[connectionHash] = new mssql.ConnectionPool(config);
+
+		pool.connect(err => {
+			//console.log("Got a connection thing", err, buffer.length)
+			isConnected = true;
+			if (err) {
+				console.log(err);
+				process.exit();
+			} else if (buffer.length) {
+				buffer.forEach(i => {
+					client.query(i.query, i.params, (err, result, fields) => {
+						i.callback(err, result, fields);
+					}, i.opts);
+				});
+			}
+		});
+	} else {
+		console.log("REUSING SQLSERVER CONNECTION");
+		pool = connections[connectionHash];
 		isConnected = true;
-		if (err) {
-			console.log(err);
-			process.exit();
-		} else if (buffer.length) {
-			buffer.forEach(i => {
-				client.query(i.query, i.params, (err, result, fields) => {
-					i.callback(err, result, fields);
-				}, i.opts);
-			});
-		}
-	});
+	}
 
 	let queryCount = 0;
 	let client = {
@@ -136,6 +146,7 @@ module.exports = function(config) {
 			client.query(sql, callback, {inRowMode: false});
 		},
 		getIds: function(table, id, start, end, reverse, callback) {
+			let sql;
 			if (reverse) {
 				sql = `select ${id} as id from ${table}  
 					where ${id} <= ${start} and ${id} >= ${end}
@@ -148,7 +159,22 @@ module.exports = function(config) {
 
 			client.query(sql, callback, {inRowMode: false});
 		},
-		end: pool.close
+		end: function(callback) {
+			let err;
+
+			try {
+				connections[connectionHash] = undefined;
+				pool.close();
+			} catch (e) {
+				err = e;
+			}
+
+			if (callback) {
+				callback(err);
+			} else if (err) {
+				throw err;
+			}
+		}
 	};
 	return client;
 };

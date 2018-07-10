@@ -52,9 +52,11 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 				if (err) {
 					console.log(err);
 				}
+
 				ids = ids.concat(newIds.filter((e, i, self) => {
-					return e !== null && ids.indexOf(e) === -1 && self.indexOf(e) === i;
+					return e != undefined && ids.indexOf(e) === -1 && self.indexOf(e) === i;
 				}));
+
 				if (ids.length >= opts.limit) {
 					submit(push, done);
 				} else {
