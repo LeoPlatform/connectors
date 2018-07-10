@@ -29,11 +29,71 @@ module.exports = {
 			replication: 'database'
 		}));
 
+		let walCheckpointHeartBeat = function() {
+			if (walCheckpointHeartBeatTimeoutId) {
+				clearTimeout(walCheckpointHeartBeatTimeoutId);
+			}
+			walCheckpoint(replicationClient, lastLsn);
+			walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
+		};
+
+		let count = 0;
+		let copyDataFunc = (msg) => {
+			if (msg.chunk[0] == 0x77) { // XLogData
+				count++;
+				if (count === 10000) {
+					walCheckpointHeartBeat();
+					console.log(count);
+					count = 0;
+				}
+				let lsn = {
+					upper: msg.chunk.readUInt32BE(1),
+					lower: msg.chunk.readUInt32BE(5),
+				};
+				lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
+				//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
+				// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
+				let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+				log.lsn = lsn;
+				if (log.d && log.d.reduce) {
+					log.d = log.d.reduce((acc, field) => {
+						acc[field.n] = field.v;
+						return acc;
+					}, {});
+				}
+				let c = {
+					source: 'postgres',
+					start: log.lsn.string
+				};
+				delete log.lsn;
+				pass.write({
+					id: ID,
+					event: opts.event,
+					payload: log,
+					correlation_id: c
+				});
+				// }
+			} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
+				let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
+				var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
+				var shouldRespond = msg.chunk.readInt8(17);
+				logger.info({
+					lsn,
+					timestamp,
+					shouldRespond
+				});
+				if (shouldRespond) {
+					walCheckpointHeartBeat();
+				}
+			} else {
+				logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
+			}
+		};
+
 		pass.stopListening = () => {
 			//stop listening for new data. So we can wrap it up.
-			replicationClient.removeListener('copyData', () => {
-				console.log('remove copyData listener', arguments);
-			});
+			clearTimeout(walCheckpointHeartBeatTimeoutId);
+			replicationClient.removeListener('copyData', copyDataFunc);
 			pass.end();
 		};
 
@@ -129,13 +189,6 @@ module.exports = {
 					};
 					replicationClient.connection.once('replicationStart', function() {
 						console.log(`Successfully listening for Changes on ${config.host}:${config.database}`);
-						let walCheckpointHeartBeat = function() {
-							if (walCheckpointHeartBeatTimeoutId) {
-								clearTimeout(walCheckpointHeartBeatTimeoutId);
-							}
-							walCheckpoint(replicationClient, lastLsn);
-							walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
-						};
 						walCheckpointHeartBeat();
 						pass.acknowledge = function(lsn) {
 							if (typeof lsn == "string") {
@@ -155,62 +208,11 @@ module.exports = {
 							lastLsn = lsn;
 							walCheckpointHeartBeat();
 						};
-						let count = 0;
 						replicationClient.connection.on('error', (err)=>{
 							if (err.message === "Connection terminated by user") return; //ignore this error
 							dieError(err);
 						});
-						replicationClient.connection.on('copyData', function(msg) {
-							if (msg.chunk[0] == 0x77) { // XLogData
-								count++;
-								if (count === 10000) {
-									walCheckpointHeartBeat();
-									console.log(count);
-									count = 0;
-								}
-								let lsn = {
-									upper: msg.chunk.readUInt32BE(1),
-									lower: msg.chunk.readUInt32BE(5),
-								};
-								lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
-								//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
-								// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
-								let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
-								log.lsn = lsn;
-								if (log.d && log.d.reduce) {
-									log.d = log.d.reduce((acc, field) => {
-										acc[field.n] = field.v;
-										return acc;
-									}, {});
-								}
-								let c = {
-									source: 'postgres',
-									start: log.lsn.string
-								};
-								delete log.lsn;
-								pass.write({
-									id: ID,
-									event: opts.event,
-									payload: log,
-									correlation_id: c
-								});
-								// }
-							} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
-								let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
-								var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
-								var shouldRespond = msg.chunk.readInt8(17);
-								logger.info({
-									lsn,
-									timestamp,
-									shouldRespond
-								});
-								if (shouldRespond) {
-									walCheckpointHeartBeat();
-								}
-							} else {
-								logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
-							}
-						});
+						replicationClient.connection.on('copyData', copyDataFunc);
 					});
 				});
 			});
