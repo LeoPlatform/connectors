@@ -29,28 +29,36 @@ module.exports = {
 			replication: 'database'
 		}));
 
-		let walCheckpointHeartBeat = function() {
-			if (walCheckpointHeartBeatTimeoutId) {
-				clearTimeout(walCheckpointHeartBeatTimeoutId);
-			}
-			walCheckpoint(replicationClient, lastLsn);
-			walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
-		};
+		// let walCheckpointHeartBeat = function() {
+		// 	if (walCheckpointHeartBeatTimeoutId) {
+		// 		clearTimeout(walCheckpointHeartBeatTimeoutId);
+		// 	}
+		// 	walCheckpoint(replicationClient, lastLsn);
+		// 	walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
+		// };
 
+		let total = 0;
 		let count = 0;
+		let isStopped = false;
+		global.afterStoppedCount = 0;
 		let copyDataFunc = (msg) => {
+			if (isStopped) {
+				global.afterStoppedCount++;
+				return;
+			}
+			let lsn = {
+				upper: msg.chunk.readUInt32BE(1),
+				lower: msg.chunk.readUInt32BE(5),
+			};
+			lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
 			if (msg.chunk[0] == 0x77) { // XLogData
 				count++;
+				if (total === 0) console.log('start', lsn.string);
 				if (count === 10000) {
-					walCheckpointHeartBeat();
-					console.log(count);
+					//walCheckpointHeartBeat();
+					console.log(count, lsn.string);
 					count = 0;
 				}
-				let lsn = {
-					upper: msg.chunk.readUInt32BE(1),
-					lower: msg.chunk.readUInt32BE(5),
-				};
-				lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
 				//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
 				// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
 				let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
@@ -83,7 +91,8 @@ module.exports = {
 					shouldRespond
 				});
 				if (shouldRespond) {
-					walCheckpointHeartBeat();
+					console.log('Should Respond');
+					walCheckpoint(replicationClient, lastLsn);
 				}
 			} else {
 				logger.error(`(${config.database}) Unknown message`, msg.chunk[0]);
@@ -92,12 +101,15 @@ module.exports = {
 
 		pass.stopListening = () => {
 			//stop listening for new data. So we can wrap it up.
+			console.log('stopListening');
+			isStopped = true;
 			clearTimeout(walCheckpointHeartBeatTimeoutId);
 			replicationClient.removeListener('copyData', copyDataFunc);
 			pass.end();
 		};
 
 		pass.endLogical = () => {
+			console.log('called endLogical', global.afterStoppedCount);
 			clearTimeout(walCheckpointHeartBeatTimeoutId);
 			if (replicationClient) {
 				replicationClient.removeAllListeners();
@@ -189,7 +201,7 @@ module.exports = {
 					};
 					replicationClient.connection.once('replicationStart', function() {
 						console.log(`Successfully listening for Changes on ${config.host}:${config.database}`);
-						walCheckpointHeartBeat();
+						//walCheckpointHeartBeat();
 						pass.acknowledge = function(lsn) {
 							if (typeof lsn == "string") {
 								let [upper, lower] = lsn.split('/');
@@ -206,7 +218,7 @@ module.exports = {
 								lsn.lower = lsn.lower + 1;
 							}
 							lastLsn = lsn;
-							walCheckpointHeartBeat();
+							walCheckpoint(replicationClient, lastLsn);
 						};
 						replicationClient.connection.on('error', (err)=>{
 							if (err.message === "Connection terminated by user") return; //ignore this error
