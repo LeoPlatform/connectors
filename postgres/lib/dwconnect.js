@@ -36,7 +36,7 @@ module.exports = function(config, columnConfig) {
 
 		tasks.push(done => client.query(`drop table if exists ${stagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${stagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${stagingTbl} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
+		tasks.push(done => client.query(`create table ${stagingTbl} (like ${publicTbl} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(stagingTbl), done));
 		tasks.push(done => client.query(`analyze ${stagingTbl}`, done));
 
@@ -112,15 +112,15 @@ module.exports = function(config, columnConfig) {
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
-		if (typeof schema[stagingTbl] === 'undefined') {
-			throw new Error(`${stagingTbl} not found in schema`);
+		if (typeof schema[publicTbl] === 'undefined') {
+			throw new Error(`${publicTbl} not found in schema`);
 		}
 		schema[stagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
 
 		let tasks = [];
 		tasks.push(done => client.query(`drop table if exists ${stagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${stagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${stagingTbl} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
+		tasks.push(done => client.query(`create table ${stagingTbl} (like ${publicTbl} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
 		tasks.push(done => client.query(`alter table ${stagingTbl} drop column ${sk}`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(stagingTbl), done));
 		tasks.push(done => client.query(`analyze ${stagingTbl}`, done));
@@ -390,7 +390,13 @@ module.exports = function(config, columnConfig) {
 				});
 			});
 		});
-		async.parallelLimit(tasks, 20, (err) => callback(err, tableResults));
+		async.parallelLimit(tasks, 20, (err) => {
+			if (err) return callback(err, tableResults);
+			//Update client schema cache with new/updated tables
+			client.describeTables((err) => {
+				callback(err, tableResults);
+			});
+		});
 	};
 
 	client.createTable = function(table, definition, callback) {
@@ -463,7 +469,6 @@ module.exports = function(config, columnConfig) {
 				tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
 			}
 		}
-
 
 		async.series(tasks, callback);
 	};
@@ -602,7 +607,7 @@ module.exports = function(config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let stageTable = `staging_${tableName}`;
+		let stageTable = `${columnConfig.stageSchema}.staging_${table}`;
 		tasks.push((done) => {
 			client.query(`drop table if exists ${stageTable}`, done);
 		});
