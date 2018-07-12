@@ -54,6 +54,7 @@ module.exports = {
 			if (msg.chunk[0] == 0x77) { // XLogData
 				count++;
 				if (total === 0) console.log('start', lsn.string);
+				total++;
 				if (count === 10000) {
 					//walCheckpointHeartBeat();
 					console.log(count, lsn.string);
@@ -61,7 +62,15 @@ module.exports = {
 				}
 				//This seems like it was bogus and not needed...I think it was due to a bug of not doing WAL +1 on acknowledge
 				// if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
-				let log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+				let log;
+				try {
+					log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+				} catch (err) {
+					console.log(err);
+					console.log(msg.chunk.slice(25).toString('utf8'));
+					dieError(err);
+				}
+
 				log.lsn = lsn;
 				if (log.d && log.d.reduce) {
 					log.d = log.d.reduce((acc, field) => {
