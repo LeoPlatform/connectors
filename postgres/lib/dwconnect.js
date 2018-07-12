@@ -361,32 +361,36 @@ module.exports = function(config, columnConfig) {
 	client.changeTableStructure = function(structures, callback) {
 		let tasks = [];
 		let tableResults = {};
-		Object.keys(structures).forEach(table => {
-			tableResults[table] = "Unmodified";
-			tasks.push(done => {
-				client.describeTable(table, (err, fields) => {
-					if (err) return done(err);
-					if (!fields || !fields.length) {
-						tableResults[table] = "Created";
-						client.createTable(table, structures[table], done);
-					} else {
-						let fieldLookup = fields.reduce((acc, field) => {
-							acc[field.column_name] = field;
-							return acc;
-						}, {});
-						let missingFields = {};
-						Object.keys(structures[table].structure).forEach(f => {
-							if (!(f in fieldLookup)) {
-								missingFields[f] = structures[table].structure[f];
-							}
-						});
-						if (Object.keys(missingFields).length) {
-							tableResults[table] = "Modified";
-							client.updateTable(table, missingFields, done);
+		client.query("CREATE SCHEMA IF NOT EXISTS stage", (err) => {
+			if (err) callback(err);
+
+			Object.keys(structures).forEach(table => {
+				tableResults[table] = "Unmodified";
+				tasks.push(done => {
+					client.describeTable(table, (err, fields) => {
+						if (err) return done(err);
+						if (!fields || !fields.length) {
+							tableResults[table] = "Created";
+							client.createTable(table, structures[table], done);
 						} else {
-							done();
+							let fieldLookup = fields.reduce((acc, field) => {
+								acc[field.column_name] = field;
+								return acc;
+							}, {});
+							let missingFields = {};
+							Object.keys(structures[table].structure).forEach(f => {
+								if (!(f in fieldLookup)) {
+									missingFields[f] = structures[table].structure[f];
+								}
+							});
+							if (Object.keys(missingFields).length) {
+								tableResults[table] = "Modified";
+								client.updateTable(table, missingFields, done);
+							} else {
+								done();
+							}
 						}
-					}
+					});
 				});
 			});
 		});
