@@ -21,7 +21,7 @@ module.exports = function(tableIds, opts) {
 	return ls.through((obj, done) => {
 		count++;
 		if (count % 10000 == 0) {
-			console.log(count);
+			console.log(count, obj.eid);
 		}
 		let payload = obj.payload;
 		let table = transform.parseTable(payload);
@@ -108,31 +108,31 @@ function combine(file) {
 		var lastId = null;
 		console.time("Merged File " + sortedFile);
 		ls.pipe(fs.createReadStream(sortedFile), ls.split(), ls.through((line, done, push) => {
-				try {
-					var id = line.substr(0, 32);
-					var data = JSON.parse(line.substr(42));
-				} catch (e) {
-					console.log(e);
-					console.log(file);
-					console.log(line.toString());
-					process.exit();
-				}
-				if (lastObj && id === lastId) {
-					lastObj = merge(lastObj, data);
-				} else {
-					if (lastObj) {
-						push(lastObj);
-					}
-					lastObj = data;
-				}
-				lastId = id;
-				done();
-			},
-			function(done) {
+			try {
+				var id = line.substr(0, 32);
+				var data = JSON.parse(line.substr(42));
+			} catch (e) {
+				console.log(e);
+				console.log(file);
+				console.log(line.toString());
+				process.exit();
+			}
+			if (lastObj && id === lastId) {
+				lastObj = merge(lastObj, data);
+			} else {
 				if (lastObj) {
-					done(null, lastObj);
+					push(lastObj);
 				}
-			}), pass, (err) => {
+				lastObj = data;
+			}
+			lastId = id;
+			done();
+		},
+		function(done) {
+			if (lastObj) {
+				done(null, lastObj);
+			}
+		}), pass, (err) => {
 			if (err) {
 				pass.emit('error', err);
 			} else {

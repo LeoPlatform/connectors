@@ -269,6 +269,9 @@ module.exports = function(config, columnConfig) {
 					if (!(unions[field.dimension])) {
 						unions[field.dimension] = [];
 					}
+					if (typeof tableNks[field.dimension] === 'undefined') {
+						throw new Error(`${field.dimension} not found in tableNks`);
+					}
 					let dimTableNk = tableNks[field.dimension][0];
 					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = (select max(${columnConfig._auditdate}) from ${table})`);
 				}
