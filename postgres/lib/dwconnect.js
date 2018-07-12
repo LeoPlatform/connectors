@@ -112,6 +112,9 @@ module.exports = function(config, columnConfig) {
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
+		if (typeof schema[stagingTbl] === 'undefined') {
+			throw new Error(`${stagingTbl} not found in schema`);
+		}
 		schema[stagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
 
 		let tasks = [];

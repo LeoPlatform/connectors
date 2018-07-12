@@ -29,14 +29,6 @@ module.exports = {
 			replication: 'database'
 		}));
 
-		// let walCheckpointHeartBeat = function() {
-		// 	if (walCheckpointHeartBeatTimeoutId) {
-		// 		clearTimeout(walCheckpointHeartBeatTimeoutId);
-		// 	}
-		// 	walCheckpoint(replicationClient, lastLsn);
-		// 	walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
-		// };
-
 		let total = 0;
 		let count = 0;
 		let isStopped = false;
@@ -91,6 +83,7 @@ module.exports = {
 				});
 				// }
 			} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
+				let strLastLsn = (lastLsn.upper.toString(16).toUpperCase()) + '/' + (lastLsn.lower.toString(16).toUpperCase()); 
 				let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
 				var timestamp = Math.floor(msg.chunk.readUInt32BE(9) * 4294967.296 + msg.chunk.readUInt32BE(13) / 1000 + 946080000000);
 				var shouldRespond = msg.chunk.readInt8(17);
@@ -100,7 +93,7 @@ module.exports = {
 					shouldRespond
 				});
 				if (shouldRespond) {
-					console.log('Should Respond');
+					console.log('Should Respond. LastLsn: ' + strLastLsn + ' THIS lsn: ' + lsn);
 					walCheckpoint(replicationClient, lastLsn);
 				}
 			} else {
