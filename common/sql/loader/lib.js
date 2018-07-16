@@ -28,7 +28,7 @@ module.exports = {
 											}));
 										}
 										done(err);
-									});
+									}, {inRowMode: false});
 								} else {
 									let sql = idthing.query.replace(/\(\?\)/, lookupIds);
 									sqlClient.query(sql, (err, results, fields) => {
@@ -37,7 +37,7 @@ module.exports = {
 											ids = ids.concat(results.map(row => row[firstColumn]));
 										}
 										done(err);
-									});
+									}, {inRowMode: false});
 								}
 
 							}, () => idthing.ids.length >= MAX, (err) => {
@@ -57,7 +57,7 @@ module.exports = {
 								ids = ids.concat(results.map(row => row[firstColumn]));
 							}
 							done(err);
-						});
+						}, {inRowMode: false});
 					});
 				}
 			});

@@ -30,6 +30,10 @@ function hashCode(str) {
 }
 
 module.exports = {
+	hash: (entity, id, count = 10) => {
+		let hash = hashCode(id) % count;
+		return `${entity}-${hash}`;
+	},
 	get: function(table, entity, id) {
 		if (id == undefined) {
 			id = entity;
@@ -52,64 +56,32 @@ module.exports = {
 			Limit: 1
 		}).then(data => (data.Items[0] && data.Items[0].data));
 	},
-	load: function(table, entity, id_field, opts = {}) {
-		let singleEntity = opts.singleEntity;
-		let data_field = opts.data_field;
+	load: function(table, entity, objFunc, opts = {}) {
+		opts = Object.assign({
+			records: 25,
+			range: 'id',
+			hash: 'partition',
+			merge: false
+		}, opts || {});
 
-		// Extract the 'id' from each payload object
-		let getId;
-		if (typeof id_field === "function") {
-			getId = id_field;
-		} else if (typeof id_field === "string") {
-			getId = (obj) => {
-				return obj[id_field];
-			}
-		} else {
-			throw new Error(`id_field is required`, `eg. 'id' or (data)=>{return data.my_id; }`);
-		}
-
-		// Extract the data from each payload object
-		let getData;
-		if (typeof data_field === "function") {
-			getData = data_field;
-		} else if (typeof data_field === "string") {
-			getData = (obj) => {
-				return obj[data_field];
-			};
-		} else {
-			getData = obj => obj;
-		}
-
+		let self = this;
 		return ls.pipeline(
-			ls.through(function(obj, done) {
-				let id = getId(obj);
-				let hash = hashCode(id) % 10;
-				let partition = !singleEntity ? `${entity}-${hash}` : `${hash}`;
-				let record = {
-					partition: partition,
-					id: id,
-					entity: entity || undefined,
-					data: getData(obj)
-				};
-				//console.log(partition, id)
-				done(null, record);
+			ls.through(async function(obj, done) {
+				let e = await objFunc(obj, self.hash);
+				if (!e[opts.range]) {
+					throw new Error(`${opts.range} is required`);
+				} else if (!e[opts.hash]) {
+					throw new Error(`${opts.hash} is required`);
+				}
+				done(null, e);
 			}),
-			toDynamoDB(table, {
-				hash: opts.hash || "partition",
-				range: opts.range || "id",
-				records: opts.records || 25,
-				merge: opts.merge
-			})
+			toDynamoDB(table, opts)
 		);
 	},
-	loadFromQueue: function(table, queue, id_field, opts) {
-		if (opts == undefined) {
-			opts = {};
-		}
-		if (typeof id_field === "object") {
-			opts = Object.assign({}, opts, id_field);
-			id_field = "id";
-		}
+	loadFromQueue: function(table, queue, objFunc, opts) {
+		opts = Object.assign({
+			records: 25
+		}, opts || {});
 
 		return new Promise((resolve, reject) => {
 			let entity = refUtil.ref(queue).id;
@@ -119,15 +91,16 @@ module.exports = {
 			if (opts.limit) {
 				readOpts.limit = opts.limit;
 			}
+			if (opts.start) {
+				readOpts.start = opts.start;
+			}
 			ls.pipe(
 				leo.read(botId, queue, readOpts),
 				stats,
 				ls.through((event, done) => {
 					done(null, event.payload);
 				}),
-				this.load(table, entity, id_field, Object.assign({}, opts, {
-					records: opts.batchRecords || 25
-				})),
+				this.load(table, entity, objFunc, opts),
 				(err) => {
 					if (err) {
 						console.log("Error:", err);
@@ -188,19 +161,15 @@ module.exports = {
 				let id = null;
 				if ("OldImage" in record.dynamodb) {
 					let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
-					data.payload.old = image.data;
-					data.event = image.entity || data.event;
-					id = image.entity;
+					data.payload.old = image;
+					data.event = image.partition.split(/-/)[0];
 				}
 				if ("NewImage" in record.dynamodb) {
 					let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
-					data.payload.new = image.data;
-					data.event = image.entity || data.event;
-					id = image.entity || id;
+					data.payload.new = image;
+					data.event = image.partition.split(/-/)[0];
 				}
-				if (id) {
-					data.id = `${data.event}_entity_changes`;
-				}
+				data.id = `${data.event}_entity_changes`;
 				data.correlation_id.source = `system:dynamodb.${data.correlation_id.source.replace(/-[A-Z0-9]{12}$/, "")}.${data.event}`
 				data.event = data.event + suffix;
 				let stream = getStream(data.id);
@@ -237,7 +206,8 @@ function toDynamoDB(table, opts) {
 		size: 1024 * 1024 * 2,
 		time: {
 			seconds: 2
-		}
+		},
+		merge: false
 	}, opts || {});
 
 	var records, size;

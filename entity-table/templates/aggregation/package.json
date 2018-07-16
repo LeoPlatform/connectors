@@ -1,5 +1,5 @@
 {
-	"name": "____DIRNAME_____to_entity",
+	"name": "____DIRNAME_____aggregation",
 	"version": "1.0.0",
 	"description": "",
 	"main": "index.js",
@@ -17,13 +17,12 @@
 			"role": "LeoEntitiesChangesRole",
 			"env": {
 				"Resources": {
-					"entityTableName": {
-						"Fn::Sub": "${Entities}"
+					"aggregationTableName": {
+						"Fn::Sub": "${Aggregations}"
 					}
 				}
 			},
 			"cron": {
-				"settings": {},
 				"triggers": ["____DIRNAME____"]
 			}
 		}
