@@ -5,6 +5,7 @@ const connect = require("./connect.js");
 const test_decoding = require("./test_decoding.js");
 const ls = require("leo-streams");
 const logger = require("leo-logger")("binlogreader");
+var backoff = require("backoff");
 
 //I need to overwrite the pg connection listener to apply backpressure;
 let Connection = require("pg/lib/connection.js");
@@ -33,11 +34,9 @@ Connection.prototype.attachListeners = function(stream) {
 		}
 
 		if (!lastWriteGood || shutdown) {
-			// console.log("pausing");
 			stream.pause();
 			if (!shutdown) {
 				copyDataThrough.once('drain', () => {
-					// console.log("resuming");
 					stream.resume();
 				});
 			}
@@ -54,33 +53,43 @@ module.exports = {
 	stream: function(ID, config, opts) {
 		opts = Object.assign({
 			slot_name: 'leo_replication',
-			keepalive: 1000 * 3,
+			keepalive: 1000 * 30,
 			failAfter: 100,
-			runTime: 4 * 60 * 1000,
 			recoverWal: false,
 			event: 'logical_replication'
 		}, opts || {});
 		let lastLsn;
-		let lastRecievedLSN;
+		let startLsn;
 		let requestedWalSegmentAlreadyRemoved = false;
-
-
 		let walCheckpointHeartBeatTimeoutId = null;
-		let wrapperClient = connect(config);
-		let replicationClient = new pg.Client(Object.assign({}, config, {
-			replication: 'database'
-		}));
+
+		var retry = backoff.fibonacci({
+			randomisationFactor: 0,
+			initialDelay: 1000,
+			maxDelay: 60000
+		});
+		retry.failAfter(100);
+		retry.on('backoff', function(number, delay) {
+			logger.error(`(${config.database}) Going to try to connect again in ${delay} ms`);
+		});
+		retry.once('fail', (err) => {
+			err.database = config.database;
+			err.traceType = 'fail';
+			logger.error(err);
+			copyDataThrough.destroy(err);
+		});
 
 		let count = 0;
-		let middleBatch = 0;
-
-		let startedProcessing = false;
 
 		copyDataThrough = ls.through((msg, done) => {
 			let lsn = {
 				upper: msg.chunk.readUInt32BE(1),
 				lower: msg.chunk.readUInt32BE(5),
 			};
+
+			if (lsn.upper == 0 && lsn.lower == 0) {
+				return done(null);
+			}
 			lsn.string = lsn.upper.toString(16).toUpperCase() + "/" + lsn.lower.toString(16).toUpperCase();
 			if (msg.chunk[0] == 0x77) { // XLogData
 				count++;
@@ -88,61 +97,39 @@ module.exports = {
 					console.log("every 10000 processed", count, lsn);
 					count = 0;
 				}
-				if (startedProcessing && lsn.lower < lastLsn.lower) {
-					console.error("-----------------Lower LSN is less than previous------------");
-					lastLsn.string = (lastLsn.upper.toString(16).toUpperCase()) + '/' + (lastLsn.lower.toString(16).toUpperCase());
-					console.error("Previous LSN", lastLsn);
-					console.error("new LSN", lsn);
-					console.error(log);
-					process.exit();
+				// console.log("processing", lsn.string);
+				startedProcessing = true;
+
+				let log;
+				try {
+					log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
+				} catch (err) {
+					console.log(err);
+					console.log(msg.chunk.slice(25).toString('utf8'));
+					done(err);
 				}
-				if (lsn.upper > lastLsn.upper || lsn.lower >= lastLsn.lower) { //Otherwise we have already see this one (we died in the middle of a commit
-					if (middleBatch) {
-						console.log(`Skipped ${middleBatch} events`);
-						middleBatch = 0;
-					}
-					startedProcessing = true;
-					let log;
-					try {
-						log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
-					} catch (err) {
-						console.log(err);
-						console.log(msg.chunk.slice(25).toString('utf8'));
-						done(err);
-					}
 
-					// These seem to be duplicated
-					if (log.trx == 'BEGIN') {
-						return done(null);
-					}
-
-
-					// console.error("Every LSN Received", lsn.string);
-					// console.error("Every Last Received LSN", lastRecievedLSN);
-					// console.log(log);
-					log.lsn = lsn;
-
-					if (log.d && log.d.reduce) {
-						log.d = log.d.reduce((acc, field) => {
-							acc[field.n] = field.v;
-							return acc;
-						}, {});
-					}
-					let c = {
-						source: 'postgres',
-						start: log.lsn.string
-					};
-					delete log.lsn;
-					done(null, {
-						id: ID,
-						event: opts.event,
-						payload: log,
-						correlation_id: c
-					});
-				} else {
-					middleBatch++;
-					done(null);
+				// console.error("Every LSN Received", lsn.string);
+				// console.error("Every Last Received LSN", lastRecievedLSN);
+				// console.log(log);
+				log.lsn = lsn;
+				if (log.d && log.d.reduce) {
+					log.d = log.d.reduce((acc, field) => {
+						acc[field.n] = field.v;
+						return acc;
+					}, {});
 				}
+				let c = {
+					source: 'postgres',
+					start: log.lsn.string
+				};
+				delete log.lsn;
+				done(null, {
+					id: ID,
+					event: opts.event,
+					payload: log,
+					correlation_id: c
+				});
 			} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
 				let strLastLsn = (lastLsn.upper.toString(16).toUpperCase()) + '/' + (lastLsn.lower.toString(16).toUpperCase());
 				// let lsn = (msg.chunk.readUInt32BE(1).toString(16).toUpperCase()) + '/' + (msg.chunk.readUInt32BE(5).toString(16).toUpperCase());
@@ -155,7 +142,7 @@ module.exports = {
 				});
 				if (shouldRespond) {
 					console.log('Should Respond. LastLsn: ' + strLastLsn + ' THIS lsn: ' + lsn);
-					walCheckpoint(replicationClient, lastLsn, lastRecievedLSN);
+					walCheckpoint(replicationClient, lastLsn);
 				}
 				done(null);
 			} else {
@@ -165,143 +152,148 @@ module.exports = {
 		});
 
 
-		setTimeout(() => {
-			shutdown = true;
-			copyDataThrough.end();
-		}, opts.runTime);
+		retry.on('ready', function(number, delay) {
+			let wrapperClient = connect(config);
+			let replicationClient = new pg.Client(Object.assign({}, config, {
+				replication: 'database'
+			}));
 
-		copyDataThrough.endLogical = () => {
-			console.log('called endLogical');
-			clearTimeout(walCheckpointHeartBeatTimeoutId);
-			if (replicationClient) {
-				replicationClient.removeAllListeners();
-				try {
-					wrapperClient.end(err => {
-						console.log("wrapperClient.end", err);
-					});
-				} catch (walCheckpointHeartBeat) {
-					console.log(`(${config.database}) Cannot end WrapperClient`);
-				}
-				try {
-					replicationClient.end(err => {
-						console.log("replicationClient.end", err);
-					});
-				} catch (walCheckpointHeartBeat) {
-					console.log(`(${config.database}) Cannot end replicationClient`);
-				}
-				replicationClient = null;
-				wrapperClient = null;
-			}
-		};
-
-		let dieError = function(err) {
-			err.database = config.database;
-			err.traceType = 'dieError';
-			logger.error(err);
-			copyDataThrough.endLogical();
-			copyDataThrough.emit('error', err);
-			copyDataThrough.destroy(err);
-		};
-		replicationClient.on('error', (err) => {
-			dieError(err);
-		});
-		replicationClient.connect(async function(err) {
-			console.log(`(${config.database}) Trying to connect.`);
-			if (err) return dieError(err);
-			if (opts.recoverWal && requestedWalSegmentAlreadyRemoved) {
-				console.log(`RECOVER FROM WAL SEGMENT ALREADY REMOVED. (removing slot ${opts.slot_name})`);
-				const dropSlotPromise = new Promise((resolve, reject) => {
-					wrapperClient.query(`SELECT pg_drop_replication_slot($1);`, [opts.slot_name], (err) => {
-						if (err) return reject(err);
-						resolve();
-					});
-				});
-				try {
-					await dropSlotPromise;
-					console.log(`SLOT ${opts.slot_name} REMOVED`);
-				} catch (err) {
-					dieError(err);
-				}
-			}
-			wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
-				console.log(`(${config.database}) Trying to get replication slot ${opts.slot_name}.`);
-				if (err) return dieError(err);
-				let tasks = [];
-				lastLsn = '0/00000000';
-				console.log(result);
-				if (!result.length) {
-					tasks.push(done => wrapperClient.query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
-						console.log(`(${config.database}) Trying to create logical replication slot ${opts.slot_name}.`);
-						if (err) return done(err);
-						wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
-							console.log(`(${config.database}) Trying to get newly created replication slot ${opts.slot_name}. Result Len = ${result.length}`);
-							if (err) return done(err);
-							if (result.length != 1) return done(err);
-
-							lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
-							done();
+			let dieError = function(err) {
+				err.database = config.database;
+				err.traceType = 'dieError';
+				logger.error(err);
+				clearTimeout(walCheckpointHeartBeatTimeoutId);
+				if (replicationClient) {
+					replicationClient.removeAllListeners();
+					try {
+						wrapperClient.end(err => {
+							console.log("wrapperClient.end", err);
 						});
-					}));
-				} else {
-					lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
+					} catch (walCheckpointHeartBeat) {
+						console.log(`(${config.database}) Cannot end WrapperClient`);
+					}
+					try {
+						replicationClient.end(err => {
+							console.log("replicationClient.end", err);
+						});
+					} catch (walCheckpointHeartBeat) {
+						console.log(`(${config.database}) Cannot end replicationClient`);
+					}
+					replicationClient = null;
+					wrapperClient = null;
+					retry.backoff(err);
 				}
-				async.series(tasks, (err) => {
-					if (err) return dieError(err);
-					console.log(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}`);
-					replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn}  `, (err, result) => {
-						if (err) {
-							if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
-							if (err.message === "Connection terminated by user") {
-								console.log("Logical replication ended with: ", err.message);
-								return;
-							}
-							return dieError(err);
-						}
+			};
+			replicationClient.on('error', dieError);
+			replicationClient.connect(async function(err) {
+				console.log(`(${config.database}) Trying to connect.`);
+				if (err) return dieError(err);
+				if (opts.recoverWal && requestedWalSegmentAlreadyRemoved) {
+					console.log(`RECOVER FROM WAL SEGMENT ALREADY REMOVED. (removing slot ${opts.slot_name})`);
+					const dropSlotPromise = new Promise((resolve, reject) => {
+						wrapperClient.query(`SELECT pg_drop_replication_slot($1);`, [opts.slot_name], (err) => {
+							if (err) return reject(err);
+							resolve();
+						});
 					});
-					console.log("WANTING TO RESTART AT ", lastLsn);
-					let [upper, lower] = lastLsn.split('/');
-					lastLsn = {
-						upper: parseInt(upper, 16),
-						lower: parseInt(lower, 16)
-					};
-					replicationClient.connection.once('replicationStart', function() {
-						console.log(`Successfully listening for Changes on ${config.host}:${config.database}`);
+					try {
+						await dropSlotPromise;
+						console.log(`SLOT ${opts.slot_name} REMOVED`);
+					} catch (err) {
+						dieError(err);
+					}
+				}
+				wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
+					console.log(`(${config.database}) Trying to get replication slot ${opts.slot_name}.`);
+					if (err) return dieError(err);
+					let tasks = [];
+					lastLsn = '0/00000000';
+					console.log(result);
+					if (!result.length) {
+						tasks.push(done => wrapperClient.query(`SELECT * FROM pg_create_logical_replication_slot($1, 'test_decoding')`, [opts.slot_name], err => {
+							console.log(`(${config.database}) Trying to create logical replication slot ${opts.slot_name}.`);
+							if (err) return done(err);
+							wrapperClient.query(`SELECT * FROM pg_replication_slots where slot_name = $1`, [opts.slot_name], (err, result) => {
+								console.log(`(${config.database}) Trying to get newly created replication slot ${opts.slot_name}. Result Len = ${result.length}`);
+								if (err) return done(err);
+								if (result.length != 1) return done(err);
 
-						let walCheckpointHeartBeat = function() {
-							if (walCheckpointHeartBeatTimeoutId) {
-								clearTimeout(walCheckpointHeartBeatTimeoutId);
+								lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
+								done();
+							});
+						}));
+					} else {
+						lastLsn = result[0].confirmed_flush_lsn || result[0].restart_lsn;
+					}
+					async.series(tasks, (err) => {
+						if (err) return dieError(err);
+						console.log(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-xids" '0', "skip-empty-xacts" '1')`);
+						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-xids" '0', "skip-empty-xacts" '1')`, (err, result) => {
+							if (err) {
+								if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
+								if (err.message === "Connection terminated by user") {
+									console.log("Logical replication ended with: ", err.message);
+									return;
+								}
+								return dieError(err);
 							}
-							walCheckpoint(replicationClient, lastLsn);
-							walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
+						});
+						console.log("WANTING TO RESTART AT ", lastLsn);
+						let [upper, lower] = lastLsn.split('/');
+						lastLsn = {
+							upper: parseInt(upper, 16),
+							lower: parseInt(lower, 16)
 						};
-						walCheckpointHeartBeat();
-						copyDataThrough.acknowledge = function(lsn) {
-							if (typeof lsn == "string") {
-								let [upper, lower] = lsn.split('/');
-								lsn = {
-									upper: parseInt(upper, 16),
-									lower: parseInt(lower, 16)
-								};
-							}
-
-							if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
-								lsn.upper = lsn.upper + 1;
-								lsn.lower = 0;
-							} else {
-								lsn.lower = lsn.lower + 1;
-							}
-							lastLsn = lsn;
+						startLsn = {
+							upper: parseInt(upper, 16),
+							lower: parseInt(lower, 16)
+						};
+						if (startLsn.lower == 0) {
+							startLsn.lower = 4294967295;
+							startLsn.upper--;
+						} else {
+							startLsn.lower--;
+						}
+						replicationClient.connection.once('replicationStart', function() {
+							console.log(`Successfully listening for Changes on ${config.host}:${config.database}`);
+							retry.reset();
+							let walCheckpointHeartBeat = function() {
+								if (walCheckpointHeartBeatTimeoutId) {
+									clearTimeout(walCheckpointHeartBeatTimeoutId);
+								}
+								walCheckpoint(replicationClient, lastLsn);
+								walCheckpointHeartBeatTimeoutId = setTimeout(walCheckpointHeartBeat, opts.keepalive);
+							};
 							walCheckpointHeartBeat();
-						};
-						replicationClient.connection.on('error', (err) => {
-							if (err.message === "Connection terminated by user") return; //ignore this error
-							dieError(err);
+							copyDataThrough.acknowledge = function(lsn) {
+								if (typeof lsn == "string") {
+									let [upper, lower] = lsn.split('/');
+									lsn = {
+										upper: parseInt(upper, 16),
+										lower: parseInt(lower, 16)
+									};
+								}
+
+								if (lsn.lower === 4294967295) { // [0xff, 0xff, 0xff, 0xff]
+									lsn.upper = lsn.upper + 1;
+									lsn.lower = 0;
+								} else {
+									lsn.lower = lsn.lower + 1;
+								}
+								lastLsn = lsn;
+								walCheckpointHeartBeat();
+							};
+
+							replicationClient.connection.on('error', (err) => {
+								if (err.message === "Connection terminated by user") return; //ignore this error
+								dieError(err);
+							});
 						});
 					});
 				});
 			});
 		});
-
+		retry.backoff();
 		return copyDataThrough;
 	}
 };
