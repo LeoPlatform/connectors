@@ -5,8 +5,7 @@ const extend = require("extend");
 const dynamodb = leo.aws.dynamodb;
 const merge = require("lodash.merge");
 
-let start = null;
-var aggregations = {};
+let aggregations = {};
 
 let bucketAliases = {
 	'alltime': '',
@@ -36,26 +35,26 @@ function processUpdate(newData, existing, reversal) {
 				if (!(key in existing)) {
 					existing[key] = func;
 				} else if ("_type" in func) {
-					if (func._type == "sum") {
+                    if (func._type === "sum") {
 						existing[key].val += func.val;
-					} else if (func._type == "min") {
+                    } else if (func._type === "min") {
 						if (func.val < existing[key].val) {
 							existing[key].val = func.val;
 						}
-					} else if (func._type == "max") {
+                    } else if (func._type === "max") {
 						if (func.val > existing[key].val) {
 							existing[key].val = func.val;
 						}
-					} else if (func._type == "last") {
+                    } else if (func._type === "last") {
 						if (func.date > existing[key].date) {
 							existing[key] = func;
 						}
-					} else if (func._type == "first") {
+                    } else if (func._type === "first") {
 						if (func.date < existing[key].date) {
 							existing[key] = func;
 						}
-					} else if (func._type == "changes") {
-						if (existing[key].prev != func.prev) {
+                    } else if (func._type === "changes") {
+                        if (existing[key].prev !== func.prev) {
 							existing[key].val++;
 						}
 						existing[key].prev = func.prev;
@@ -68,7 +67,7 @@ function processUpdate(newData, existing, reversal) {
 						val: 0
 					};
 				}
-				if (func._type == "sum") {
+                if (func._type === "sum") {
 					existing[key].val -= func.val;
 				}
 			}
@@ -80,20 +79,20 @@ function processUpdate(newData, existing, reversal) {
 }
 
 function myProcess(ns, e, reversal) {
-	var id = e.entity + "-" + e.id;
+    let id = e.entity + "-" + e.id;
 	if (ns) {
 		ns = "-" + ns;
 	}
-	var buckets = [];
+    let buckets = [];
 	if (!e.aggregate) {
 		buckets = [{
 			cat: "all",
 			range: ""
 		}];
 	} else {
-		var d = moment(e.aggregate.timestamp);
+        let d = moment(e.aggregate.timestamp);
 		e.aggregate.buckets.forEach((bucket) => {
-			if (bucket == "" || bucket == "alltime" || bucket == "all") {
+            if (bucket === "" || bucket === "alltime" || bucket === "all") {
 				buckets.push({
 					cat: "all",
 					range: ""
@@ -110,10 +109,10 @@ function myProcess(ns, e, reversal) {
 		});
 	}
 	buckets.forEach((bucket) => {
-		var data = merge({}, e.data);
-		var newId = id + "-" + bucket.cat;
+        let data = merge({}, e.data);
+        let newId = id + "-" + bucket.cat;
 		let range = bucket.range + ns;
-		if (bucket.cat == "all") {
+        if (bucket.cat === "all") {
 			newId = id;
 			range = "all" + ns;
 		}
@@ -161,22 +160,24 @@ module.exports = {
 		values: values
 	}),
 	hash: (key, func) => {
-		var hash = {};
+        let hash = {};
 		this.forEach((e) => {
 			hash[e[key]] = func(e);
 		});
 		return hash;
 	},
-	aggregator: function(ns, t) {
+    aggregator: function (tableName, ns, t) {
 		if (!t) {
 			t = ns;
 			ns = "";
 		}
+
+        let start = null;
+        aggregations = {};
 		return ls.bufferBackoff(function each(obj, done) {
 				if (!start) start = obj.eid;
 
 				obj = obj.payload;
-				let changes = {};
 				if (obj.old) {
 					t(obj.old).forEach((e) => {
 						myProcess(ns, e, true);
@@ -192,22 +193,22 @@ module.exports = {
 			function emit(records, done) {
 				//Fetch Ids
 				let ids = [];
-				for (var i in aggregations) {
+                for (let i in aggregations) {
 					ids.push({
 						id: aggregations[i].id,
 						bucket: aggregations[i].bucket
 					});
 				}
 				// console.log(ids);
-				let stream = leo.streams.toDynamoDB("aggregations");
+                let stream = leo.streams.toDynamoDB(tableName);
 				let seenHashes = {};
 
-				dynamodb.batchGetTable("aggregations", ids, (err, result) => {
-					for (var i = 0; i < result.length; i++) {
+                dynamodb.batchGetTable(tableName, ids, (err, result) => {
+                    for (let i = 0; i < result.length; i++) {
 						let record = result[i];
 						let fullHash = record.id + record.bucket;
 						seenHashes[fullHash] = true;
-						if (start == record.start) {
+                        if (start === record.start) {
 							record.d = record.p || {};
 						}
 						record.p = extend(true, {}, record.d);
@@ -217,7 +218,7 @@ module.exports = {
 
 						stream.write(record);
 					}
-					for (var i in aggregations) {
+                    for (let i in aggregations) {
 						if (!(i in seenHashes)) {
 							aggregations[i].p = {};
 							aggregations[i].start = start;
@@ -227,6 +228,8 @@ module.exports = {
 						}
 					}
 					stream.end((err) => {
+                        start = null;
+                        aggregations = {};
 						done(err, []);
 					});
 				});
