@@ -10,27 +10,26 @@ var backoff = require("backoff");
 //I need to overwrite the pg connection listener to apply backpressure;
 let Connection = require("pg/lib/connection.js");
 
-let count = 0;
 let shutdown = false;
 let copyDataThrough;
 Connection.prototype.attachListeners = function(stream) {
-	var self = this
+	var self = this;
 
 	stream.on('data', function(buff) {
-		self._reader.addChunk(buff)
-		var packet = self._reader.read()
+		self._reader.addChunk(buff);
+		var packet = self._reader.read();
 		let lastWriteGood = true;
 		while (packet) {
-			var msg = self.parseMessage(packet)
+			var msg = self.parseMessage(packet);
 			if (self._emitMessage) {
-				self.emit('message', msg)
+				self.emit('message', msg);
 			}
 			if (msg.name == "copyData") {
 				lastWriteGood = copyDataThrough.write(msg);
 			} else {
-				self.emit(msg.name, msg)
+				self.emit(msg.name, msg);
 			}
-			packet = self._reader.read()
+			packet = self._reader.read();
 		}
 
 		if (!lastWriteGood || shutdown) {
@@ -41,11 +40,11 @@ Connection.prototype.attachListeners = function(stream) {
 				});
 			}
 		}
-	})
+	});
 	stream.on('end', function() {
-		self.emit('end')
-	})
-}
+		self.emit('end');
+	});
+};
 
 
 
@@ -53,7 +52,7 @@ module.exports = {
 	stream: function(ID, config, opts) {
 		opts = Object.assign({
 			slot_name: 'leo_replication',
-			keepalive: 1000 * 30,
+			keepalive: 1000 * 50,
 			failAfter: 100,
 			recoverWal: false,
 			event: 'logical_replication'
@@ -98,7 +97,6 @@ module.exports = {
 					count = 0;
 				}
 				// console.log("processing", lsn.string);
-				startedProcessing = true;
 
 				let log;
 				try {

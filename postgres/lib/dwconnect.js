@@ -396,12 +396,12 @@ module.exports = function(config, columnConfig) {
 					});
 				});
 			});
-		});
-		async.parallelLimit(tasks, 20, (err) => {
-			if (err) return callback(err, tableResults);
-			//Update client schema cache with new/updated tables
-			client.describeTables((err) => {
-				callback(err, tableResults);
+			async.parallelLimit(tasks, 20, (err) => {
+				if (err) return callback(err, tableResults);
+				//Update client schema cache with new/updated tables
+				client.describeTables((err) => {
+					callback(err, tableResults);
+				});
 			});
 		});
 	};
