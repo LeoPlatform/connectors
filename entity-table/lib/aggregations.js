@@ -218,7 +218,7 @@ module.exports = {
                     Object.keys(aggregations)
                         .filter(hash => !(hash in seenHashes))
                         .map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
-                        .forEach(stream.write);
+                        .forEach(a => stream.write(a));
 
                     stream.end((err) => {
                         start = null;
