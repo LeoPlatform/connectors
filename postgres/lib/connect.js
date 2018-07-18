@@ -394,7 +394,7 @@ function create(hash, pool, parentCache) {
 					myClient = c;
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
 					stream.on("error", function(err) {
-						console.log(err);
+						console.log(`COPY error: ${err.where}`, err);
 						process.exit();
 					});
 					if (pending) {
