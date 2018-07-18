@@ -79,6 +79,7 @@ module.exports = {
 		});
 
 		let count = 0;
+		let replicationClient;
 
 		copyDataThrough = ls.through((msg, done) => {
 			let lsn = {
@@ -152,7 +153,7 @@ module.exports = {
 
 		retry.on('ready', function(number, delay) {
 			let wrapperClient = connect(config);
-			let replicationClient = new pg.Client(Object.assign({}, config, {
+			replicationClient = new pg.Client(Object.assign({}, config, {
 				replication: 'database'
 			}));
 
