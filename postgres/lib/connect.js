@@ -75,7 +75,11 @@ function create(pool, parentCache) {
 					}
 					callback(err);
 				} else {
-					callback(null, result.rows, result.fields);
+					if (opts && opts.returnResultObject) {
+						callback(null, result);
+					} else {
+						callback(null, result.rows, result.fields);
+					}
 				}
 			});
 		},
