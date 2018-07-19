@@ -75,7 +75,11 @@ function create(pool, parentCache) {
 					}
 					callback(err);
 				} else {
-					callback(null, result.rows, result.fields);
+					if (opts && opts.returnResultObject) {
+						callback(null, result);
+					} else {
+						callback(null, result.rows, result.fields);
+					}
 				}
 			});
 		},
@@ -89,12 +93,17 @@ function create(pool, parentCache) {
 				logger.info(`Table "${table}" schema from cache`, cache.timestamp);
 				callback(null, cache.schema[table] || []);
 			} else {
+				this.clearSchemaCache();
 				this.describeTables((err, schema) => {
 					callback(err, schema && schema[table] || []);
 				});
 			}
 		},
 		describeTables: function(callback) {
+			if (Object.keys(cache.schema || {}).length) {
+				logger.info(`Tables schema from cache`, cache.timestamp);
+				return callback(null, cache.schema);
+			}
 			client.query("SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' order by ordinal_position asc", (err, result) => {
 				let schema = {};
 				result && result.map(r => {
@@ -111,6 +120,13 @@ function create(pool, parentCache) {
 		},
 		getSchemaCache: function() {
 			return cache.schema || {};
+		},
+		setSchemaCache: function(schema) {
+			cache.schema = schema || {};
+		},
+		clearSchemaCache: function() {
+			logger.info(`Clearing Tables schema cache`);
+			cache.schema = {};
 		},
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
@@ -552,4 +568,4 @@ function create(pool, parentCache) {
 		}
 	};
 	return client;
-};
+}

@@ -5,7 +5,7 @@ const ls = require("leo-sdk").streams;
 
 module.exports = function(config, columnConfig) {
 	let client = postgres(config);
-
+	let dwClient = client;
 	columnConfig = Object.assign({
 		_auditdate: '_auditdate',
 		_startdate: '_startdate',
@@ -34,7 +34,8 @@ module.exports = function(config, columnConfig) {
 
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
-		tasks.push(done => client.query(`create table staging_${table} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} (${ids.join(', ')})`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 		tasks.push(done => client.query(`analyze staging_${table}`, done));
 
@@ -61,11 +62,10 @@ module.exports = function(config, columnConfig) {
 						});
 					});
 					tasks.push(done => {
-						client.query(`Update ${table} dm
-								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._auditdate} = now()
+						client.query(`Update ${table} prev
+								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._auditdate} = ${dwClient.auditdate}
 								FROM staging_${table} staging
-								JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
-								where ${ids.map(id=>`dm.${id} = staging.${id}`).join(' and ')}
+								where ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
 					});
 
@@ -73,7 +73,7 @@ module.exports = function(config, columnConfig) {
 					//Now insert any we were missing
 					tasks.push(done => {
 						client.query(`INSERT INTO ${table} (${columns.join(',')},${columnConfig._auditdate})
-								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as ${columnConfig._auditdate}
+								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}
 								FROM staging_${table} staging
 								LEFT JOIN ${table} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
@@ -113,7 +113,8 @@ module.exports = function(config, columnConfig) {
 		let tasks = [];
 		tasks.push(done => client.query(`drop table if exists staging_${table}`, done));
 		tasks.push(done => client.query(`drop table if exists staging_${table}_changes`, done));
-		tasks.push(done => client.query(`create table staging_${table} (like ${table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`, done));
+		tasks.push(done => client.query(`create table staging_${table} (like ${table})`, done));
+		tasks.push(done => client.query(`create index staging_${table}_id on staging_${table} (${nk.join(', ')})`, done));
 		tasks.push(done => client.query(`alter table staging_${table} drop column ${sk}`, done));
 		tasks.push(done => ls.pipe(stream, client.streamToTable(`staging_${table}`), done));
 		tasks.push(done => client.query(`analyze staging_${table}`, done));
@@ -142,6 +143,9 @@ module.exports = function(config, columnConfig) {
 
 					let scdSQL = [];
 
+					//if (!scd2.length && !scd3.length && !scd6.length) {
+					//	scdSQL.push(`1 as runSCD1`);
+					//} else 
 					if (scd1.length) {
 						scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
 					} else {
@@ -176,6 +180,7 @@ module.exports = function(config, columnConfig) {
 						let tasks = [];
 						let rowId = null;
 						let totalRecords = 0;
+						tasks.push(done => client.query(`analyze staging_${table}_changes`, done));
 						tasks.push(done => {
 							client.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
 								if (err) {
@@ -194,7 +199,7 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 							client.query(`INSERT INTO ${table} (${fields.join(',')})
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, now() as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 								FROM staging_${table}_changes changes  
 								JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
 								LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
@@ -206,15 +211,14 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
 							let columns = scd1.map(f => `"${f}" = coalesce(staging."${f}", prev."${f}")`).concat(scd6.map(f => `"current_${f}" = coalesce(staging."${f}", prev."${f}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else dm."${columnConfig._enddate}" END`);
-							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else dm."${columnConfig._current}" END`);
-							columns.push(`"${columnConfig._auditdate}" = now()`);
-							client.query(`update ${table} as dm
+							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
+							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
+							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
+							client.query(`update ${table} as prev
 										set  ${columns.join(', ')}
 										FROM staging_${table}_changes changes
 										JOIN staging_${table} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-										LEFT JOIN ${table} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
-										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
@@ -263,7 +267,7 @@ module.exports = function(config, columnConfig) {
 						unions[field.dimension] = [];
 					}
 					let dimTableNk = tableNks[field.dimension][0];
-					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = (select max(${columnConfig._auditdate}) from ${table})`);
+					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
 				}
 			});
 		});
@@ -278,12 +282,12 @@ module.exports = function(config, columnConfig) {
 				let trx;
 				client.connect().then(transaction => {
 					trx = transaction;
-					transaction.query(`select max(${sk}) as maxid, max(${columnConfig._auditdate}) as _auditdate from ${table}`, (err, results) => {
+					transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
 						if (err) {
 							return done(err);
 						}
 						let rowId = results[0].maxid || 10000;
-						let _auditdate = results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
+						let _auditdate = dwClient.auditdate; //results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
 						let unionQuery = unions[table].join("\nUNION\n");
 						transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
 							done(err);
@@ -339,7 +343,7 @@ module.exports = function(config, columnConfig) {
                         FROM ${table} t
                         ${joinTables.join("\n")}
                         where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
-                            AND dm.${columnConfig._auditdate} = (SELECT MAX(${columnConfig._auditdate}) FROM ${table}) AND t.${columnConfig._auditdate} = (SELECT MAX(${columnConfig._auditdate}) FROM ${table})
+                            AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
 				} else {
 					done();
@@ -512,7 +516,7 @@ module.exports = function(config, columnConfig) {
 				callback(err);
 			} else {
 				let audit = auditdate && auditdate[0].max;
-				let auditdateCompare = audit != null ? `date_trunc('second',${columnConfig._auditdate}) = ${client.escapeValue(audit)}` : `${columnConfig._auditdate} is null`;
+				let auditdateCompare = audit != null ? `${columnConfig._auditdate} >= ${client.escapeValue(audit)}` : `${columnConfig._auditdate} is null`;
 				client.query(`select count(*) as count FROM ${client.escapeId(table)} where ${auditdateCompare}`, (err, count) => {
 					callback(err, {
 						auditdate: audit,
@@ -524,16 +528,16 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
-		let auditdateCompare = remoteAuditdate.auditdate != null ? `date_trunc('second',${columnConfig._auditdate}) = ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
+		let auditdateCompare = remoteAuditdate.auditdate != null ? `${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
 		client.query(`select count(*) as count FROM ${client.escapeId(table)} WHERE ${auditdateCompare}`, (err, result) => {
 			let where = "";
 
 			let mysqlAuditDate = parseInt(result[0].count);
 
 			if (remoteAuditdate.auditdate && mysqlAuditDate <= remoteAuditdate.count) {
-				where = `WHERE date_trunc('second', ${columnConfig._auditdate}) > ${client.escapeValue(remoteAuditdate.auditdate)}`;
+				where = `WHERE ${columnConfig._auditdate} > ${client.escapeValue(remoteAuditdate.auditdate)}`;
 			} else if (remoteAuditdate.auditdate && mysqlAuditDate > remoteAuditdate.count) {
-				where = `WHERE date_trunc('second', ${columnConfig._auditdate}) >= ${client.escapeValue(remoteAuditdate.auditdate)}`;
+				where = `WHERE ${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}`;
 			}
 			client.query(`select to_char(min(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as oldest, count(*) as count
         FROM ${client.escapeId(table)}
@@ -626,7 +630,7 @@ module.exports = function(config, columnConfig) {
 				}
 				client.query(`copy ${stageTable} (${f})
           from '${file}' ${manifest} ${opts.role?`credentials 'aws_iam_role=${opts.role}'`: ""}
-		  NULL AS '\\\\N' ACCEPTINVCHARS TRUNCATECOLUMNS ESCAPE ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
+		  NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
 			} else {
 				done("Postgres importChanges Not Implemented Yet");
 			}
