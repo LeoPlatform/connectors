@@ -35,7 +35,7 @@ module.exports = {
 		return `${entity}-${hash}`;
 	},
 	get: function(table, entity, id) {
-		if (id == undefined) {
+        if (id === undefined) {
 			id = entity;
 			entity = "";
 		} else {
@@ -115,7 +115,7 @@ module.exports = {
 							return reject(err);
 						}
 						if (statsData.units > 0) {
-							leo.bot.checkpoint(botId, `system:dynamodb.${table.replace(/-[A-Z0-9]{12}$/, "")}.${entity}`, {
+                            leo.bot.checkpoint(botId, `system:dynamodb.${table.replace(/-[A-Z0-9]{12,}$/, "")}.${entity}`, {
 								type: "write",
 								eid: statsData.eid,
 								records: statsData.units,
@@ -179,7 +179,7 @@ module.exports = {
 					data.event = image.partition.split(/-/)[0];
 				}
 				data.id = `${data.event}_entity_changes`;
-				data.correlation_id.source = `system:dynamodb.${data.correlation_id.source.replace(/-[A-Z0-9]{12}$/, "")}.${data.event}`
+                data.correlation_id.source = `system:dynamodb.${data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "")}.${data.event}`
 				data.event = data.event + suffix;
 				let stream = getStream(data.id);
 				if (!stream.write(data)) {
@@ -254,7 +254,7 @@ module.exports = {
                     }
                     data.id = `${resourcePrefix}${options.botSuffix || ""}`;
                     data.event = `${eventPrefix}${resourceSuffix}`;
-                    let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12}$/, "");
+                    let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
                     data.correlation_id.source = `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
                     let stream = getStream(data.id);
