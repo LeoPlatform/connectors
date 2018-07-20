@@ -197,7 +197,7 @@ module.exports = {
                         bucket: aggregations[hash].bucket
                     }));
 
-                let stream = leo.streams.toDynamoDB(tableName);
+                let stream = leo.streams.toDynamoDB(tableName, {records: 500});
                 let seenHashes = {};
 
                 dynamodb.batchGetTable(tableName, ids, (err, result) => {
@@ -226,6 +226,6 @@ module.exports = {
                         done(err, []);
                     });
                 });
-            }, {}, {});
+            }, {}, {records: 1000});
     }
 };
