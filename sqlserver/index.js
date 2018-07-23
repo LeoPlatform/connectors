@@ -10,9 +10,6 @@ const ls = leo.streams;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
 
-// require("leo-sdk/lib/logger").configure(/.*/, {
-// 	all: true
-// });
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
 		if (Array.isArray(idColumns)) {
@@ -51,31 +48,70 @@ module.exports = {
 		}
 
 		let parts = opts.start.toString().split(".");
-
-		let version = parseInt(parts[0]);
-		let offset = parts[1] || 0;
+		let version = parseInt(parts.shift());
+		let order = '';
 
 		let sqlTables = Object.keys(tables).map(t => {
-			let query = `SELECT '${t}' as tableName, ${tables[t]} as id, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
-					 FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT  
-					 where SYS_CHANGE_VERSION > ${version} OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${offset})`;
+			let fields;
+			let where;
+
+			// build fields for composite keys
+			if (Array.isArray(tables[t])) {
+				let count = 0;
+				let next = `SYS_CHANGE_VERSION = ${version}`;
+				let queryPieces = [];
+
+				tables[t].forEach(field => {
+					queryPieces.push(`(${next} AND ${field} > ${parts[count]})`);
+					next += ` AND ${field} = ${parts[count++]}`;
+				});
+
+				where = ' OR ' + queryPieces.join(' OR ');
+				fields = tables[t].join(', ');
+				order = order || tables[t].join(' asc,') + ' asc';
+			} else {
+				where = ` OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${parts[0] || 0})`;
+				fields = tables[t];
+				order = order || tables[t] + ' asc';
+			}
+
+			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
+				FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT
+				where SYS_CHANGE_VERSION > ${version}${where}`;
+
 			logger.log(query);
 			return query;
 		});
-		client.query(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc', (err, result) => {
-			logger.log(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc');
+
+		let changeQuery = sqlTables.join(" UNION ") + ` order by SYS_CHANGE_VERSION asc, ${order}`;
+		client.query(changeQuery, (err, result) => {
+			logger.log(changeQuery);
 			if (!err) {
 				result.forEach(r => {
-					if (!obj.payload[r.tableName]) {
-						obj.payload[r.tableName] = [];
+					let tableName = r.tableName;
+					let sys_change_version = r.__SYS_CHANGE_VERSION;
+					delete r.tableName;
+					delete r.__SYS_CHANGE_VERSION;
+
+					if (!obj.payload[tableName]) {
+						obj.payload[tableName] = [];
 					}
 
-					let eid = `${r.__SYS_CHANGE_VERSION}.${r.id}`;
+					let eid = `${sys_change_version}.`;
+					let payload;
+					if (Object.keys(r).length > 1) {
+						eid += tables[tableName].map(field => r[field]).join('.');
+						payload = r;
+					} else {
+						eid += r[tables[tableName]];
+						payload = r[tables[tableName]];
+					}
+
 					obj.correlation_id.units++;
 					obj.correlation_id.start = obj.correlation_id.start || eid;
 					obj.correlation_id.end = eid;
 					obj.eid = eid;
-					obj.payload[r.tableName].push(r.id);
+					obj.payload[tableName].push(payload);
 				});
 
 				if (obj.correlation_id.units > 0) {
