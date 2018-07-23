@@ -93,22 +93,20 @@ module.exports = {
 					}
 
 					let eid = `${sys_change_version}.`;
+					let payload;
 					if (Object.keys(r).length > 1) {
 						eid += tables[tableName].map(field => r[field]).join('.');
+						payload = r;
 					} else {
 						eid += r[tables[tableName]];
+						payload = r[tables[tableName]];
 					}
 
 					obj.correlation_id.units++;
 					obj.correlation_id.start = obj.correlation_id.start || eid;
 					obj.correlation_id.end = eid;
 					obj.eid = eid;
-
-					if (Object.keys(r).length > 1) {
-						obj.payload[tableName].push(r);
-					} else {
-						obj.payload[tableName].push(r[tables[tableName]]);
-					}
+					obj.payload[tableName].push(payload);
 				});
 
 				if (obj.correlation_id.units > 0) {
