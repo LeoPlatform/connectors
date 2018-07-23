@@ -59,7 +59,7 @@ module.exports = {
 			let changes;
 			let fields;
 			// build fields for composite keys
-			if (typeof tables[t] === 'object') {
+			if (Array.isArray(tables[t])) {
 				fields = tables[t].join(', ');
 				order = tables[t].join(' asc,') + ' asc';
 				changes = tables[t].map(field => {
