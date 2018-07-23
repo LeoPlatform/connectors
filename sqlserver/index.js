@@ -10,9 +10,6 @@ const ls = leo.streams;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
 
-// require("leo-sdk/lib/logger").configure(/.*/, {
-// 	all: true
-// });
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
 		if (Array.isArray(idColumns)) {
