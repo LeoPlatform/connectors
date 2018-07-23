@@ -61,14 +61,12 @@ module.exports = {
 			// build fields for composite keys
 			if (Array.isArray(tables[t])) {
 				let count = 0;
-				let current = `SYS_CHANGE_VERSION = ${version}`;
-				let next = current;
+				let next = `SYS_CHANGE_VERSION = ${version}`;
 				let queryPieces = [];
 
 				tables[t].forEach(field => {
-					current = `${next} AND ${field} > ${parts[count]}`;
-					next = `${next} AND ${field} = ${parts[count++]}`;
-					queryPieces.push(current);
+					queryPieces.push(`(${next} AND ${field} > ${parts[count]})`);
+					next += ` AND ${field} = ${parts[count++]}`;
 				});
 
 				where = ' OR ' + queryPieces.join(' OR ');
