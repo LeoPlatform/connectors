@@ -55,25 +55,35 @@ module.exports = {
 		let order = '';
 
 		let sqlTables = Object.keys(tables).map(t => {
-			let count = 0;
-			let changes;
 			let fields;
+			let where;
+
 			// build fields for composite keys
 			if (Array.isArray(tables[t])) {
+				let count = 0;
+				let current = `SYS_CHANGE_VERSION = ${version}`;
+				let next = current;
+				let queryPieces = [];
+
+				tables[t].forEach(field => {
+					current = `${next} AND ${field} > ${parts[count]}`;
+					next = `${next} AND ${field} = ${parts[count++]}`;
+					queryPieces.push(current);
+				});
+
+				where = ' OR ' + queryPieces.join(' OR ');
 				fields = tables[t].join(', ');
-				order = tables[t].join(' asc,') + ' asc';
-				changes = tables[t].map(field => {
-					return `${field} > ${parts[count++] || 0}`;
-				}).join(' OR ');
+				order = order || tables[t].join(' asc,') + ' asc';
 			} else {
-				order = tables[t] + ' asc';
+				where = ` OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${parts[0] || 0})`;
 				fields = tables[t];
-				changes = `${tables[t]} > ${parts[count] || 0}`;
+				order = order || tables[t] + ' asc';
 			}
 
 			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
 				FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT
-				where SYS_CHANGE_VERSION > ${version} OR (SYS_CHANGE_VERSION = ${version} AND (${changes}))`;
+				where SYS_CHANGE_VERSION > ${version}${where}`;
+
 			logger.log(query);
 			return query;
 		});
