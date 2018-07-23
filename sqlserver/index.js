@@ -51,31 +51,64 @@ module.exports = {
 		}
 
 		let parts = opts.start.toString().split(".");
-
-		let version = parseInt(parts[0]);
-		let offset = parts[1] || 0;
+		let version = parseInt(parts.shift());
+		let order = '';
 
 		let sqlTables = Object.keys(tables).map(t => {
-			let query = `SELECT '${t}' as tableName, ${tables[t]} as id, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
-					 FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT  
-					 where SYS_CHANGE_VERSION > ${version} OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${offset})`;
+			let count = 0;
+			let changes;
+			let fields;
+			// build fields for composite keys
+			if (typeof tables[t] === 'object') {
+				fields = tables[t].join(', ');
+				order = tables[t].join(' asc,') + ' asc';
+				changes = tables[t].map(field => {
+					return `${field} > ${parts[count++] || 0}`;
+				}).join(' OR ');
+			} else {
+				order = tables[t] + ' asc';
+				fields = tables[t];
+				changes = `${tables[t]} > ${parts[count] || 0}`;
+			}
+
+			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
+				FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT
+				where SYS_CHANGE_VERSION > ${version} OR (SYS_CHANGE_VERSION = ${version} AND (${changes}))`;
 			logger.log(query);
 			return query;
 		});
-		client.query(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc', (err, result) => {
-			logger.log(sqlTables.join(" UNION ") + ' order by SYS_CHANGE_VERSION asc, id asc');
+
+		let changeQuery = sqlTables.join(" UNION ") + ` order by SYS_CHANGE_VERSION asc, ${order}`;
+		client.query(changeQuery, (err, result) => {
+			logger.log(changeQuery);
 			if (!err) {
 				result.forEach(r => {
-					if (!obj.payload[r.tableName]) {
-						obj.payload[r.tableName] = [];
+					let tableName = r.tableName;
+					let sys_change_version = r.__SYS_CHANGE_VERSION;
+					delete r.tableName;
+					delete r.__SYS_CHANGE_VERSION;
+
+					if (!obj.payload[tableName]) {
+						obj.payload[tableName] = [];
 					}
 
-					let eid = `${r.__SYS_CHANGE_VERSION}.${r.id}`;
+					let eid = `${sys_change_version}.`;
+					if (Object.keys(r).length > 1) {
+						eid += tables[tableName].map(field => r[field]).join('.');
+					} else {
+						eid += r[tables[tableName]];
+					}
+
 					obj.correlation_id.units++;
 					obj.correlation_id.start = obj.correlation_id.start || eid;
 					obj.correlation_id.end = eid;
 					obj.eid = eid;
-					obj.payload[r.tableName].push(r.id);
+
+					if (Object.keys(r).length > 1) {
+						obj.payload[tableName].push(r);
+					} else {
+						obj.payload[tableName].push(r[tables[tableName]]);
+					}
 				});
 
 				if (obj.correlation_id.units > 0) {

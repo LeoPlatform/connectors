@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-sqlserver",
-	"version": "1.3.3",
+	"version": "1.4.0",
 	"description": "A SQL Server database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -17,8 +17,8 @@
 	},
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
-		"leo-connector-common": "^1.1.3",
-		"leo-sdk": "^1.1.0",
+		"leo-connector-common": "^1.1.5",
+		"leo-sdk": "^1.1.1",
 		"mssql": "^4.1.0",
 		"uuid": "^3.2.1"
 	},
