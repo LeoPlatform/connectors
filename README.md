@@ -33,6 +33,7 @@ Quick Start Guide: https://github.com/LeoPlatform/Leo
 			* [Delete](#delete)
 			* [Sample](#sample)
 			* [Destroy](#destroy)
+ * [Creating a Domain Object transform bot](#create-a-domain-object-loader-bot)
  * [Support](#support)
 		
 
@@ -602,7 +603,7 @@ Composite key example:
 ```javascript
     // build your domain object query using composite keys
     // ? will be replaced with values. Example: "values (1,2),(1,3),(2,4),(2,2)"
-    let query = `SELECT your, select, statement, fields, go, here
+    let query = `SELECT id, your, select, statement, fields, go, here
         FROM (?) as jt (id1, id2)
         JOIN yourTableName AS ytn ON ytn.id1 = jt.id1 AND ytn.id2 = jt.id2`;
 
@@ -615,6 +616,33 @@ Composite key example:
     .mapDomainId('yourTableName', ['LeadID1', 'LeadID2'])
     .query(query)
     .run(callback);
+```
+
+The query in the examples above is what builds the domain object. Here is an example of how to build a domain object and
+what the various parts of the query do to build it.
+#####Query example
+```javascript
+let query = `SELECT a.id
+		, a.name
+		, a.foo_id
+		, '' AS prefix_Foo
+		, b.id
+		, b.name
+	FROM tableOne a
+	JOIN tableTwo b ON (b.id = a.foo_id)	
+	WHERE a.id IN (?)`;
+```
+#####Output example
+```json
+{
+	"id": 1,
+	"name": "test",
+	"foo_id": 5,
+	"Foo": {
+		"id": 5,
+		"name": "bar"
+	}
+}
 ```
 
 ## Support
