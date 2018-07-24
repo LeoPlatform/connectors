@@ -579,7 +579,7 @@ exports.handler = async function(event, context, callback) {
     const helper = new helperFactory(event, context, leo);
 ```
     
-####Build domain objects
+#### Build domain objects
 Example:
 ```javascript
     // build your domain object query
@@ -620,7 +620,7 @@ Composite key example:
 
 The query in the examples above is what builds the domain object. Here is an example of how to build a domain object and
 what the various parts of the query do to build it.
-#####Query example
+##### Query example
 ```javascript
 let query = `SELECT a.id
 		, a.name
@@ -632,7 +632,7 @@ let query = `SELECT a.id
 	JOIN tableTwo b ON (b.id = a.foo_id)	
 	WHERE a.id IN (?)`;
 ```
-#####Output example
+##### Output example
 ```json
 {
 	"id": 1,
