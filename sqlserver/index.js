@@ -132,7 +132,7 @@ module.exports = {
 				event: opts.outQueue
 			}, callback);
 		} else {
-			let stream = leo.read(bot_id, opts.inQueue);//, {start: opts.start});
+			let stream = leo.read(bot_id, opts.inQueue, {start: opts.start});
 			let stats = ls.stats(bot_id, opts.inQueue);
 
 			ls.pipe(stream, stats, this.load(dbConfig, sql, domain, opts, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {

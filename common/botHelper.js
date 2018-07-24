@@ -30,11 +30,9 @@ module.exports = function(event, context, sdk) {
 			params.connection = event.connection;
 		}
 
-		// if we're doing a snapshot, put the table and id into the connection object
-		if (params.snapshot) {
-			params.connection.table = params.table;
-			params.connection.id = params.pk;
-		}
+		// put the table and id into the connection object if we haven't already done so
+		params.connection.table = params.connection.table || params.table;
+		params.connection.id = params.connection.id || params.pk;
 
 		let tables = {},
 			joins = {},
@@ -74,8 +72,19 @@ module.exports = function(event, context, sdk) {
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
 
+							if (Array.isArray(tables[table])) { // if we passed in an array of primary keys
+								// turn the object into an array of items
+								objArray.push(obj[table].map(row => {
+									let array = [];
+									for (let key of tables[table]) {
+										array.push(row[key]);
+									}
+
+									return array;
+								}));
+
 							// if the value of any of the tables is a SELECT query, replace ? with the IDs in obj[table]
-							if (tables[table].match(/^SELECT/)) {
+							} else if (tables[table].match(/^SELECT/)) {
 								async.doWhilst((done) => {
 
 									// split the ID's up into no more than 5k for each query
@@ -93,7 +102,11 @@ module.exports = function(event, context, sdk) {
 					done(null, objArray);
 				},
 				function (ids, builder) {
-					let idsList = ids.filter(id => {return id != undefined}).join();
+					let idsList = ids;
+					if (Array.isArray(ids)) {
+						idsList = ids.filter(id => {return id != undefined}).join();
+					}
+
 					let builderSql = builder(params.pk, sqlQuery.replace(/\?/g, idsList));
 
 					// build the joins
