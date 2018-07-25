@@ -103,8 +103,8 @@ module.exports = {
 				try {
 					log = test_decoding.parse(msg.chunk.slice(25).toString('utf8'));
 				} catch (err) {
-					console.log(err);
-					console.log(msg.chunk.slice(25).toString('utf8'));
+					console.log("TEST_DECODING ERR", err);
+					console.log("PROBLEMATIC MESSAGE", msg.chunk.slice(25).toString('utf8'));
 					done(err);
 				}
 
