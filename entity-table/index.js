@@ -146,7 +146,7 @@ module.exports = {
 		let suffix = "_changes";
 		let getStream = (id) => {
 			if (!(id in streams)) {
-				streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint());
+				streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint({force: true}));
 			}
 			return streams[id];
 		};
@@ -163,10 +163,11 @@ module.exports = {
 					event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
 					timestamp: Date.now(),
 					correlation_id: {
-						start: record.eventID,
+						start: record.dynamodb.SequenceNumber,
 						source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
 					}
-				}
+				};
+
 				let id = null;
 				if ("OldImage" in record.dynamodb) {
 					let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
@@ -216,7 +217,7 @@ module.exports = {
             let resourceSuffix = options.eventSuffix || "_table_changes";
             let getStream = id => {
                 if (!(id in streams)) {
-                    streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint());
+	                streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint({force: true}));
                 }
                 return streams[id];
             };
