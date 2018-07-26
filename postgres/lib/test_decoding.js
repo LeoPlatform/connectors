@@ -25,7 +25,7 @@ float = left:[0-9]+ "." right:[0-9]+ { return parseFloat(left.join("") + "." +  
 integer = digits:[0-9]+ { return parseInt(digits.join(""), 10); }
 
 double_quote_escaped_string = "\"" t:([^"]+ / [\r\n] / "\"\"" {return "\""})* "\"" {return t[0] ? t[0].join('') : '';}
-single_quote_escaped_string = "'" t:([^'\\] / [\r\n] / "\\'" / "''" / "\\\"" / "\\n" / "\\t")* "'" {
+single_quote_escaped_string = "'" t:([^'\\] / [\r\n] / "\\'" / "''" / "\\\"" / "\\n" / "\\t" / "\\\/")* "'" {
 	return t.join('');
 }
 dot_terminated_string = t:[^.]+ {return t.join('');}
