@@ -133,80 +133,6 @@ function create(hash, pool, parentCache) {
 		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
 		},
-		streamToTable: function(table /*, opts*/ ) {
-			const ts = table.split('.');
-			let schema = 'public';
-			let shortTable = table;
-			if (ts.length > 1) {
-				schema = ts[0];
-				shortTable = ts[1];
-			}
-					
-			// opts = Object.assign({
-			// 	records: 10000
-			// }, opts || {});
-			let columns = [];
-			var stream;
-			let myClient = null;
-			let pending = null;
-			pool.connect().then(c => {
-				client.describeTable(shortTable, (err, result) => {
-					columns = result.map(f => f.column_name);
-					myClient = c;
-					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
-					stream.on("error", function(err) {
-						console.log(`COPY error: ${err.where}`, err);
-						process.exit();
-					});
-					if (pending) {
-						pending();
-					}
-				}, schema);
-			}, err => {
-				console.log(err);
-			});
-
-			let count = 0;
-
-			function nonNull(v) {
-				if (v === "" || v === null || v === undefined) {
-					return "\\N";
-				} else if (typeof v === "string" && v.search(/\r/) !== -1) {
-					return v.replace(/\r\n?/g, "\n");
-				} else {
-					return v;
-				}
-			}
-
-			return ls.pipeline(csv.createWriteStream({
-				headers: false,
-				transform: (row, done) => {
-					if (!myClient) {
-						pending = () => {
-							done(null, columns.map(f => nonNull(row[f])));
-						};
-					} else {
-						done(null, columns.map(f => nonNull(row[f])));
-					}
-				}
-			}), ls.write((r, done) => {
-				count++;
-				if (count % 10000 == 0) {
-					console.log(table + ": " + count);
-				}
-				if (!stream.write(r)) {
-					stream.once('drain', done);
-				} else {
-					done(null);
-				}
-			}, (done, push) => {
-				stream.on('end', () => {
-					myClient.release(true);
-					done();
-				});
-				stream.end();
-			}));
-		},
 		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
@@ -348,6 +274,80 @@ function create(hash, pool, parentCache) {
 			}, {
 				records: opts.records
 			});
+		},
+		streamToTable: function(table /*, opts*/ ) {
+			const ts = table.split('.');
+			let schema = 'public';
+			let shortTable = table;
+			if (ts.length > 1) {
+				schema = ts[0];
+				shortTable = ts[1];
+			}
+					
+			// opts = Object.assign({
+			// 	records: 10000
+			// }, opts || {});
+			let columns = [];
+			var stream;
+			let myClient = null;
+			let pending = null;
+			pool.connect().then(c => {
+				client.describeTable(shortTable, (err, result) => {
+					columns = result.map(f => f.column_name);
+					myClient = c;
+					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
+					stream.on("error", function(err) {
+						console.log(`COPY error: ${err.where}`, err);
+						process.exit();
+					});
+					if (pending) {
+						pending();
+					}
+				}, schema);
+			}, err => {
+				console.log(err);
+			});
+
+			let count = 0;
+
+			function nonNull(v) {
+				if (v === "" || v === null || v === undefined) {
+					return "\\N";
+				} else if (typeof v === "string" && v.search(/\r/) !== -1) {
+					return v.replace(/\r\n?/g, "\n");
+				} else {
+					return v;
+				}
+			}
+
+			return ls.pipeline(csv.createWriteStream({
+				headers: false,
+				transform: (row, done) => {
+					if (!myClient) {
+						pending = () => {
+							done(null, columns.map(f => nonNull(row[f])));
+						};
+					} else {
+						done(null, columns.map(f => nonNull(row[f])));
+					}
+				}
+			}), ls.write((r, done) => {
+				count++;
+				if (count % 10000 == 0) {
+					console.log(table + ": " + count);
+				}
+				if (!stream.write(r)) {
+					stream.once('drain', done);
+				} else {
+					done(null);
+				}
+			}, (done, push) => {
+				stream.on('end', () => {
+					myClient.release(true);
+					done();
+				});
+				stream.end();
+			}));
 		},
 		streamFromTable: function(table, opts) {
 
