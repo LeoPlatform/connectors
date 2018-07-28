@@ -1,0 +1,96 @@
+table public.company_user_notifications: INSERT: id[integer]:172783 cid[integer]:10052 company_user_id[integer]:2501 message[json]:'
+{
+    "report_details": {
+        "correlation_id": "reports.10052.2501.reports5b5833600466d9.75226393",
+        "status": "Completed",
+        "download_options": {
+            "export_pdf": {
+                "orientation": "portrait",
+                "include_report_parameters": "1",
+                "pagination": "restart_pages",
+                "corporate_logo": "0"
+            },
+            "is_temporary": true,
+            "self_destruct": false,
+            "send_email": false
+        },
+        "histories": [
+            {
+                "id": null,
+                "cid": 10052,
+                "report_schedule_type_id": 1,
+                "report_schedule_id": null,
+                "report_id": 77665,
+                "report_version_id": 25895,
+                "report_filter_id": null,
+                "report_new_instance_id": null,
+                "report_group_id": null,
+                "report_new_group_id": null,
+                "name": "Late Fee Batches - 07-25-2018",
+                "correlation_id": "reports.10052.2501.reports5b5833600466d9.75226393",
+                "status": "Completed",
+                "errors": null,
+                "filters": {
+                    "report_filter": {
+                        "property_group_ids": [
+                            "95799",
+                            "95800",
+                            "95801"
+                        ],
+                        "ps_product_ids": "1",
+                        "period": {
+                            "allow_future_periods": "1",
+                            "show_retained_earnings": "",
+                            "ignore_post_month_validation": "",
+                            "period_type": "priorcq",
+                            "week-start": "0",
+                            "daterange-start": "",
+                            "daterange-end": "",
+                            "date": ""
+                        }
+                    }
+                },
+                "download_options": {
+                    "export_pdf": {
+                        "orientation": "portrait",
+                        "include_report_parameters": "1",
+                        "pagination": "restart_pages",
+                        "corporate_logo": "0"
+                    },
+                    "is_temporary": true,
+                    "self_destruct": false,
+                    "send_email": false
+                },
+                "queued_datetime": "7/25/2018 2:22 am MDT",
+                "started_datetime": "2018-07-25T02:22:56-06:00",
+                "completed_datetime": "2018-07-25T02:22:56-06:00",
+                "recipients": {},
+                "created_by": null,
+                "created_on": "2018-07-25T02:22:56-06:00",
+                "title": "Late Fee Batches",
+                "major": 1,
+                "minor": 0,
+                "url": "?module=reportsxxx&name=late_fee_batches",
+                "output_type": "export_pdf",
+                "created": "7/25/2018 2:22 am MDT",
+                "queued": "0:00:00",
+                "processing": "0:00:00",
+                "filter_descriptions": {
+                    "property_group_ids": {
+                        "label": "Property Groups",
+                        "submitted_value": "Bingham, Ballif, Clinger"
+                    },
+                    "period": {
+                        "label": "Period",
+                        "submitted_value": "Prior Calendar Quarter"
+                    }
+                }
+            }
+        ]
+    },
+    "description": "Completed",
+    "title": "Late Fee Batches",
+    "auto_hide_after": null,
+    "callback_function": "$.asyncRequest({\n\t\t\t\t\t\turl: \"/?module=report_queuexxx&action=download&correlation_id=reports.10052.2501.reports5b5833600466d9.75226393\",\n\t\t\t\t\t\tmethod: \"post\",\n\t\t\t\t\t\tisFile: true\n\t\t\t\t\t})"
+}
+' tags[text[]]:'{QUEUED_ALERT}' sent_on[timestamp with time zone]:null read_on[timestamp with time zone]:null expires_on[timestamp with time zone]:'07/26/2018 02:22:56 MDT' snooze_until[timestamp with time zone]:null created_by[integer]:2501 created_on[timestamp with time zone]:'07/25/2018 02:22:56.985812 MDT'

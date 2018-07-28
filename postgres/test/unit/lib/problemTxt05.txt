@@ -1,0 +1,88 @@
+table public.company_user_notifications: INSERT: id[integer]:172782 cid[integer]:2138 company_user_id[integer]:1886 message[json]:'
+{
+    "report_details": {
+        "correlation_id": "reports.2138.1886.reports5b58335f518d30.27098276",
+        "status": "Completed",
+        "download_options": {
+            "screen": [],
+            "is_temporary": true,
+            "self_destruct": false,
+            "send_email": false
+        },
+        "histories": [
+            {
+                "id": null,
+                "cid": 2138,
+                "report_schedule_type_id": 1,
+                "report_schedule_id": null,
+                "report_id": 1220958,
+                "report_version_id": 740409,
+                "report_filter_id": null,
+                "report_new_instance_id": null,
+                "report_group_id": null,
+                "report_new_group_id": null,
+                "name": "Failed Recurring Payments - 07-25-2018",
+                "correlation_id": "reports.2138.1886.reports5b58335f518d30.27098276",
+                "status": "Completed",
+                "errors": null,
+                "filters": {
+                    "report_filter": {
+                        "property_group_ids": [
+                            "590010",
+                            "502599"
+                        ],
+                        "ps_product_ids": "4",
+                        "period": {
+                            "allow_future_periods": "1",
+                            "show_retained_earnings": "",
+                            "ignore_post_month_validation": "",
+                            "period_type": "daterange",
+                            "daterange-start": "01/01/2018",
+                            "daterange-end": "07/31/2018"
+                        },
+                        "failure_reason": "all"
+                    }
+                },
+                "download_options": {
+                    "screen": [],
+                    "is_temporary": true,
+                    "self_destruct": false,
+                    "send_email": false
+                },
+                "queued_datetime": "7/25/2018 2:22 am MDT",
+                "started_datetime": "2018-07-25T02:22:55-06:00",
+                "completed_datetime": "2018-07-25T02:22:55-06:00",
+                "recipients": {},
+                "created_by": null,
+                "created_on": "2018-07-25T02:22:55-06:00",
+                "title": "Failed Recurring Payments",
+                "major": 1,
+                "minor": 0,
+                "url": "?module=reportsxxx&name=failed_recurring_payments",
+                "output_type": "screen",
+                "created": "7/25/2018 2:22 am MDT",
+                "queued": "0:00:00",
+                "processing": "0:00:00",
+                "filter_descriptions": {
+                    "property_group_ids": {
+                        "label": "Property Groups",
+                        "submitted_value": "Varsha''s Military, 14th North Avenue"
+                    },
+                    "period": {
+                        "label": "Period",
+                        "submitted_value": "01/01/2018 - 07/31/2018"
+                    },
+                    "failure_reason": {
+                        "label": "Failure Reason",
+                        "submitted_value": "All"
+                    }
+                }
+            }
+        ]
+    },
+    "description": "Completed",
+    "title": "Failed Recurring Payments",
+    "auto_hide_after": null,
+    "callback_function": "psi.patterns.loadLargeDialog( { strUrl:\"/?module=reportsxxx&correlation_id=reports.2138.1886.reports5b58335f518d30.27098276\" } )"
+}
+' tags[text[]]:'{QUEUED_ALERT}' sent_on[timestamp with time zone]:null read_on[timestamp with time zone]:null expires_on[timestamp with time zone]:'07/26/2018 02:22:55 MDT' snooze_until[timestamp with time zone]:null created_by[integer]:1886 created_on[timestamp with time zone]:'07/25/2018 02:22:55.766234 MDT'
