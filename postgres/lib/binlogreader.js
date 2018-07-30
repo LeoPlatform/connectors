@@ -61,7 +61,6 @@ module.exports = {
 		let startLsn;
 		let requestedWalSegmentAlreadyRemoved = false;
 		let walCheckpointHeartBeatTimeoutId = null;
-
 		var retry = backoff.fibonacci({
 			randomisationFactor: 0,
 			initialDelay: 1000,
@@ -80,6 +79,8 @@ module.exports = {
 
 		let count = 0;
 		let replicationClient;
+
+		let maxDate = null;
 
 		copyDataThrough = ls.through((msg, done) => {
 			let lsn = {
@@ -109,6 +110,14 @@ module.exports = {
 					done(err);
 				}
 
+
+				if (log.time) {
+					let d = new Date(log.time);
+					maxDate = Math.max(d.valueOf(), maxDate);
+				}
+
+
+
 				// console.error("Every LSN Received", lsn.string);
 				// console.error("Every Last Received LSN", lastRecievedLSN);
 				// console.log(log);
@@ -128,7 +137,9 @@ module.exports = {
 					id: ID,
 					event: opts.event,
 					payload: log,
-					correlation_id: c
+					correlation_id: c,
+					event_source_timestamp: maxDate,
+					timestamp: Date.now()
 				});
 			} else if (msg.chunk[0] == 0x6b) { // Primary keepalive message
 				let strLastLsn = (lastLsn.upper.toString(16).toUpperCase()) + '/' + (lastLsn.lower.toString(16).toUpperCase());
@@ -227,8 +238,8 @@ module.exports = {
 					}
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
-						console.log(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-xids" '0', "skip-empty-xacts" '1')`);
-						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-xids" '0', "skip-empty-xacts" '1')`, (err, result) => {
+						console.log(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', include-xids" '0', "skip-empty-xacts" '1')`);
+						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '0', "skip-empty-xacts" '1')`, (err, result) => {
 							if (err) {
 								if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
 								if (err.message === "Connection terminated by user") {
