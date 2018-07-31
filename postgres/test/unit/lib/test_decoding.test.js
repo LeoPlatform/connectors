@@ -7,6 +7,13 @@ const msg04 = require('./problemMsg04');
 const msg05 = require('./problemMsg05');
 const msg06 = require('./problemMsg06');
 const msg07 = require('./problemMsg07');
+const msg08 = require('./problemMsg08');
+const msg09 = require('./problemMsg09');
+const msg10 = require('./problemMsg10');
+const msg11 = require('./problemMsg11');
+const msg12 = require('./problemMsg12');
+const msg13 = require('./problemMsg13');
+const msg14 = require('./problemMsg14');
 const testDecoding = require('../../../lib/test_decoding');
 
 describe("test_decoding", () => {
@@ -109,6 +116,55 @@ describe("test_decoding", () => {
 	it("problematic message 07", () => {
 		msg07.chunk = Buffer.from(msg07.chunk);
 		const utf8str = msg07.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 08", () => {
+		msg08.chunk = Buffer.from(msg08.chunk);
+		const utf8str = msg08.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 09", () => {
+		msg09.chunk = Buffer.from(msg09.chunk);
+		const utf8str = msg09.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 10", () => {
+		msg10.chunk = Buffer.from(msg10.chunk);
+		const utf8str = msg10.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 11", () => {
+		msg11.chunk = Buffer.from(msg11.chunk);
+		const utf8str = msg11.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 12", () => {
+		msg12.chunk = Buffer.from(msg12.chunk);
+		const utf8str = msg12.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 13", () => {
+		msg13.chunk = Buffer.from(msg13.chunk);
+		const utf8str = msg13.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 14", () => {
+		msg14.chunk = Buffer.from(msg14.chunk);
+		const utf8str = msg14.chunk.slice(25).toString('utf8');
 		// console.log("TO STRING", utf8str);
 		const results = testDecoding.parse(utf8str);
 		assert.isObject(results);
