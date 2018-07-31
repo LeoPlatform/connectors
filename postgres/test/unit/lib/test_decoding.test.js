@@ -6,6 +6,7 @@ const msg03 = require('./problemMsg03');
 const msg04 = require('./problemMsg04');
 const msg05 = require('./problemMsg05');
 const msg06 = require('./problemMsg06');
+const msg07 = require('./problemMsg07');
 const testDecoding = require('../../../lib/test_decoding');
 
 describe("test_decoding", () => {
@@ -101,6 +102,13 @@ describe("test_decoding", () => {
 	it("problematic message 06", () => {
 		msg06.chunk = Buffer.from(msg06.chunk);
 		const utf8str = msg06.chunk.slice(25).toString('utf8');
+		// console.log("TO STRING", utf8str);
+		const results = testDecoding.parse(utf8str);
+		assert.isObject(results);
+	});
+	it("problematic message 07", () => {
+		msg07.chunk = Buffer.from(msg07.chunk);
+		const utf8str = msg07.chunk.slice(25).toString('utf8');
 		// console.log("TO STRING", utf8str);
 		const results = testDecoding.parse(utf8str);
 		assert.isObject(results);
