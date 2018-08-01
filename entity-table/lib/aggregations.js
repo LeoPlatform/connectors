@@ -94,20 +94,22 @@ function myProcess(ns, e, reversal) {
     } else {
         let d = moment(e.aggregate.timestamp);
         e.aggregate.buckets.forEach((bucket) => {
-            if (bucket === "" || bucket === "alltime" || bucket === "all") {
+	        if (bucket.toLowerCase() in bucketAliases) {
+		        buckets.push({
+			        cat: bucket,
+			        range: d.format(bucketAliases[bucket.toLowerCase()])
+		        });
+	        } else if (bucket === "" || bucket === "alltime" || bucket === "all") {
                 buckets.push({
                     cat: "all",
                     range: ""
                 });
             } else {
-                if (bucket.toLowerCase() in bucketAliases) {
-                    bucket = bucketAliases[bucket.toLowerCase()];
-                }
-                buckets.push({
-                    cat: bucket,
-                    range: d.format(bucket)
-                });
-            }
+	        	buckets.push({
+			        cat: bucket,
+			        range: ''
+		        });
+	        }
         });
     }
     buckets.forEach((bucket) => {
