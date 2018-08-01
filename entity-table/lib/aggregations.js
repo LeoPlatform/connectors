@@ -9,6 +9,8 @@ let aggregations = {};
 
 let bucketAliases = {
     'alltime': '',
+    'minutely': 'YYYY-MM-DD HH:mm',
+    'hourly': 'YYYY-MM HH',
     'monthly': 'YYYY-MM',
     'daily': 'YYYY-MM-DD',
     'weekly': 'YYYY-W',
