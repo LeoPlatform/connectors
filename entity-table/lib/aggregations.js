@@ -236,27 +236,55 @@ module.exports = {
                 });
             }, {}, {records: 1000});
     },
+	/**
+     * Get current value from aggregate data
+     * If no key is passed, returns entire current object.
+	 * @param obj (aggregate data object)
+	 * @param key (name of child object you want to look in)
+	 * @returns {*|{}}
+	 */
 	getCurrent: function(obj, key) {
     	if (key) {
-		    return obj.d[key] && obj.d[key].v || obj.d[key] && obj.d[key].val || obj.d[key] && obj.d[key].values || {};
+		    return obj.d[key] && obj.d[key].v || {};
         }
 
         return obj.d;
     },
-    getCurrentMeta: function(obj, key) {
+	/**
+     * Get meta data from aggregate data.
+     * If no key is passed, returns entire current object.
+	 * @param obj
+	 * @param key
+	 * @returns {{}}
+	 */
+	getCurrentMeta: function(obj, key) {
         if (key) {
             return obj.d[key] || {};
         }
 
         return obj.d;
     },
+	/**
+	 * Get previous value from aggregate data
+	 * If no key is passed, returns entire previous object.
+	 * @param obj (aggregate data object)
+	 * @param key (name of child object you want to look in)
+	 * @returns {*|{}}
+	 */
     getPrevious: function(obj, key) {
 	    if (key) {
-		    return obj.p[key] && obj.p[key].v || obj.p[key] && obj.p[key].val || obj.p[key] && obj.p[key].values || {};
+		    return obj.p[key] && obj.p[key].v || {};
 	    }
 
         return obj.p;
     },
+	/**
+	 * Get meta data from aggregate data.
+	 * If no key is passed, returns entire previous object.
+	 * @param obj
+	 * @param key
+	 * @returns {{}}
+	 */
     getPreviousMeta: function(obj, key) {
 	    if (key) {
 		    return obj.p[key] || {};
