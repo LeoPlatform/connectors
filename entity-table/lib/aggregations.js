@@ -8,262 +8,264 @@ const merge = require("lodash.merge");
 let aggregations = {};
 
 let bucketAliases = {
-    'alltime': '',
-    'minutely': 'YYYY-MM-DD HH:mm',
-    'hourly': 'YYYY-MM-DD HH',
-    'monthly': 'YYYY-MM',
-    'daily': 'YYYY-MM-DD',
-    'weekly': 'YYYY-W',
-    'quarterly': 'YYYY-Q'
+	'alltime': '',
+	'minutely': 'YYYY-MM-DD HH:mm',
+	'hourly': 'YYYY-MM-DD HH',
+	'monthly': 'YYYY-MM',
+	'daily': 'YYYY-MM-DD',
+	'weekly': 'YYYY-W',
+	'quarterly': 'YYYY-Q'
 };
 let defaultTypes = {
-    'sum': {
-        v: 0
-    },
-    'min': {
-        v: null
-    },
-    'max': {
-        v: null
-    }
+	'sum': {
+		v: 0
+	},
+	'min': {
+		v: null
+	},
+	'max': {
+		v: null
+	}
 };
 
 function processUpdate(newData, existing, reversal) {
-    for (let key in newData) {
-        let func = newData[key];
-        if (func._type) {
-            func = merge({}, defaultTypes[func._type], func);
-            if (!reversal) {
-                if (!(key in existing)) {
-                    existing[key] = func;
-                } else if ("_type" in func) {
-                    if (func._type === "sum") {
-                        existing[key].v += func.v;
-                    } else if (func._type === "min") {
-                        if (func.v < existing[key].v) {
-                            existing[key].v = func.v;
-                        }
-                    } else if (func._type === "max") {
-                        if (func.v > existing[key].v) {
-                            existing[key].v = func.v;
-                        }
-                    } else if (func._type === "last") {
-                        if (func.date > existing[key].date) {
-                            existing[key] = func;
-                        }
-                    } else if (func._type === "first") {
-                        if (func.date < existing[key].date) {
-                            existing[key] = func;
-                        }
-                    } else if (func._type === "changes") {
-                        if (existing[key].prev !== func.prev) {
-                            existing[key].v++;
-                        }
-                        existing[key].prev = func.prev;
-                    }
-                }
-            } else { //reversal
-                if (!(key in existing) && ["sum"].indexOf(func._type) !== -1) {
-                    existing[key] = {
-                        _type: func._type,
-                        v: 0
-                    };
-                }
-                if (func._type === "sum") {
-                    existing[key].v -= func.v;
-                }
-            }
-        } else {
-            existing[key] = existing[key] || {};
-            processUpdate(func, existing[key], reversal);
-        }
-    }
+	for (let key in newData) {
+		let func = newData[key];
+		if (func._type) {
+			func = merge({}, defaultTypes[func._type], func);
+			if (!reversal) {
+				if (!(key in existing)) {
+					existing[key] = func;
+				} else if ("_type" in func) {
+					if (func._type === "sum") {
+						existing[key].v += func.v;
+					} else if (func._type === "min") {
+						if (func.v < existing[key].v) {
+							existing[key].v = func.v;
+						}
+					} else if (func._type === "max") {
+						if (func.v > existing[key].v) {
+							existing[key].v = func.v;
+						}
+					} else if (func._type === "last") {
+						if (func.date > existing[key].date) {
+							existing[key] = func;
+						}
+					} else if (func._type === "first") {
+						if (func.date < existing[key].date) {
+							existing[key] = func;
+						}
+					} else if (func._type === "changes") {
+						if (existing[key].prev !== func.prev) {
+							existing[key].v++;
+						}
+						existing[key].prev = func.prev;
+					}
+				}
+			} else { //reversal
+				if (!(key in existing) && ["sum"].indexOf(func._type) !== -1) {
+					existing[key] = {
+						_type: func._type,
+						v: 0
+					};
+				}
+				if (func._type === "sum") {
+					existing[key].v -= func.v;
+				}
+			}
+		} else {
+			existing[key] = existing[key] || {};
+			processUpdate(func, existing[key], reversal);
+		}
+	}
 }
 
 function myProcess(ns, e, reversal) {
-    let id = e.entity + "-" + e.id;
-    if (ns) {
-        ns = "-" + ns;
-    }
-    let buckets = [];
-    if (!e.aggregate) {
-        buckets = [{
-            cat: "all",
-            range: ""
-        }];
-    } else {
-        let d = moment(e.aggregate.timestamp);
-        e.aggregate.buckets.forEach((bucket) => {
-	        let bucketObj = {
-		        cat: bucket,
-		        range: ''
-	        };
+	let id = e.entity + "-" + e.id;
+	if (ns) {
+		ns = "-" + ns;
+	}
+	let buckets = [];
+	if (!e.aggregate) {
+		buckets = [{
+			cat: "all",
+			range: ""
+		}];
+	} else {
+		let d = moment(e.aggregate.timestamp);
+		e.aggregate.buckets.forEach((bucket) => {
+			let bucketObj = {
+				cat: bucket,
+				range: ''
+			};
+			let bucketLower = bucket.toLowerCase();
 
-	        if (bucket.toLowerCase() in bucketAliases) {
-	        	bucketObj.range = d.format(bucketAliases[bucket.toLowerCase()]);
-	        } else if (bucket === "" || bucket === "alltime" || bucket === "all") {
-	        	bucketObj.cat = 'all';
-            } else {
-	        	for (let i in bucketAliases) {
-	        		if (bucket.toLowerCase() === bucketAliases[i].toLowerCase()) {
+			if (bucketLower in bucketAliases) {
+				bucketObj.range = d.format(bucketAliases[bucketLower]);
+			} else if (bucket === "" || bucket === "alltime" || bucket === "all") {
+				bucketObj.cat = 'all';
+			} else {
+				for (let i in bucketAliases) {
+					// do not change case, since time formats are case sensitive
+					if (bucket === bucketAliases[i]) {
 						bucketObj.cat = i;
 						bucketObj.range = d.format(i);
 						break;
-			        }
-		        }
-	        }
+					}
+				}
+			}
 
-	        buckets.push(bucketObj);
-        });
-    }
-    buckets.forEach((bucket) => {
-        let data = merge({}, e.data);
-        let newId = id + "-" + bucket.cat;
-        let range = bucket.range + ns;
-        if (bucket.cat === "all") {
-            newId = id;
-            range = "all" + ns;
-        }
+			buckets.push(bucketObj);
+		});
+	}
+	buckets.forEach((bucket) => {
+		let data = merge({}, e.data);
+		let newId = id + "-" + bucket.cat;
+		let range = bucket.range + ns;
+		if (bucket.cat === "all") {
+			newId = id;
+			range = "all" + ns;
+		}
 
-        let fullHash = newId + range;
-        if (!(fullHash in aggregations)) {
-            aggregations[fullHash] = {
-                id: newId,
-                bucket: range,
-                d: {}
-            };
-        }
-        processUpdate(data, aggregations[fullHash].d, reversal);
-    });
+		let fullHash = newId + range;
+		if (!(fullHash in aggregations)) {
+			aggregations[fullHash] = {
+				id: newId,
+				bucket: range,
+				d: {}
+			};
+		}
+		processUpdate(data, aggregations[fullHash].d, reversal);
+	});
 }
 
 
 module.exports = {
-    sum: (v) => ({
-        _type: 'sum',
-        v: v
-    }),
-    min: (v) => ({
-        _type: 'min',
-        v: v
-    }),
-    max: (v) => ({
-        _type: 'max',
-        v: v
-    }),
-    countChanges: (v) => ({
-        _type: 'changes',
-        prev: v,
-        v: 0
-    }),
-    last: (date, v) => ({
-        _type: 'last',
-        date: date,
-        v: v
-    }),
-    first: (date, v) => ({
-        _type: 'first',
-        date: date,
-        v: v
-    }),
-    hash: (key, func) => {
-        let hash = {};
-        this.forEach((e) => {
-            hash[e[key]] = func(e);
-        });
-        return hash;
-    },
-    aggregator: function (tableName, ns, t) {
-        if (!t) {
-            t = ns;
-            ns = "";
-        }
+	sum: (v) => ({
+		_type: 'sum',
+		v: v
+	}),
+	min: (v) => ({
+		_type: 'min',
+		v: v
+	}),
+	max: (v) => ({
+		_type: 'max',
+		v: v
+	}),
+	countChanges: (v) => ({
+		_type: 'changes',
+		prev: v,
+		v: 0
+	}),
+	last: (date, v) => ({
+		_type: 'last',
+		date: date,
+		v: v
+	}),
+	first: (date, v) => ({
+		_type: 'first',
+		date: date,
+		v: v
+	}),
+	hash: (key, func) => {
+		let hash = {};
+		this.forEach((e) => {
+			hash[e[key]] = func(e);
+		});
+		return hash;
+	},
+	aggregator: function (tableName, ns, t) {
+		if (!t) {
+			t = ns;
+			ns = "";
+		}
 
-        let start = null;
-        aggregations = {};
-        return ls.bufferBackoff(function each(obj, done) {
-                if (!start) start = obj.eid;
+		let start = null;
+		aggregations = {};
+		return ls.bufferBackoff(function each(obj, done) {
+				if (!start) start = obj.eid;
 
-                obj = obj.payload;
-                if (obj.old) {
-                    t(obj.old).forEach((e) => {
-                        myProcess(ns, e, true);
-                    });
-                }
-                if (obj.new) {
-                    t(obj.new).forEach((e) => {
-                        myProcess(ns, e, false);
-                    });
-                }
-                done();
-            },
-            function emit(records, done) {
-                //Fetch Ids
-                let ids = Object.keys(aggregations)
-                    .map(hash => ({
-                        id: aggregations[hash].id,
-                        bucket: aggregations[hash].bucket
-                    }));
+				obj = obj.payload;
+				if (obj.old) {
+					t(obj.old).forEach((e) => {
+						myProcess(ns, e, true);
+					});
+				}
+				if (obj.new) {
+					t(obj.new).forEach((e) => {
+						myProcess(ns, e, false);
+					});
+				}
+				done();
+			},
+			function emit(records, done) {
+				//Fetch Ids
+				let ids = Object.keys(aggregations)
+				.map(hash => ({
+					id: aggregations[hash].id,
+					bucket: aggregations[hash].bucket
+				}));
 
-                let stream = leo.streams.toDynamoDB(tableName, {records: 500});
-                let seenHashes = {};
+				let stream = leo.streams.toDynamoDB(tableName, {records: 500});
+				let seenHashes = {};
 
-                dynamodb.batchGetTable(tableName, ids, (err, result) => {
-                    result.forEach(record => {
-                        let fullHash = record.id + record.bucket;
-                        seenHashes[fullHash] = true;
-                        if (start === record.start) {
-                            record.d = record.p || {};
-                        }
-                        record.p = extend(true, {}, record.d);
-                        record.start = start;
+				dynamodb.batchGetTable(tableName, ids, (err, result) => {
+					result.forEach(record => {
+						let fullHash = record.id + record.bucket;
+						seenHashes[fullHash] = true;
+						if (start === record.start) {
+							record.d = record.p || {};
+						}
+						record.p = extend(true, {}, record.d);
+						record.start = start;
 
-                        processUpdate(aggregations[fullHash].d, record.d, false);
+						processUpdate(aggregations[fullHash].d, record.d, false);
 
-                        stream.write(record);
-                    });
+						stream.write(record);
+					});
 
-                    Object.keys(aggregations)
-                        .filter(hash => !(hash in seenHashes))
-                        .map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
-                        .forEach(a => stream.write(a));
+					Object.keys(aggregations)
+					.filter(hash => !(hash in seenHashes))
+					.map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
+					.forEach(a => stream.write(a));
 
-                    stream.end((err) => {
-                        start = null;
-                        aggregations = {};
-                        done(err, []);
-                    });
-                });
-            }, {}, {records: 1000});
-    },
+					stream.end((err) => {
+						start = null;
+						aggregations = {};
+						done(err, []);
+					});
+				});
+			}, {}, {records: 1000});
+	},
 	/**
-     * Get current value from aggregate data
-     * If no key is passed, returns entire current object.
+	 * Get current value from aggregate data
+	 * If no key is passed, returns entire current object.
 	 * @param obj (aggregate data object)
 	 * @param key (name of child object you want to look in)
 	 * @returns {*|{}}
 	 */
-	getCurrent: function(obj, key) {
-    	if (key) {
-		    return obj.d[key] && obj.d[key].v || {};
-        }
+	getCurrent: function (obj, key) {
+		if (key) {
+			return obj.d[key] && obj.d[key].v || {};
+		}
 
-        return obj.d;
-    },
+		return obj.d;
+	},
 	/**
-     * Get meta data from aggregate data.
-     * If no key is passed, returns entire current object.
+	 * Get meta data from aggregate data.
+	 * If no key is passed, returns entire current object.
 	 * @param obj
 	 * @param key
 	 * @returns {{}}
 	 */
-	getCurrentMeta: function(obj, key) {
-        if (key) {
-            return obj.d[key] || {};
-        }
+	getCurrentMeta: function (obj, key) {
+		if (key) {
+			return obj.d[key] || {};
+		}
 
-        return obj.d;
-    },
+		return obj.d;
+	},
 	/**
 	 * Get previous value from aggregate data
 	 * If no key is passed, returns entire previous object.
@@ -271,13 +273,13 @@ module.exports = {
 	 * @param key (name of child object you want to look in)
 	 * @returns {*|{}}
 	 */
-    getPrevious: function(obj, key) {
-	    if (key) {
-		    return obj.p[key] && obj.p[key].v || {};
-	    }
+	getPrevious: function (obj, key) {
+		if (key) {
+			return obj.p[key] && obj.p[key].v || {};
+		}
 
-        return obj.p;
-    },
+		return obj.p;
+	},
 	/**
 	 * Get meta data from aggregate data.
 	 * If no key is passed, returns entire previous object.
@@ -285,11 +287,11 @@ module.exports = {
 	 * @param key
 	 * @returns {{}}
 	 */
-    getPreviousMeta: function(obj, key) {
-	    if (key) {
-		    return obj.p[key] || {};
-	    }
+	getPreviousMeta: function (obj, key) {
+		if (key) {
+			return obj.p[key] || {};
+		}
 
-	    return obj.p;
-    }
+		return obj.p;
+	}
 };
