@@ -10,7 +10,7 @@ let aggregations = {};
 let bucketAliases = {
     'alltime': '',
     'minutely': 'YYYY-MM-DD HH:mm',
-    'hourly': 'YYYY-MM HH',
+    'hourly': 'YYYY-MM-DD HH',
     'monthly': 'YYYY-MM',
     'daily': 'YYYY-MM-DD',
     'weekly': 'YYYY-W',
@@ -18,13 +18,13 @@ let bucketAliases = {
 };
 let defaultTypes = {
     'sum': {
-        val: 0
+        v: 0
     },
     'min': {
-        val: null
+        v: null
     },
     'max': {
-        val: null
+        v: null
     }
 };
 
@@ -38,14 +38,14 @@ function processUpdate(newData, existing, reversal) {
                     existing[key] = func;
                 } else if ("_type" in func) {
                     if (func._type === "sum") {
-                        existing[key].val += func.val;
+                        existing[key].v += func.v;
                     } else if (func._type === "min") {
-                        if (func.val < existing[key].val) {
-                            existing[key].val = func.val;
+                        if (func.v < existing[key].v) {
+                            existing[key].v = func.v;
                         }
                     } else if (func._type === "max") {
-                        if (func.val > existing[key].val) {
-                            existing[key].val = func.val;
+                        if (func.v > existing[key].v) {
+                            existing[key].v = func.v;
                         }
                     } else if (func._type === "last") {
                         if (func.date > existing[key].date) {
@@ -57,7 +57,7 @@ function processUpdate(newData, existing, reversal) {
                         }
                     } else if (func._type === "changes") {
                         if (existing[key].prev !== func.prev) {
-                            existing[key].val++;
+                            existing[key].v++;
                         }
                         existing[key].prev = func.prev;
                     }
@@ -66,11 +66,11 @@ function processUpdate(newData, existing, reversal) {
                 if (!(key in existing) && ["sum"].indexOf(func._type) !== -1) {
                     existing[key] = {
                         _type: func._type,
-                        val: 0
+                        v: 0
                     };
                 }
                 if (func._type === "sum") {
-                    existing[key].val -= func.val;
+                    existing[key].v -= func.v;
                 }
             }
         } else {
@@ -94,22 +94,26 @@ function myProcess(ns, e, reversal) {
     } else {
         let d = moment(e.aggregate.timestamp);
         e.aggregate.buckets.forEach((bucket) => {
+	        let bucketObj = {
+		        cat: bucket,
+		        range: ''
+	        };
+
 	        if (bucket.toLowerCase() in bucketAliases) {
-		        buckets.push({
-			        cat: bucket,
-			        range: d.format(bucketAliases[bucket.toLowerCase()])
-		        });
+	        	bucketObj.range = d.format(bucketAliases[bucket.toLowerCase()]);
 	        } else if (bucket === "" || bucket === "alltime" || bucket === "all") {
-                buckets.push({
-                    cat: "all",
-                    range: ""
-                });
+	        	bucketObj.cat = 'all';
             } else {
-	        	buckets.push({
-			        cat: bucket,
-			        range: ''
-		        });
+	        	for (let i in bucketAliases) {
+	        		if (bucket.toLowerCase() === bucketAliases[i].toLowerCase()) {
+						bucketObj.cat = i;
+						bucketObj.range = d.format(i);
+						break;
+			        }
+		        }
 	        }
+
+	        buckets.push(bucketObj);
         });
     }
     buckets.forEach((bucket) => {
@@ -135,32 +139,32 @@ function myProcess(ns, e, reversal) {
 
 
 module.exports = {
-    sum: (val) => ({
+    sum: (v) => ({
         _type: 'sum',
-        val: val
+        v: v
     }),
-    min: (val) => ({
+    min: (v) => ({
         _type: 'min',
-        val: val
+        v: v
     }),
-    max: (val) => ({
+    max: (v) => ({
         _type: 'max',
-        val: val
+        v: v
     }),
-    countChanges: (val) => ({
+    countChanges: (v) => ({
         _type: 'changes',
-        prev: val,
-        val: 0
+        prev: v,
+        v: 0
     }),
-    last: (date, values) => ({
+    last: (date, v) => ({
         _type: 'last',
         date: date,
-        values: values
+        v: v
     }),
-    first: (date, values) => ({
+    first: (date, v) => ({
         _type: 'first',
         date: date,
-        values: values
+        v: v
     }),
     hash: (key, func) => {
         let hash = {};
@@ -231,5 +235,33 @@ module.exports = {
                     });
                 });
             }, {}, {records: 1000});
+    },
+	getCurrent: function(obj, key) {
+    	if (key) {
+		    return obj.d[key] && obj.d[key].v || obj.d[key] && obj.d[key].val || obj.d[key] && obj.d[key].values || {};
+        }
+
+        return obj.d;
+    },
+    getCurrentMeta: function(obj, key) {
+        if (key) {
+            return obj.d[key] || {};
+        }
+
+        return obj.d;
+    },
+    getPrevious: function(obj, key) {
+	    if (key) {
+		    return obj.p[key] && obj.p[key].v || obj.p[key] && obj.p[key].val || obj.p[key] && obj.p[key].values || {};
+	    }
+
+        return obj.p;
+    },
+    getPreviousMeta: function(obj, key) {
+	    if (key) {
+		    return obj.p[key] || {};
+	    }
+
+	    return obj.p;
     }
 };
