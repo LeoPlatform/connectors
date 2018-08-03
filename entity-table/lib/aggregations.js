@@ -4,6 +4,8 @@ const moment = require("moment");
 const extend = require("extend");
 const dynamodb = leo.aws.dynamodb;
 const merge = require("lodash.merge");
+const leoaws = require('leo-aws');
+const logger = require('leo-logger');
 
 let aggregations = {};
 
@@ -293,5 +295,89 @@ module.exports = {
 		}
 
 		return obj.p;
+	},
+	/**
+	 * query wrapper for the aggregations table
+	 * @param table
+	 * @param items
+	 * @param opts
+	 * @returns {Promise<any[]>}
+	 */
+	query: async function (table, items, opts) {
+		opts = merge({
+			start: null,
+			end: null,
+			offset: null,
+			limit: null
+		}, opts);
+
+		let defaultQuery = {
+			TableName: table,
+			KeyConditionExpression: '#id = :id',
+			ExpressionAttributeNames: {
+				"#id": "id"
+			},
+			ExpressionAttributeValues: {
+				":id": ''
+			},
+		};
+		let configuration = {};
+		if (opts.limit) {
+			defaultQuery.Limit = opts.limit;
+		}
+
+		let tasks = [];
+
+		if (Array.isArray(items)) {
+			items.forEach(item => {
+				// build ID from items
+				let id = [];
+				if (typeof item === 'string') {
+					id.push(item);
+				} else {
+					if (item.prefix) {
+						id.push(item.prefix);
+					}
+					if (item.id) {
+						id.push(item.id);
+					}
+					if (opts.frequency) {
+						id.push(opts.frequency);
+					}
+				}
+
+				// clone defaultQuery so we can reuse the object if we have selected multiple items
+				let query = Object.assign({}, defaultQuery);
+				query.ExpressionAttributeValues[':id'] = id.join('-');
+
+				// do we have a start/end time?
+				if (opts.start && opts.end) {
+					query.KeyConditionExpression += ' AND #bucket BETWEEN :start AND :end';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':start'] = opts.start;
+					query.ExpressionAttributeValues[':end'] = opts.end;
+				} else if (opts.start) {
+					query.KeyConditionExpression += ' AND #bucket >= :bucket';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':bucket'] = opts.start;
+				} else if (opts.end) {
+					query.KeyConditionExpression += ' AND #bucket <= :bucket';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':bucket'] = opts.end;
+				}
+
+				tasks.push(new Promise(resolve => {
+					logger.log('DynamoDB Query', query);
+
+					leoaws.dynamodb.smartQuery(query, configuration).then(result => {
+						resolve(result);
+					}).catch(err => {
+						throw new Error(err);
+					});
+				}));
+			});
+		}
+
+		return await Promise.all(tasks);
 	}
 };
