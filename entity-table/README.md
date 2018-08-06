@@ -187,6 +187,77 @@ const transformChanges = payload => ({
     }   
 });
 ```
+package.json
+```json
+{
+    "name": "SampleEntityChanges",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "directories": {
+        "test": "test"
+    },
+    "scripts": {
+        "test": "leo-cli test ."
+    },
+    "config": {
+        "leo": {
+            "type": "cron",
+            "memory": 128,
+            "timeout": 300,
+            "role": "LeoEntitiesChangesRole",
+            "env": {
+                "aggregationTableName": {
+                    "Fn::Sub": "${Aggregations}"
+                }
+            },
+            "cron": {
+                "settings": {},
+                "triggers": [
+                    "enriched_numbers_changes"
+                ]
+            }
+        }
+    }
+}
+```
 
+## Step 4: Process old/new aggregate data
+Create a bot to process old/new data. It's just a single command with configuration parameters:
+```javascript
+exports.handler = require("leo-connector-entity-table").tableOldNewProcessor({
+    defaultQueue: "sample_aggregation_changes",
+    resourcePrefix: "sample",
+    eventSuffix: "_aggregations",
+    botSuffix: "_aggregation_changes"
+});
+```
+package.json
+```json
+{
+  "name": "SampleEntityAggregations",
+  "version": "1.0.0",
+  "description": "Reads from DynamoDB entity table and writes to a queue with entity changes",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "leo-cli test . "
+  },
+  "config": {
+    "leo": {
+      "type": "bot",
+      "memory": 256,
+      "timeout": 30,
+      "role": "LeoEntitiesChangesRole",
+      "env": {},
+      "cron": {
+        "settings": {}
+      }
+    }
+  }
+}
+```
 ## Support
 Want to hire an expert, or need technical support? Reach out to the Leo team: https://leoinsights.com/contact
