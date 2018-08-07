@@ -21,7 +21,8 @@ module.exports = function(config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 
 	client.importFact = function(stream, table, ids, callback) {
-		const stagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
+		const schemaTbl = `staging_${table}`;
+		const schemaStagingTbl = `${columnConfig.stageSchema}.${schemaTbl}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(ids)) {
 			ids = [ids];
@@ -29,17 +30,17 @@ module.exports = function(config, columnConfig) {
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
-		schema[stagingTbl] = schema[publicTbl];
+		schema[schemaStagingTbl] = schema[publicTbl];
 
 		let tasks = [];
 		// tasks.push(done => client.query(`alter table ${table} add primary key (${ids.join(',')})`, done));
 
-		tasks.push(done => client.query(`drop table if exists ${stagingTbl}`, done));
-		tasks.push(done => client.query(`drop table if exists ${stagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${stagingTbl} (like ${publicTbl})`, done));
-		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${stagingTbl} (${ids.join(', ')})`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(stagingTbl), done));
-		tasks.push(done => client.query(`analyze ${stagingTbl}`, done));
+		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
+		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
+		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${publicTbl})`, done));
+		tasks.push(done => client.query(`create index ${schemaTbl}_id on ${schemaStagingTbl} (${ids.join(', ')})`, done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
 
 		client.describeTable(table, (err, result) => {
 			let columns = result.filter(f => !f.column_name.match(/^_/)).map(f => `"${f.column_name}"`);
@@ -55,7 +56,7 @@ module.exports = function(config, columnConfig) {
 					//The following code relies on the fact that now() will return the same time during all transaction events
 					tasks.push(done => client.query(`Begin Transaction`, done));
 					tasks.push(done => {
-						client.query(`select 1 as total from ${table} limit 1`, (err, results) => {
+						client.query(`select 1 as total from ${publicTbl} limit 1`, (err, results) => {
 							if (err) {
 								return done(err);
 							}
@@ -66,7 +67,7 @@ module.exports = function(config, columnConfig) {
 					tasks.push(done => {
 						client.query(`Update ${publicTbl} prev
 								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._auditdate} = ${dwClient.auditdate}
-								FROM ${stagingTbl} staging
+								FROM ${schemaStagingTbl} staging
 								where ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
 					});
@@ -76,12 +77,12 @@ module.exports = function(config, columnConfig) {
 					tasks.push(done => {
 						client.query(`INSERT INTO ${publicTbl} (${columns.join(',')},${columnConfig._auditdate})
 								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}
-								FROM ${stagingTbl} staging
+								FROM ${schemaStagingTbl} staging
 								LEFT JOIN ${publicTbl} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
 							`, done);
 					});
-					// tasks.push(done => client.query(`drop table staging_${table}`, done));
+					// tasks.push(done => client.query(`drop table ${stagingTbl}`, done));
 
 					async.series(tasks, err => {
 						if (!err) {
@@ -104,7 +105,8 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback) {
-		const stagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
+		const stagingTbl = `staging_${table}`;
+		const schemaStagingTbl = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const publicTbl = `public.${table}`;
 		if (!Array.isArray(nk)) {
 			nk = [nk];
@@ -115,16 +117,16 @@ module.exports = function(config, columnConfig) {
 		if (typeof schema[publicTbl] === 'undefined') {
 			throw new Error(`${publicTbl} not found in schema`);
 		}
-		schema[stagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
+		schema[schemaStagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
 
 		let tasks = [];
-		tasks.push(done => client.query(`drop table if exists ${stagingTbl}`, done));
-		tasks.push(done => client.query(`drop table if exists ${stagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${stagingTbl} (like ${publicTbl})`, done));
-		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${stagingTbl} (${nk.join(', ')})`, done));
-		tasks.push(done => client.query(`alter table ${stagingTbl} drop column ${sk}`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(stagingTbl), done));
-		tasks.push(done => client.query(`analyze ${stagingTbl}`, done));
+		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
+		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
+		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${publicTbl})`, done));
+		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${schemaStagingTbl} (${nk.join(', ')})`, done));
+		tasks.push(done => client.query(`alter table ${schemaStagingTbl} drop column ${sk}`, done));
+		tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
 
 		client.describeTable(table, (err, result) => {
 			client.connect().then(client => {
@@ -133,7 +135,7 @@ module.exports = function(config, columnConfig) {
 						return callback(err);
 					}
 
-					let scd0 = scds[0] || [];
+					// let scd0 = scds[0] || []; // Not Used
 					let scd2 = scds[2] || [];
 					let scd3 = scds[3] || [];
 					let scd6 = Object.keys(scds[6] || {});
@@ -175,11 +177,11 @@ module.exports = function(config, columnConfig) {
 					}
 
 					//let's figure out which SCDs needs to happen
-					client.query(`create table ${stagingTbl}_changes as 
+					client.query(`create table ${schemaStagingTbl}_changes as 
 				select ${nk.map(id=>`s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
-					FROM ${stagingTbl} s
-					LEFT JOIN ${table} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err, result) => {
+					FROM ${schemaStagingTbl} s
+					LEFT JOIN ${publicTbl} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
 						if (err) {
 							console.log(err);
 							process.exit();
@@ -187,9 +189,9 @@ module.exports = function(config, columnConfig) {
 						let tasks = [];
 						let rowId = null;
 						let totalRecords = 0;
-						tasks.push(done => client.query(`analyze staging_${table}_changes`, done));
+						tasks.push(done => client.query(`analyze ${schemaStagingTbl}_changes`, done));
 						tasks.push(done => {
-							client.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
+							client.query(`select max(${sk}) as maxid from ${publicTbl}`, (err, results) => {
 								if (err) {
 									return done(err);
 								}
@@ -207,8 +209,8 @@ module.exports = function(config, columnConfig) {
 							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 							client.query(`INSERT INTO ${publicTbl} (${fields.join(',')})
 								SELECT row_number() over () + ${rowId}, ${allColumns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-								FROM ${stagingTbl}_changes changes  
-								JOIN ${stagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+								FROM ${schemaStagingTbl}_changes changes  
+								JOIN ${schemaStagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
 								LEFT JOIN ${publicTbl} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
@@ -223,16 +225,16 @@ module.exports = function(config, columnConfig) {
 							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 							client.query(`update ${publicTbl} as prev
 										set  ${columns.join(', ')}
-										FROM ${stagingTbl}_changes changes
-										JOIN ${stagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+										FROM ${schemaStagingTbl}_changes changes
+										JOIN ${schemaStagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
 										LEFT JOIN ${publicTbl} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
 										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
 
-						tasks.push(done => client.query(`drop table ${stagingTbl}_changes`, done));
-						tasks.push(done => client.query(`drop table ${stagingTbl}`, done));
+						tasks.push(done => client.query(`drop table ${schemaStagingTbl}_changes`, done));
+						tasks.push(done => client.query(`drop table ${schemaStagingTbl}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								client.query(`commit`, e => {
@@ -315,7 +317,9 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.linkDimensions = function(table, links, nk, callback, tableStatus) {
-		client.describeTable(table, (err, result) => {
+		client.describeTable(table, (err) => {
+			if (err) return callback(err);
+
 			let tasks = [];
 			let sets = [];
 
@@ -616,12 +620,12 @@ module.exports = function(config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let stageTable = `${columnConfig.stageSchema}.staging_${table}`;
+		let schemaStagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
 		tasks.push((done) => {
-			client.query(`drop table if exists ${stageTable}`, done);
+			client.query(`drop table if exists ${schemaStagingTbl}`, done);
 		});
 		tasks.push((done) => {
-			client.query(`create /*temporary*/ table ${stageTable} (like ${tableName})`, done);
+			client.query(`create /*temporary*/ table ${schemaStagingTbl} (like ${tableName})`, done);
 		});
 		tasks.push((done) => {
 			let needs = {
@@ -645,7 +649,7 @@ module.exports = function(config, columnConfig) {
 				if (file.match(/\.manifest$/)) {
 					manifest = "MANIFEST";
 				}
-				client.query(`copy ${stageTable} (${f})
+				client.query(`copy ${schemaStagingTbl} (${f})
           from '${file}' ${manifest} ${opts.role?`credentials 'aws_iam_role=${opts.role}'`: ""}
 		  NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
 			} else {
@@ -654,25 +658,25 @@ module.exports = function(config, columnConfig) {
 		});
 		if (table.isDimension) {
 			tasks.push((done) => {
-				client.query(`delete from ${tableName} using ${stageTable} where ${stageTable}.${table.sk}=${tableName}.${table.sk}`, done);
+				client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${schemaStagingTbl}.${table.sk}=${tableName}.${table.sk}`, done);
 			});
 		} else {
 			tasks.push((done) => {
-				let ids = table.nks.map(nk => `${stageTable}.${nk}=${tableName}.${nk}`).join(' and ');
-				client.query(`delete from ${tableName} using ${stageTable} where ${ids}`, done);
+				let ids = table.nks.map(nk => `${schemaStagingTbl}.${nk}=${tableName}.${nk}`).join(' and ');
+				client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
 			});
 		}
 		tasks.push(function(done) {
-			client.query(`insert into ${tableName} select * from ${stageTable}`, done);
+			client.query(`insert into ${tableName} select * from ${schemaStagingTbl}`, done);
 		});
 		tasks.push(function(done) {
-			client.query(`select count(*) from ${stageTable}`, (err, result) => {
+			client.query(`select count(*) from ${schemaStagingTbl}`, (err, result) => {
 				loadCount = result && parseInt(result[0].count);
 				done(err);
 			});
 		});
 		tasks.push(function(done) {
-			client.query(`drop table if exists ${stageTable}`, done);
+			client.query(`drop table if exists ${schemaStagingTbl}`, done);
 		});
 		async.series(tasks, (err) => {
 			callback(err, loadCount);
