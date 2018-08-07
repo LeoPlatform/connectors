@@ -33,6 +33,7 @@ Quick Start Guide: https://github.com/LeoPlatform/Leo
 			* [Delete](#delete)
 			* [Sample](#sample)
 			* [Destroy](#destroy)
+ * [Creating a Domain Object transform bot](#create-a-domain-object-loader-bot)
  * [Support](#support)
 		
 
@@ -554,6 +555,93 @@ Destroy runs once on checksum completion. Use this if you need to shutdown a ses
 ```javascript
 destroy: function(data) {
     return Promise.resolve();
+}
+```
+
+# Create a Domain Object Loader bot
+##### Example code
+```javascript
+// include the required handlers
+const leo = require("leo-sdk");
+const helperFactory = require("leo-connector-common/botHelper");
+// config requires leo-sdk 2.x
+const config = require('leo-config');
+// use the connector for your database type:
+const connector = require('leo-connector-<dbtype>');
+
+// use this handler for leo-sdk 2.x
+exports.handler = require("leo-sdk/wrappers/cron.js")(async function(event, context, callback) {
+	
+// use this handler for leo-sdk 1.x	
+exports.handler = async function(event, context, callback) {
+	
+	// create the helper	
+    const helper = new helperFactory(event, context, leo);
+```
+    
+#### Build domain objects
+Example:
+```javascript
+    // build your domain object query
+    // ? will be replaced with ids. Example: "1, 2, 3, 4, 5"
+    let query = `SELECT your, select, statement, fields, go, here
+        FROM yourTableName
+        WHERE id IN (?)`;
+
+    helper.buildDomainObjects({
+        connection: config.db,
+        connector: connector,
+        table: 'yourTableName',
+        pk: 'id' // regular key example
+    })  
+    .mapDomainId('yourTableName', 'id')
+    .query(query)
+    .run(callback);
+```
+
+Composite key example:
+```javascript
+    // build your domain object query using composite keys
+    // ? will be replaced with values. Example: "values (1,2),(1,3),(2,4),(2,2)"
+    let query = `SELECT id, your, select, statement, fields, go, here
+        FROM (?) as jt (id1, id2)
+        JOIN yourTableName AS ytn ON ytn.id1 = jt.id1 AND ytn.id2 = jt.id2`;
+
+    helper.buildDomainObjects({
+        connection: config.db,
+        connector: connector,
+        table: 'yourTableName',
+        pk: ['id1', 'id2'] // composite key example
+    })  
+    .mapDomainId('yourTableName', ['LeadID1', 'LeadID2'])
+    .query(query)
+    .run(callback);
+```
+
+The query in the examples above is what builds the domain object. Here is an example of how to build a domain object and
+what the various parts of the query do to build it.
+##### Query example
+```javascript
+let query = `SELECT a.id
+		, a.name
+		, a.foo_id
+		, '' AS prefix_Foo
+		, b.id
+		, b.name
+	FROM tableOne a
+	JOIN tableTwo b ON (b.id = a.foo_id)	
+	WHERE a.id IN (?)`;
+```
+##### Output example
+```json
+{
+	"id": 1,
+	"name": "test",
+	"foo_id": 5,
+	"Foo": {
+		"id": 5,
+		"name": "bar"
+	}
 }
 ```
 

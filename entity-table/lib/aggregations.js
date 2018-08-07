@@ -4,12 +4,15 @@ const moment = require("moment");
 const extend = require("extend");
 const dynamodb = leo.aws.dynamodb;
 const merge = require("lodash.merge");
+const leoaws = require('leo-aws');
+const logger = require('leo-logger');
 
-let start = null;
-var aggregations = {};
+let aggregations = {};
 
 let bucketAliases = {
 	'alltime': '',
+	'minutely': 'YYYY-MM-DD HH:mm',
+	'hourly': 'YYYY-MM-DD HH',
 	'monthly': 'YYYY-MM',
 	'daily': 'YYYY-MM-DD',
 	'weekly': 'YYYY-W',
@@ -17,13 +20,13 @@ let bucketAliases = {
 };
 let defaultTypes = {
 	'sum': {
-		val: 0
+		v: 0
 	},
 	'min': {
-		val: null
+		v: null
 	},
 	'max': {
-		val: null
+		v: null
 	}
 };
 
@@ -36,27 +39,27 @@ function processUpdate(newData, existing, reversal) {
 				if (!(key in existing)) {
 					existing[key] = func;
 				} else if ("_type" in func) {
-					if (func._type == "sum") {
-						existing[key].val += func.val;
-					} else if (func._type == "min") {
-						if (func.val < existing[key].val) {
-							existing[key].val = func.val;
+					if (func._type === "sum") {
+						existing[key].v += func.v;
+					} else if (func._type === "min") {
+						if (func.v < existing[key].v) {
+							existing[key].v = func.v;
 						}
-					} else if (func._type == "max") {
-						if (func.val > existing[key].val) {
-							existing[key].val = func.val;
+					} else if (func._type === "max") {
+						if (func.v > existing[key].v) {
+							existing[key].v = func.v;
 						}
-					} else if (func._type == "last") {
+					} else if (func._type === "last") {
 						if (func.date > existing[key].date) {
 							existing[key] = func;
 						}
-					} else if (func._type == "first") {
+					} else if (func._type === "first") {
 						if (func.date < existing[key].date) {
 							existing[key] = func;
 						}
-					} else if (func._type == "changes") {
-						if (existing[key].prev != func.prev) {
-							existing[key].val++;
+					} else if (func._type === "changes") {
+						if (existing[key].prev !== func.prev) {
+							existing[key].v++;
 						}
 						existing[key].prev = func.prev;
 					}
@@ -65,11 +68,11 @@ function processUpdate(newData, existing, reversal) {
 				if (!(key in existing) && ["sum"].indexOf(func._type) !== -1) {
 					existing[key] = {
 						_type: func._type,
-						val: 0
+						v: 0
 					};
 				}
-				if (func._type == "sum") {
-					existing[key].val -= func.val;
+				if (func._type === "sum") {
+					existing[key].v -= func.v;
 				}
 			}
 		} else {
@@ -80,40 +83,48 @@ function processUpdate(newData, existing, reversal) {
 }
 
 function myProcess(ns, e, reversal) {
-	var id = e.entity + "-" + e.id;
+	let id = e.entity + "-" + e.id;
 	if (ns) {
 		ns = "-" + ns;
 	}
-	var buckets = [];
+	let buckets = [];
 	if (!e.aggregate) {
 		buckets = [{
 			cat: "all",
 			range: ""
 		}];
 	} else {
-		var d = moment(e.aggregate.timestamp);
+		let d = moment(e.aggregate.timestamp);
 		e.aggregate.buckets.forEach((bucket) => {
-			if (bucket == "" || bucket == "alltime" || bucket == "all") {
-				buckets.push({
-					cat: "all",
-					range: ""
-				});
+			let bucketObj = {
+				cat: bucket,
+				range: ''
+			};
+			let bucketLower = bucket.toLowerCase();
+
+			if (bucketLower in bucketAliases) {
+				bucketObj.range = d.format(bucketAliases[bucketLower]);
+			} else if (bucket === "" || bucket === "alltime" || bucket === "all") {
+				bucketObj.cat = 'all';
 			} else {
-				if (bucket.toLowerCase() in bucketAliases) {
-					bucket = bucketAliases[bucket.toLowerCase()];
+				for (let i in bucketAliases) {
+					// do not change case, since time formats are case sensitive
+					if (bucket === bucketAliases[i]) {
+						bucketObj.cat = i;
+						bucketObj.range = d.format(i);
+						break;
+					}
 				}
-				buckets.push({
-					cat: bucket,
-					range: d.format(bucket)
-				});
 			}
+
+			buckets.push(bucketObj);
 		});
 	}
 	buckets.forEach((bucket) => {
-		var data = merge({}, e.data);
-		var newId = id + "-" + bucket.cat;
+		let data = merge({}, e.data);
+		let newId = id + "-" + bucket.cat;
 		let range = bucket.range + ns;
-		if (bucket.cat == "all") {
+		if (bucket.cat === "all") {
 			newId = id;
 			range = "all" + ns;
 		}
@@ -131,52 +142,53 @@ function myProcess(ns, e, reversal) {
 }
 
 
-
 module.exports = {
-	sum: (val) => ({
+	sum: (v) => ({
 		_type: 'sum',
-		val: val
+		v: v
 	}),
-	min: (val) => ({
+	min: (v) => ({
 		_type: 'min',
-		val: val
+		v: v
 	}),
-	max: (val) => ({
+	max: (v) => ({
 		_type: 'max',
-		val: val
+		v: v
 	}),
-	countChanges: (val) => ({
+	countChanges: (v) => ({
 		_type: 'changes',
-		prev: val,
-		val: 0
+		prev: v,
+		v: 0
 	}),
-	last: (date, values) => ({
+	last: (date, v) => ({
 		_type: 'last',
 		date: date,
-		values: values
+		v: v
 	}),
-	first: (date, values) => ({
+	first: (date, v) => ({
 		_type: 'first',
 		date: date,
-		values: values
+		v: v
 	}),
 	hash: (key, func) => {
-		var hash = {};
+		let hash = {};
 		this.forEach((e) => {
 			hash[e[key]] = func(e);
 		});
 		return hash;
 	},
-	aggregator: function(ns, t) {
+	aggregator: function (tableName, ns, t) {
 		if (!t) {
 			t = ns;
 			ns = "";
 		}
+
+		let start = null;
+		aggregations = {};
 		return ls.bufferBackoff(function each(obj, done) {
 				if (!start) start = obj.eid;
 
 				obj = obj.payload;
-				let changes = {};
 				if (obj.old) {
 					t(obj.old).forEach((e) => {
 						myProcess(ns, e, true);
@@ -191,23 +203,20 @@ module.exports = {
 			},
 			function emit(records, done) {
 				//Fetch Ids
-				let ids = [];
-				for (var i in aggregations) {
-					ids.push({
-						id: aggregations[i].id,
-						bucket: aggregations[i].bucket
-					});
-				}
-				// console.log(ids);
-				let stream = leo.streams.toDynamoDB("aggregations");
+				let ids = Object.keys(aggregations)
+				.map(hash => ({
+					id: aggregations[hash].id,
+					bucket: aggregations[hash].bucket
+				}));
+
+				let stream = leo.streams.toDynamoDB(tableName, {records: 500});
 				let seenHashes = {};
 
-				dynamodb.batchGetTable("aggregations", ids, (err, result) => {
-					for (var i = 0; i < result.length; i++) {
-						let record = result[i];
+				dynamodb.batchGetTable(tableName, ids, (err, result) => {
+					result.forEach(record => {
 						let fullHash = record.id + record.bucket;
 						seenHashes[fullHash] = true;
-						if (start == record.start) {
+						if (start === record.start) {
 							record.d = record.p || {};
 						}
 						record.p = extend(true, {}, record.d);
@@ -216,20 +225,159 @@ module.exports = {
 						processUpdate(aggregations[fullHash].d, record.d, false);
 
 						stream.write(record);
-					}
-					for (var i in aggregations) {
-						if (!(i in seenHashes)) {
-							aggregations[i].p = {};
-							aggregations[i].start = start;
-							// console.log("---aggregations");
-							// console.log(aggregations[i]);
-							stream.write(aggregations[i]);
-						}
-					}
+					});
+
+					Object.keys(aggregations)
+					.filter(hash => !(hash in seenHashes))
+					.map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
+					.forEach(a => stream.write(a));
+
 					stream.end((err) => {
+						start = null;
+						aggregations = {};
 						done(err, []);
 					});
 				});
-			}, {}, {});
+			}, {}, {records: 1000});
+	},
+	/**
+	 * Get current value from aggregate data
+	 * If no key is passed, returns entire current object.
+	 * @param obj (aggregate data object)
+	 * @param key (name of child object you want to look in)
+	 * @returns {*|{}}
+	 */
+	getCurrent: function (obj, key) {
+		if (key) {
+			return obj.d[key] && obj.d[key].v || {};
+		}
+
+		return obj.d;
+	},
+	/**
+	 * Get meta data from aggregate data.
+	 * If no key is passed, returns entire current object.
+	 * @param obj
+	 * @param key
+	 * @returns {{}}
+	 */
+	getCurrentMeta: function (obj, key) {
+		if (key) {
+			return obj.d[key] || {};
+		}
+
+		return obj.d;
+	},
+	/**
+	 * Get previous value from aggregate data
+	 * If no key is passed, returns entire previous object.
+	 * @param obj (aggregate data object)
+	 * @param key (name of child object you want to look in)
+	 * @returns {*|{}}
+	 */
+	getPrevious: function (obj, key) {
+		if (key) {
+			return obj.p[key] && obj.p[key].v || {};
+		}
+
+		return obj.p;
+	},
+	/**
+	 * Get meta data from aggregate data.
+	 * If no key is passed, returns entire previous object.
+	 * @param obj
+	 * @param key
+	 * @returns {{}}
+	 */
+	getPreviousMeta: function (obj, key) {
+		if (key) {
+			return obj.p[key] || {};
+		}
+
+		return obj.p;
+	},
+	/**
+	 * query wrapper for the aggregations table
+	 * @param table
+	 * @param items
+	 * @param opts
+	 * @returns {Promise<any[]>}
+	 */
+	query: async function (table, items, opts) {
+		opts = merge({
+			start: null,
+			end: null,
+			offset: null,
+			limit: null
+		}, opts);
+
+		let defaultQuery = {
+			TableName: table,
+			KeyConditionExpression: '#id = :id',
+			ExpressionAttributeNames: {
+				"#id": "id"
+			},
+			ExpressionAttributeValues: {
+				":id": ''
+			},
+		};
+		let configuration = {};
+		if (opts.limit) {
+			defaultQuery.Limit = opts.limit;
+		}
+
+		let tasks = [];
+
+		if (Array.isArray(items)) {
+			items.forEach(item => {
+				// build ID from items
+				let id = [];
+				if (typeof item === 'string') {
+					id.push(item);
+				} else {
+					if (item.prefix) {
+						id.push(item.prefix);
+					}
+					if (item.id) {
+						id.push(item.id);
+					}
+					if (opts.frequency) {
+						id.push(opts.frequency);
+					}
+				}
+
+				// clone defaultQuery so we can reuse the object if we have selected multiple items
+				let query = Object.assign({}, defaultQuery);
+				query.ExpressionAttributeValues[':id'] = id.join('-');
+
+				// do we have a start/end time?
+				if (opts.start && opts.end) {
+					query.KeyConditionExpression += ' AND #bucket BETWEEN :start AND :end';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':start'] = opts.start;
+					query.ExpressionAttributeValues[':end'] = opts.end;
+				} else if (opts.start) {
+					query.KeyConditionExpression += ' AND #bucket >= :bucket';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':bucket'] = opts.start;
+				} else if (opts.end) {
+					query.KeyConditionExpression += ' AND #bucket <= :bucket';
+					query.ExpressionAttributeNames['#bucket'] = 'bucket';
+					query.ExpressionAttributeValues[':bucket'] = opts.end;
+				}
+
+				tasks.push(new Promise(resolve => {
+					logger.log('DynamoDB Query', query);
+
+					leoaws.dynamodb.smartQuery(query, configuration).then(result => {
+						resolve(result);
+					}).catch(err => {
+						throw new Error(err);
+					});
+				}));
+			});
+		}
+
+		return await Promise.all(tasks);
 	}
 };
