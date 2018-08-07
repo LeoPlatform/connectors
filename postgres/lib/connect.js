@@ -5,7 +5,6 @@ const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
 const moment = require("moment");
 const format = require('pg-format');
 const async = require('async');
-const chunk = require('lodash/fp/chunk');
 
 // require("leo-sdk/lib/logger").configure(true);
 
@@ -21,11 +20,10 @@ require('pg').types.setTypeParser(1114, (val) => {
 });
 
 const ls = require("leo-sdk").streams;
-const clients = {};
 
 let queryCount = 0;
 module.exports = function(config) {
-	const defaultedConfig = Object.assign({
+	const pool = new Pool(Object.assign({
 		user: 'root',
 		host: 'localhost',
 		database: 'test',
@@ -33,21 +31,12 @@ module.exports = function(config) {
 		port: 5432,
 	}, config, {
 		max: 15
-	});
+	}));
 
-	const connectionHash = JSON.stringify(defaultedConfig);
-	if (!(connectionHash in clients) || typeof clients[connectionHash] === 'undefined') {
-		console.log("CREATING NEW POSTGRES CLIENT");
-		clients[connectionHash] = create(connectionHash, new Pool(defaultedConfig));
-	} else {
-		console.log("REUSING POSTGRES CLIENT");
-	}
-
-	return clients[connectionHash];
+	return create(pool);
 };
 
-function create(hash, pool, parentCache) {
-	const connectionHash = hash;
+function create(pool, parentCache) {
 	let cache = {
 		schema: Object.assign({}, parentCache && parentCache.schema || {}),
 		timestamp: parentCache && parentCache.timestamp || null
@@ -56,7 +45,7 @@ function create(hash, pool, parentCache) {
 		connect: function(opts) {
 			opts = opts || {};
 			return pool.connect().then(c => {
-				return create(connectionHash, c, opts.type == "isolated" ? {} : cache);
+				return create(c, opts.type == "isolated" ? {} : cache);
 			});
 		},
 		query: function(query, params, callback, opts = {}) {
@@ -93,14 +82,8 @@ function create(hash, pool, parentCache) {
 				}
 			});
 		},
-		disconnect: function() {
-			clients[connectionHash] = undefined;
-			return pool.end();
-		},
-		end: function(callback) {
-			clients[connectionHash] = undefined;
-			return pool.end(callback);
-		},
+		disconnect: pool.end.bind(pool),
+		end: pool.end.bind(pool),	
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
@@ -224,7 +207,7 @@ function create(hash, pool, parentCache) {
 				Object.keys(uniqueKeys).forEach(constraint => {
 					toRemoveRecords[constraint] = [];
 				});
-				var values = records.map((r, i) => {
+				var values = records.map((r) => {
 					Object.keys(uniqueKeys).forEach(constraint => {
 						toRemoveRecords[constraint].push(
 							uniqueKeys[constraint].map(f => r[f])
@@ -357,7 +340,7 @@ function create(hash, pool, parentCache) {
 				} else {
 					done(null);
 				}
-			}, (done, push) => {
+			}, (done) => {
 				stream.on('end', () => {
 					myClient.release(true);
 					done();
