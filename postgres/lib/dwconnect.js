@@ -227,8 +227,7 @@ module.exports = function(config, columnConfig) {
 										set  ${columns.join(', ')}
 										FROM ${schemaStagingTbl}_changes changes
 										JOIN ${schemaStagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-										LEFT JOIN ${publicTbl} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
-										where ${nk.map(id=>`dm.${id} = changes.${id}`).join(' and ')} and dm.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
