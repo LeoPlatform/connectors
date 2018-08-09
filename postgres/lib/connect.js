@@ -19,8 +19,7 @@ require('pg').types.setTypeParser(1114, (val) => {
 	return moment(val).unix() + "  " + moment(val).utc().format();
 });
 
-
-let ls = require("leo-sdk").streams;
+const ls = require("leo-sdk").streams;
 
 let queryCount = 0;
 module.exports = function(config) {
@@ -84,33 +83,35 @@ function create(pool, parentCache) {
 			});
 		},
 		disconnect: pool.end.bind(pool),
-		end: pool.end.bind(pool),
+		end: pool.end.bind(pool),	
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
-		describeTable: function(table, callback) {
-			if (cache.schema[table]) {
-				logger.info(`Table "${table}" schema from cache`, cache.timestamp);
-				callback(null, cache.schema[table] || []);
+		describeTable: function(table, callback, tableSchema = 'public') {
+			const tblSch = `${tableSchema}.${table}`;
+			if (cache.schema[tblSch]) {
+				logger.info(`Table "${tblSch}" schema from cache`, cache.timestamp);
+				callback(null, cache.schema[tblSch] || []);
 			} else {
 				this.clearSchemaCache();
 				this.describeTables((err, schema) => {
-					callback(err, schema && schema[table] || []);
-				});
+					callback(err, schema && schema[tblSch] || []);
+				}, tableSchema);
 			}
 		},
-		describeTables: function(callback) {
+		describeTables: function(callback, tableSchema = 'public') {
 			if (Object.keys(cache.schema || {}).length) {
 				logger.info(`Tables schema from cache`, cache.timestamp);
 				return callback(null, cache.schema);
 			}
-			client.query("SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' order by ordinal_position asc", (err, result) => {
+			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(r => {
-					if (!(r.table_name in schema)) {
-						schema[r.table_name] = [];
+					const tblSch = `${tableSchema}.${r.table_name}`;
+					if (!(tblSch in schema)) {
+						schema[tblSch] = [];
 					}
-					schema[r.table_name].push(r);
+					schema[tblSch].push(r);
 				});
 				cache.schema = schema;
 				cache.timestamp = Date.now();
@@ -206,7 +207,7 @@ function create(pool, parentCache) {
 				Object.keys(uniqueKeys).forEach(constraint => {
 					toRemoveRecords[constraint] = [];
 				});
-				var values = records.map((r, i) => {
+				var values = records.map((r) => {
 					Object.keys(uniqueKeys).forEach(constraint => {
 						toRemoveRecords[constraint].push(
 							uniqueKeys[constraint].map(f => r[f])
@@ -274,6 +275,14 @@ function create(pool, parentCache) {
 			});
 		},
 		streamToTable: function(table /*, opts*/ ) {
+			const ts = table.split('.');
+			let schema = 'public';
+			let shortTable = table;
+			if (ts.length > 1) {
+				schema = ts[0];
+				shortTable = ts[1];
+			}
+					
 			// opts = Object.assign({
 			// 	records: 10000
 			// }, opts || {});
@@ -282,20 +291,18 @@ function create(pool, parentCache) {
 			let myClient = null;
 			let pending = null;
 			pool.connect().then(c => {
-
-				client.describeTable(table, (err, result) => {
+				client.describeTable(shortTable, (err, result) => {
 					columns = result.map(f => f.column_name);
 					myClient = c;
-
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
 					stream.on("error", function(err) {
-						console.log(err);
+						console.log(`COPY error: ${err.where}`, err);
 						process.exit();
 					});
 					if (pending) {
 						pending();
 					}
-				});
+				}, schema);
 			}, err => {
 				console.log(err);
 			});
@@ -333,7 +340,7 @@ function create(pool, parentCache) {
 				} else {
 					done(null);
 				}
-			}, (done, push) => {
+			}, (done) => {
 				stream.on('end', () => {
 					myClient.release(true);
 					done();

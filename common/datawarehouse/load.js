@@ -4,6 +4,7 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
+
 module.exports = function(client, tableConfig, stream, callback) {
 	let tableStatuses = {};
 	let tableSks = {};
@@ -117,7 +118,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 								links.push(Object.assign({
 									table: null,
 									on: f,
-									destination: client.getDimensionColumn(f),
+									destination: client.getDimensionColumn(f, field),
 									link_date: "_auditdate",
 									sk: tableSks[link.table]
 								}, link));

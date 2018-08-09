@@ -229,7 +229,7 @@ module.exports = function(event, context, sdk) {
 						if (err) {
 							callback(err);
 						} else {
-							stats.checkpoint(callback)
+							stats.checkpoint(callback);
 						}
 					});
 			}
@@ -304,6 +304,6 @@ module.exports = function(event, context, sdk) {
 						callback(err);
 					});
 			}
-		}
+		};
 	};
 };
