@@ -259,5 +259,100 @@ package.json
   }
 }
 ```
+
+## Available Aggregate functions
+`sum(field)`
+
+Gets the sum of all of this field for the selected buckets.
+##### Example
+```javascript
+data: {
+	totalAmountSpent: sum(payload.paymentAmount)
+}
+```
+
+`min(field)`
+
+Gets the min value for this field for the selected buckets.
+##### Example
+```javascript
+data: {
+	minPayment: min(payload.paymentAmount)
+}
+```
+
+`max(field)`
+
+Gets the max value for this field for the selected buckets.
+##### Example
+```javascript
+data: {
+	maxPayment: max(payload.paymentAmount)
+}
+```
+
+`countChanges(field)`
+
+Counts the number of times this field has changed for the selected buckets.
+##### Example
+Counting the number of times the temperature has changed in the given time period (see selected buckets).
+```javascript
+data: {
+	totalChanges: countChanges(payload.currentTemperature)
+}
+```
+
+`last(date, field)`
+
+Gets the last value of the selected field prior to selected date.
+##### Example
+```javascript
+data: {
+	lastOrderId: last(payload.date_created, payload.id)
+}
+```
+
+`first(date, field)`
+
+Gets the first value of the selected field for the selected bucket (see bucket options).
+##### Example
+```javascript
+data: {
+	firstOrderId: first(payload.date_created, payload.id)
+}
+```
+
+`hash(key, function)`
+
+Create a hash somehow.
+##### Example
+
+`aggregator(tableName, namespace, transformFunction)`
+
+Create an aggregation from a selected namespace and transformed data using the available functions.
+##### Example
+```javascript
+aggregator(config.aggregationTableName, entity, payload => [transformChanges(payload)])
+
+const transformChanges = payload => ({
+	entity: entity,
+	id: payload.id,
+	aggregate: {
+		timestamp: payload.updated,
+		buckets: ["alltime", "hourly", "minutely"]
+	},
+	data: {
+		firstOrderId: first(payload.date_created, payload.id),
+		lastOrderId: last(payload.date_created, payload.id),
+		totalAmountSpent: sum(payload.payments),
+	}
+});
+```
+
+## Available querying functions
+getCurrent
+getCurrentMeta
+query
+
 ## Support
 Want to hire an expert, or need technical support? Reach out to the Leo team: https://leoinsights.com/contact
