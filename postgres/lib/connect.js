@@ -113,6 +113,12 @@ function create(pool, parentCache) {
 					}
 					schema[tblSch].push(r);
 				});
+				Object.keys(schema).map((t)=>{
+					let parts = t.match(/^public\.(.*)$/);
+					if (parts) {
+						schema[parts[1]] = schema[t];
+					}
+				});
 				cache.schema = schema;
 				cache.timestamp = Date.now();
 				logger.info("Caching Schema Table", cache.timestamp);
