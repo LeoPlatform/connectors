@@ -35,5 +35,6 @@ module.exports = {
 			});
 		}
 	},
+	streamChanges: binlogReader.stream,
 	connect: connect
 };
