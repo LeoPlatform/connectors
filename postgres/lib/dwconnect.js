@@ -619,7 +619,7 @@ module.exports = function(config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let schemaStagingTbl = `${columnConfig.stageSchema}.staging_${table}`;
+		let schemaStagingTbl = `${columnConfig.stageSchema}.staging_${tableName}`;
 		tasks.push((done) => {
 			client.query(`drop table if exists ${schemaStagingTbl}`, done);
 		});
