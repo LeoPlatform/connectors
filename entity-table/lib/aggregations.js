@@ -33,7 +33,7 @@ let defaultTypes = {
 function processUpdate(newData, existing, reversal) {
 	for (let key in newData) {
 		let func = newData[key];
-		if (func._type) {
+		if (func && func._type) {
 			func = merge({}, defaultTypes[func._type], func);
 			if (!reversal) {
 				if (!(key in existing)) {
@@ -186,59 +186,59 @@ module.exports = {
 		let start = null;
 		aggregations = {};
 		return ls.bufferBackoff(function each(obj, done) {
-				if (!start) start = obj.eid;
+			if (!start) start = obj.eid;
 
-				obj = obj.payload;
-				if (obj.old) {
-					t(obj.old).forEach((e) => {
-						myProcess(ns, e, true);
-					});
-				}
-				if (obj.new) {
-					t(obj.new).forEach((e) => {
-						myProcess(ns, e, false);
-					});
-				}
-				done();
-			},
-			function emit(records, done) {
-				//Fetch Ids
-				let ids = Object.keys(aggregations)
+			obj = obj.payload;
+			if (obj.old) {
+				t(obj.old).forEach((e) => {
+					myProcess(ns, e, true);
+				});
+			}
+			if (obj.new) {
+				t(obj.new).forEach((e) => {
+					myProcess(ns, e, false);
+				});
+			}
+			done();
+		},
+		function emit(records, done) {
+			//Fetch Ids
+			let ids = Object.keys(aggregations)
 				.map(hash => ({
 					id: aggregations[hash].id,
 					bucket: aggregations[hash].bucket
 				}));
 
-				let stream = leo.streams.toDynamoDB(tableName, {records: 500});
-				let seenHashes = {};
+			let stream = leo.streams.toDynamoDB(tableName, {records: 500});
+			let seenHashes = {};
 
-				dynamodb.batchGetTable(tableName, ids, (err, result) => {
-					result.forEach(record => {
-						let fullHash = record.id + record.bucket;
-						seenHashes[fullHash] = true;
-						if (start === record.start) {
-							record.d = record.p || {};
-						}
-						record.p = extend(true, {}, record.d);
-						record.start = start;
+			dynamodb.batchGetTable(tableName, ids, (err, result) => {
+				result.forEach(record => {
+					let fullHash = record.id + record.bucket;
+					seenHashes[fullHash] = true;
+					if (start === record.start) {
+						record.d = record.p || {};
+					}
+					record.p = extend(true, {}, record.d);
+					record.start = start;
 
-						processUpdate(aggregations[fullHash].d, record.d, false);
+					processUpdate(aggregations[fullHash].d, record.d, false);
 
-						stream.write(record);
-					});
+					stream.write(record);
+				});
 
-					Object.keys(aggregations)
+				Object.keys(aggregations)
 					.filter(hash => !(hash in seenHashes))
 					.map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
 					.forEach(a => stream.write(a));
 
-					stream.end((err) => {
-						start = null;
-						aggregations = {};
-						done(err, []);
-					});
+				stream.end((err) => {
+					start = null;
+					aggregations = {};
+					done(err, []);
 				});
-			}, {}, {records: 1000});
+			});
+		}, {}, {records: 1000});
 	},
 	/**
 	 * Get current value from aggregate data
