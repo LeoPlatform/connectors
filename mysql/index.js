@@ -5,6 +5,7 @@ const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum");
+const streamChanges = require('./lib/streamchanges');
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
@@ -48,6 +49,11 @@ module.exports = {
 			);
 		}
 	},
-	// streamChanges: binlogReader.stream,
+	streamChanges: function(config, tables, opts = {}) {
+		// @todo change this to a connection
+		opts.config = config;
+		// return streamChanges(connect(config), tables, opts);
+		return streamChanges(config, tables, opts);
+	},
 	connect: connect
 };

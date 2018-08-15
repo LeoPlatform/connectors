@@ -281,7 +281,7 @@ module.exports = function(event, context, sdk) {
 				&& event.__cron.checkpoints.read
 				&& ((event.__cron.checkpoints.read[queue] && event.__cron.checkpoints.read[queue].checkpoint)
 					|| (event.__cron.checkpoints.read[queue.id] && event.__cron.checkpoints.read[queue.id].checkpoint)))
-			|| '0.0';
+			|| params.defaultCheckpoint || '0.0';
 
 		return {
 			trackTable: function(table, pk) {
@@ -291,7 +291,13 @@ module.exports = function(event, context, sdk) {
 			run: function(callback) {
 				let stream = params.connector.streamChanges(params.connection, trackedTables, {
 					start: start,
-					source: event.source
+					source: event.source,
+					batch: params.batch || {
+						count: 100,
+						time: {
+							seconds: 10
+						}
+					}
 				});
 
 				let end;
@@ -302,7 +308,6 @@ module.exports = function(event, context, sdk) {
 				}
 
 				params.ls.pipe(stream,
-					// ls.log(),
 					end, (err) => {
 						console.log("all done");
 						console.log(err);
