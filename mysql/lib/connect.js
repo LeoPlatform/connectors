@@ -1,7 +1,7 @@
 "use strict";
 
 const mysql = require("mysql2");
-const logger = require("leo-sdk/lib/logger")("leo.connector.sql.mysql");
+const logger = require("leo-logger")("leo.connector.sql.mysql");
 let ls = require("leo-sdk").streams;
 let connections = {};
 

@@ -55,7 +55,8 @@ const domainIdentifierFor = (row, key) => {
 
 module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 	source: "loader",
-	isSnapshot: false
+	isSnapshot: false,
+	values: true
 }) {
 	let ids = [];
 
@@ -63,7 +64,7 @@ module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 		async.doWhilst((done) => {
 			let buildIds = ids.splice(0, MAX);
 			buildEntities({
-				jointable: 'values ' + buildIds.map(keys => {
+				jointable: (opts.values ? 'values ' : '') + buildIds.map(keys => {
 					return "(" + keys.join(",") + ")";
 				}).join(","),
 				count: buildIds.length
@@ -187,6 +188,7 @@ module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
 						domainIdentifier,
 						err
 					} = domainIdentifierFor(row, obj.id);
+
 					if (!err) {
 						//We need to keep the domain relationships in tact
 						domains[domainIdentifier] = merge({}, template, domains[domainIdentifier], row);

@@ -69,6 +69,12 @@ module.exports = function(event, context, sdk) {
 					let objArray = [];
 
 					Object.keys(tables).forEach((table) => {
+
+						// @todo handle deletes separatley
+						if (obj.update && obj.update[table]) {
+							obj[table] = obj.update[table];
+						}
+
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
 
