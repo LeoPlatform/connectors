@@ -50,7 +50,7 @@ module.exports = {
 		}
 	},
 	streamChanges: function(config, tables, opts = {}) {
-		// @todo change this to a connection
+		// @todo change this to a connection. Zongji would have to be updated to work with mysql2
 		opts.config = config;
 		// return streamChanges(connect(config), tables, opts);
 		return streamChanges(config, tables, opts);

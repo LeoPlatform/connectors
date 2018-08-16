@@ -77,7 +77,6 @@ module.exports = function(event, context, sdk) {
 
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
-
 							if (Array.isArray(tables[table])) { // if we passed in an array of primary keys
 								// turn the object into an array of items
 								objArray.push(obj[table].map(row => {
