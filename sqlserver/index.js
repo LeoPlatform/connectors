@@ -17,12 +17,6 @@ module.exports = {
 		} else {
 			return sqlLoader(connect(config), sql, domain, opts);
 		}
-
-		// Possible solution if the above doesn't work correctly. I didn't find the below to work correctly, but don't
-		// want to destroy it we have a change to test another 5k+ records
-		// return sqlLoader(() => connect(config), sql, domain, Object.assign({
-		// getEid: (id, obj, stats)=>stats.end.replace(/\..*/, "." + id)
-		// }, opts));
 	},
 	nibble: function(config, table, id, opts) {
 		return sqlNibbler(connect(config), table, id, opts);

@@ -1,7 +1,7 @@
 "use strict";
 
 const mysql = require("mysql2");
-const logger = require("leo-sdk/lib/logger")("leo.connector.sql.mysql");
+const logger = require("leo-logger")("leo.connector.sql.mysql");
 let ls = require("leo-sdk").streams;
 let connections = {};
 
@@ -53,15 +53,21 @@ module.exports = function(c) {
 				let fields;
 				if (err) {
 					log.error("Had error #${queryId}", query, err);
-				} else {
+				} else if (dbfields) {
 					// make fields interchangeable between mysql and mysql2 node modules
-					fields = Object.assign(dbfields, {
-						type: dbfields.type || dbfields.columnType,
-						columnType: dbfields.columnType || dbfields.type,
-						db: dbfields.db || dbfields.schema,
-						schema: dbfields.schema || dbfields.db,
-						length: dbfields.length || dbfields.columnLength,
-						columnLength: dbfields.columnLength || dbfields.length,
+					fields = dbfields.map(data => {
+						let startingObj = {
+							type: data.columnType,
+							db: data.schema,
+							length: data.columnLength,
+							schema: ''
+						};
+
+						Object.keys(data).filter(f => !f.match(/^\_/)).filter(f => data[f]).map(k => {
+							startingObj[k] = data[k];
+						});
+
+						return startingObj;
 					});
 				}
 
