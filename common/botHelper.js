@@ -242,13 +242,6 @@ module.exports = function(event, context, sdk) {
 	};
 
 	/**
-	 * Filter bin logs to pull changed ids for specific tables
-	 * @param params
-	 * @todo
-	 */
-	this.filterBinLogs = function (params) {};
-
-	/**
 	 * Create a change stream and get changed ids for specific tables
 	 * @param params {
 	 *  connector (leo-connector-(dbtype))
@@ -273,7 +266,8 @@ module.exports = function(event, context, sdk) {
 
 		// get the starting point
 		let queue = refUtil.ref(event.source);
-		let start = params.start
+		params.source = event.source;
+		params.start = params.start
 			|| event.start
 			|| (event.__cron
 				&& event.__cron.checkpoints
@@ -288,16 +282,7 @@ module.exports = function(event, context, sdk) {
 				return this;
 			},
 			run: function(callback) {
-				let stream = params.connector.streamChanges(params.connection, trackedTables, {
-					start: start,
-					source: event.source,
-					batch: params.batch || {
-						count: 100,
-						time: {
-							seconds: 10
-						}
-					}
-				});
+				let stream = params.connector.streamChanges(params.connection, trackedTables, params);
 
 				let end;
 				if (params.devnull) {

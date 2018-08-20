@@ -2,9 +2,10 @@
 const leolistener = require("./listener");
 const leo = require('leo-sdk');
 const ls = leo.streams;
-const logger = require('leo-logger');
+const logger = require('leo-logger')('leo-connector-mysql/lib/streamchanges');
+let counter = 0;
 
-module.exports = function(connection, tables, opts = {}) {
+module.exports = function (connection, tables, opts = {}) {
 	// make sure we have a start
 	opts.start = opts.start || '0::0';
 	let start = opts.start.split('::');
@@ -28,12 +29,18 @@ module.exports = function(connection, tables, opts = {}) {
 		} else if (event.updaterows) {
 			event = event.updaterows;
 			event.data = event.data.after;
+
 			streamWrite(event, 'update', stream);
 		} else if (event.deleterows) {
 			event = event.deleterows;
 			streamWrite(event, 'delete', stream);
-		// } else if (event.rotate) {
+			// } else if (event.rotate) {
 		}
+	});
+
+	// catch errors and try to continue
+	listener.on('error', function(err) {
+		logger.error('[Error]', err);
 	});
 
 	let includeSchema = {};
@@ -122,7 +129,6 @@ module.exports = function(connection, tables, opts = {}) {
 			done(null, batch);
 		})
 	);
-	// leo.bot.runAgain // to start the bot back up
 };
 
 /**
@@ -131,8 +137,7 @@ module.exports = function(connection, tables, opts = {}) {
  * @param type
  * @param stream
  */
-function streamWrite(event, type, stream)
-{
+function streamWrite(event, type, stream) {
 	let writeEvent = {};
 	writeEvent[type] = {};
 	writeEvent[type][event.tableName] = {
