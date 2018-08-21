@@ -69,9 +69,14 @@ module.exports = function(event, context, sdk) {
 					let objArray = [];
 
 					Object.keys(tables).forEach((table) => {
+
+						// @todo handle deletes separatley
+						if (obj.update && obj.update[table]) {
+							obj[table] = obj.update[table];
+						}
+
 						// only process if we have any data for this table
 						if (obj[table] && obj[table].length) {
-
 							if (Array.isArray(tables[table])) { // if we passed in an array of primary keys
 								// turn the object into an array of items
 								objArray.push(obj[table].map(row => {
@@ -237,13 +242,6 @@ module.exports = function(event, context, sdk) {
 	};
 
 	/**
-	 * Filter bin logs to pull changed ids for specific tables
-	 * @param params
-	 * @todo
-	 */
-	this.filterBinLogs = function (params) {};
-
-	/**
 	 * Create a change stream and get changed ids for specific tables
 	 * @param params {
 	 *  connector (leo-connector-(dbtype))
@@ -268,14 +266,15 @@ module.exports = function(event, context, sdk) {
 
 		// get the starting point
 		let queue = refUtil.ref(event.source);
-		let start = params.start
+		params.source = event.source;
+		params.start = params.start
 			|| event.start
 			|| (event.__cron
 				&& event.__cron.checkpoints
 				&& event.__cron.checkpoints.read
 				&& ((event.__cron.checkpoints.read[queue] && event.__cron.checkpoints.read[queue].checkpoint)
 					|| (event.__cron.checkpoints.read[queue.id] && event.__cron.checkpoints.read[queue.id].checkpoint)))
-			|| '0.0';
+			|| params.defaultCheckpoint || '0.0';
 
 		return {
 			trackTable: function(table, pk) {
@@ -283,10 +282,7 @@ module.exports = function(event, context, sdk) {
 				return this;
 			},
 			run: function(callback) {
-				let stream = params.connector.streamChanges(params.connection, trackedTables, {
-					start: start,
-					source: event.source
-				});
+				let stream = params.connector.streamChanges(params.connection, trackedTables, params);
 
 				let end;
 				if (params.devnull) {
@@ -296,7 +292,6 @@ module.exports = function(event, context, sdk) {
 				}
 
 				params.ls.pipe(stream,
-					// ls.log(),
 					end, (err) => {
 						console.log("all done");
 						console.log(err);
