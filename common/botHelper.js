@@ -117,7 +117,7 @@ module.exports = function(event, context, sdk) {
 					// build the joins
 					Object.keys(joins).forEach((name) => {
 						let join = joins[name];
-						builderSql.joinOneToMany(join.table, join.pk, join.query.replace(/\?/g, idsList), join.transform);
+						builderSql.joinOneToMany(join.name, join.pk, join.query.replace(/\?/g, idsList), join.transform);
 					});
 
 					return builderSql;

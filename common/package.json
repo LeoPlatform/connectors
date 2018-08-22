@@ -1,11 +1,11 @@
 {
 	"name": "leo-connector-common",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"description": "Common package for all Leo Platform database connectors",
 	"main": "index.js",
 	"directories": {},
 	"scripts": {
-		"test": "mocha --recursive -w"
+    "test": "mocha test/**/*.test.js"
 	},
 	"repository": {
 		"type": "git",
