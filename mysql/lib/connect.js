@@ -8,13 +8,20 @@ let connections = {};
 module.exports = function(c) {
 	let config = Object.assign({
 		host: "localhost",
-		user: "root",
+		user: c.username || 'root', // use username if it is passed through (secrets manager)
 		port: 3306,
-		database: "datawarehouse",
+		database: c.dbname || "datawarehouse", // use dbname if it is passed through (secrets manager)
 		password: "a",
 		connectionLimit: 10,
 		timezone: 'utc'
 	}, c);
+
+	// delete invalid options so we don't throw an error in future versions of mysql
+	delete config.username;
+	delete config.dbname;
+	delete config.engine;
+	delete config.table;
+	delete config.id;
 
 	let connectionHash = JSON.stringify(config);
 	let m;
@@ -52,7 +59,7 @@ module.exports = function(c) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				let fields;
 				if (err) {
-					log.error("Had error #${queryId}", query, err);
+					log.error(`Had error #${queryId}`, query, err);
 				} else if (dbfields) {
 					// make fields interchangeable between mysql and mysql2 node modules
 					fields = dbfields.map(data => {
