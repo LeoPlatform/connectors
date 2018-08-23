@@ -42,6 +42,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	}, (obj, done, push) => {
 		eids.start = eids.start || obj.eid;
 		eids.end = obj.eid;
+		eids.ts = obj.event_source_timestamp;
 		let tasks = [];
 		let findIds = [];
 
@@ -265,6 +266,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 						id: opts.id,
 						eid: eid,
 						payload: domains[id],
+						event_source_timestamp: eids.ts,
 						correlation_id: {
 							source: opts.source,
 							start: opts.isSnapshot ? id : eid,
