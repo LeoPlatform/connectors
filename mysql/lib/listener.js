@@ -83,6 +83,11 @@ ZongJi.prototype._init = function () {
 	var binlogOptions = {
 		tableMap: self.tableMap,
 	};
+	let firstLog = {
+		filename: null,
+		logNumber: null,
+		position: 4
+	};
 
 	var asyncMethods = [
 		{
@@ -93,11 +98,18 @@ ZongJi.prototype._init = function () {
 			}
 		},
 		{
-			name: '_findBinlogEnd',
+			name: '_findBinlogs',
 			callback: function (result) {
-				if (result && self.options.startAtEnd) {
-					binlogOptions.filename = result.Log_name;
-					binlogOptions.position = result.File_size;
+				if (result && result.length) {
+					if (self.options.startAtEnd) {
+						let row = result[result.length - 1];
+						binlogOptions.filename = row.Log_name;
+						binlogOptions.position = row.File_size;
+					} else {
+						firstLog.filename = result[0].Log_name;
+						let logNumber = firstLog.filename.match(/\.(\d+)$/);
+						firstLog.logNumber = logNumber && logNumber[1];
+					}
 				}
 			}
 		}
@@ -125,9 +137,15 @@ ZongJi.prototype._init = function () {
 			binlogOptions.serverId = self.options.serverId;
 		}
 
-		if (('binlogName' in self.options) && ('binlogNextPos' in self.options) && self.options.binlogName && self.options.binlogNextPos) {
+		if (self.options.binlogName && self.options.binlogNextPos) {
 			binlogOptions.filename = self.options.binlogName;
 			binlogOptions.position = self.options.binlogNextPos;
+
+			let selectedLogNumber = binlogOptions.filename.match(/\.(\d+)$/);
+			if (selectedLogNumber && selectedLogNumber[1] && selectedLogNumber[1] < firstLog.logNumber) {
+				binlogOptions.filename = firstLog.filename;
+				binlogOptions.position = firstLog.position;
+			}
 		}
 
 		self.binlog = generateBinlog.call(self, binlogOptions);
@@ -175,7 +193,7 @@ ZongJi.prototype._isChecksumEnabled = function (next) {
 	});
 };
 
-ZongJi.prototype._findBinlogEnd = function (next) {
+ZongJi.prototype._findBinlogs = function (next) {
 	var self = this;
 	self.ctrlConnection.query('SHOW BINARY LOGS', function (err, rows) {
 		if (err) {
@@ -183,7 +201,7 @@ ZongJi.prototype._findBinlogEnd = function (next) {
 			self.emit('error', err);
 			return;
 		}
-		next(rows.length > 0 ? rows[rows.length - 1] : null);
+		next(rows);
 	});
 };
 
