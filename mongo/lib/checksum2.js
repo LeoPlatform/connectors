@@ -31,7 +31,7 @@ module.exports = () => {
 		}
 	}
 	let buildExtractFunction = (settings) => {
-		let mapper = settings.fields == "string" ? settings.fields : settings.map;
+		let mapper = (typeof settings.fields == "string") ? settings.fields : settings.map;
 		if (mapper) {
 			return eval(`(${mapper})`);
 		}
