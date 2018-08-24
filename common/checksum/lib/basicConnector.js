@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const base = require("./handler.js");
 const moment = require("moment");
 require("moment-timezone");
-
+const logger = require("leo-sdk/lib/logger")("leo-checksum.basic");
 const Stream = require('stream').Stream;
 
 function promisify(method, arity) {
@@ -12,7 +12,7 @@ function promisify(method, arity) {
 			return new Promise((resolve, reject) => {
 				args.push((...args) => {
 					if (args[0]) reject(args[0]);
-					else resolve.call(this, args.splice(1));
+					else resolve.apply(this, args.splice(1));
 				});
 				method.apply(this, args);
 			});
@@ -53,6 +53,10 @@ function readArray(array) {
 		stream.emit('close');
 	};
 	return stream;
+}
+
+function buildKeys(settings) {
+	return Array.isArray(settings.fields) ? () => settings.fields : Object.keys;
 }
 module.exports = function(opts) {
 
@@ -100,7 +104,7 @@ module.exports = function(opts) {
 	});
 
 	function batch(event, handler, callback) {
-		console.log("Calling Batch", event);
+		logger.log("Calling Batch", event);
 
 		let startTime = moment.now();
 		let data = event.data;
@@ -118,6 +122,8 @@ module.exports = function(opts) {
 					hash: stream.hash
 				});
 			}
+
+			let ObjectKeys = buildKeys(event.settings);
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
 
 			let result = {
@@ -132,11 +138,11 @@ module.exports = function(opts) {
 				result.duration = moment.now() - startTime;
 				callback(null, result);
 			}).on("error", (err) => {
-				console.log("Batch On Error", err);
+				logger.log("Batch On Error", err);
 				callback(err);
 			}).on("data", (obj) => {
 				let allFields = "";
-				Object.keys(obj).forEach(key => {
+				ObjectKeys(obj).forEach(key => {
 					let value = obj[key];
 					if (value instanceof Date) {
 						allFields += crypto.createHash('md5').update(Math.round(value.getTime() / 1000).toString()).digest('hex');
@@ -159,10 +165,9 @@ module.exports = function(opts) {
 	}
 
 	function individual(event, handler, callback) {
-		console.log("Calling Individual", event);
+		logger.log("Calling Individual", event);
 		let startTime = moment.now();
 		let data = event.data;
-
 		promisify(handler, 2).call({
 			settings: event.settings,
 			session: event.session
@@ -177,6 +182,7 @@ module.exports = function(opts) {
 				});
 			}
 
+			let ObjectKeys = buildKeys(event.settings);
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
 			let results = {
 				ids: data.ids,
@@ -185,17 +191,16 @@ module.exports = function(opts) {
 				qty: 0,
 				checksums: []
 			};
-
 			stream.on("end", () => {
 				results.duration = moment.now() - startTime;
 				callback(null, results);
 			}).on("error", (err) => {
-				console.log("Individual On Error", err);
+				logger.log("Individual On Error", err);
 				callback(err);
 			}).on("data", (obj) => {
 				let allFields = "";
 
-				Object.keys(obj).forEach(key => {
+				ObjectKeys(obj).forEach(key => {
 					let value = obj[key];
 					if (value instanceof Date) {
 						allFields += crypto.createHash('md5').update(Math.round(value.getTime() / 1000).toString()).digest('hex');
@@ -218,7 +223,7 @@ module.exports = function(opts) {
 	}
 
 	function sample(event, handler, callback) {
-		console.log("Calling Sample", event);
+		logger.log("Calling Sample", event);
 		let data = event.data;
 
 		promisify(handler, 1).call({
@@ -235,6 +240,7 @@ module.exports = function(opts) {
 				});
 			}
 
+			let ObjectKeys = buildKeys(event.settings);
 			stream = Array.isArray(stream) ? readArray(stream) : stream;
 
 			let results = {
@@ -248,11 +254,11 @@ module.exports = function(opts) {
 			stream.on("end", function() {
 				callback(null, results);
 			}).on("err", function(err) {
-				console.log("error");
+				logger.log("error");
 				throw err;
 			}).on("data", function(obj) {
 				let out = [];
-				Object.keys(obj).forEach(key => {
+				ObjectKeys(obj).forEach(key => {
 					let value = obj[key];
 					if (value instanceof Date) {
 						out.push(Math.round(value.getTime() / 1000) + "  " + moment(value).utc().format());
@@ -272,7 +278,7 @@ module.exports = function(opts) {
 	}
 
 	function range(event, handler, callback) {
-		console.log("Calling Range", event);
+		logger.log("Calling Range", event);
 
 		let data = event.data;
 		promisify(handler, 2).call({
@@ -284,7 +290,7 @@ module.exports = function(opts) {
 	}
 
 	function nibble(event, handler, callback) {
-		console.log("Calling Nibble", event);
+		logger.log("Calling Nibble", event);
 
 		let data = event.data;
 		promisify(handler, 4).call({
@@ -299,7 +305,7 @@ module.exports = function(opts) {
 	}
 
 	function initialize(event, handler, callback) {
-		console.log("Calling Initialize", event);
+		logger.log("Calling Initialize", event);
 		promisify(handler, 1).call({
 			settings: event.settings,
 			session: event.session
@@ -307,7 +313,7 @@ module.exports = function(opts) {
 	}
 
 	function destroy(event, handler, callback) {
-		console.log("Calling Destroy", event);
+		logger.log("Calling Destroy", event);
 		promisify(handler, 1).call({
 			settings: event.settings,
 			session: event.session
@@ -315,7 +321,7 @@ module.exports = function(opts) {
 	}
 
 	function deleteFn(event, handler, callback) {
-		console.log("Calling Delete", event);
+		logger.log("Calling Delete", event);
 		promisify(handler, 1).call({
 			settings: event.settings,
 			session: event.session
