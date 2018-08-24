@@ -3,7 +3,6 @@ const leolistener = require("./listener");
 const leo = require('leo-sdk');
 const ls = leo.streams;
 const logger = require('leo-logger')('leo-connector-mysql/lib/streamchanges');
-let counter = 0;
 
 module.exports = function (connection, tables, opts = {}) {
 	// make sure we have a start
@@ -21,6 +20,13 @@ module.exports = function (connection, tables, opts = {}) {
 			seconds: 15
 		}
 	});
+
+	if (opts.duration) {
+		// End the stream and listener after 285 seconds (4:45)
+		setTimeout(() => {
+			endStream(listener, stream);
+		}, opts.duration * 0.8);
+	}
 
 	listener.on('binlog', function (event) {
 		if (event.writerows) {
@@ -40,35 +46,50 @@ module.exports = function (connection, tables, opts = {}) {
 
 	// catch errors and try to continue
 	listener.on('error', function(err) {
-		logger.error('[Error]', err);
+
+		// receive a fatal error. Stop the listener and stream.
+		if (err.fatal === true) {
+			logger.error('[Fatal Error]', err);
+
+			endStream(listener, stream);
+		} else {
+			logger.error('[Error]', err);
+		}
 	});
 
 	let includeSchema = {};
-	if (tables) {
-		// log only selected tables
-		includeSchema[opts.config.database] = Object.keys(tables);
+	let excludeSchema = {};
+	if (opts.config.database) {
+		if (tables && tables.length) {
+			// log only selected tables
+			includeSchema[opts.config.database] = Object.keys(tables);
+		} else {
+			// log all table changes for the selected database
+			includeSchema[opts.config.database] = true;
+		}
 	} else {
-		// log all table changes for the selected database
-		includeSchema[opts.config.database] = true;
+		// log all changes to all databases for this connection
+		// omit default mysql tables
+		excludeSchema = {
+			information_schema: true,
+			mysql: true,
+			performance_schema: true,
+			sys: true
+		};
 	}
 
 	listener.start({
 		binlogName: start[0] || undefined,
 		binlogNextPos: parseInt(start[1]) > 3 && start[1] || undefined,
-		serverId: 1,
+		serverId: opts.config.server_id || 1,
 		includeEvents: ['rotate', 'tablemap', 'writerows', 'updaterows', 'deleterows'],
 		includeSchema: includeSchema,
+		excludeSchema: excludeSchema
 	});
 
 	process.on('SIGINT', function () {
 		console.log('Got SIGINT.');
-		// end the mysql listener
-		listener.stop();
-
-		// end the stream
-		stream.end(err => {
-			console.log("All done loading events", err);
-		});
+		endStream(listener, stream);
 		process.exit();
 	});
 
@@ -148,4 +169,14 @@ function streamWrite(event, type, stream) {
 	};
 
 	stream.write(writeEvent);
+}
+
+function endStream(listener, stream) {
+	// end the mysql listener
+	listener.stop();
+
+	// end the stream
+	stream.end(err => {
+		console.log("All done loading events", err);
+	});
 }
