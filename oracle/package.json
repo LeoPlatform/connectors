@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-oracle",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "An Oracle database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -22,5 +22,19 @@
 		"leo-sdk": "^2.0.1",
 		"oracledb": "^2.3.0",
 		"uuid": "^3.2.1"
+	},
+	"config": {
+		"leo": {
+			"build": {
+				"include": [{
+					"src": "lambda/node_modules",
+					"dest": ".",
+					"external": "oracledb"
+				}, {
+					"src": "./inc/lib",
+					"dest": "."
+				}]
+			}
+		}
 	}
 }

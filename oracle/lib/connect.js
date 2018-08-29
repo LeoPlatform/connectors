@@ -1,5 +1,4 @@
 'use strict';
-
 const oracle = require("oracledb");
 const logger = require("leo-logger")("connector.sql.oracle");
 let connections = {};
@@ -22,7 +21,6 @@ module.exports = function(config) {
 		password: 'test',
 		connectionString: connectionString
 	}, config);
-
 	let connectionHash = JSON.stringify(config);
 	let pool;
 	let isConnected = false;
@@ -32,7 +30,6 @@ module.exports = function(config) {
 		logger.log("CREATING NEW ORACLE CONNECTION");
 		connections[connectionHash] = oracle.createPool(config).then(c => {
 			c.getConnection().then(conn => {
-				console.log('connection gotten. Buffer has', buffer);
 				pool = conn;
 				isConnected = true;
 
@@ -44,7 +41,13 @@ module.exports = function(config) {
 					});
 				}
 
+			}).catch(err => {
+				delete connections[connectionHash];
+				console.log(err);
 			});
+		}).catch(err => {
+			delete connections[connectionHash];
+			console.log(err);
 		});
 	} else {
 		logger.log("REUSING EXISTING ORACLE CONNECTION");
@@ -54,7 +57,7 @@ module.exports = function(config) {
 
 	let client = {
 		query: function(query, params, callback, opts = {}) {
-			console.log('running query');
+
 			if (typeof params == "function") {
 				opts = callback;
 				callback = params;
@@ -84,7 +87,7 @@ module.exports = function(config) {
 				log.info(`SQL query #${queryId} is `, query.slice(0, 300));
 				log.time(`Ran Query #${queryId}`);
 
-				pool.execute(query, {}, {}, function (err, result) {
+				pool.execute(query, {}, {}, function(err, result) {
 					log.timeEnd(`Ran Query #${queryId}`);
 					if (err) {
 						log.error(`Had error #${queryId}`, query, err);
