@@ -28,29 +28,25 @@ module.exports = function(config) {
 
 	if (!(connectionHash in connections)) {
 		logger.log("CREATING NEW ORACLE CONNECTION");
-		connections[connectionHash] = oracle.createPool(config).then(c => {
-			c.getConnection().then(conn => {
-				pool = conn;
-				isConnected = true;
+		oracle.getConnection(config).then(c => {
+			pool = connections[connectionHash] = c;
+			isConnected = true;
 
-				if (buffer.length) {
-					buffer.forEach(i => {
-						client.query(i.query, (err, result, fields) => {
-							i.callback(err, result, fields);
-						});
+			if (buffer.length) {
+				buffer.forEach(i => {
+					client.query(i.query, (err, result, fields) => {
+						i.callback(err, result, fields);
 					});
-				}
-
-			}).catch(err => {
-				delete connections[connectionHash];
-				console.log(err);
-			});
+				});
+			}
 		}).catch(err => {
 			delete connections[connectionHash];
 			console.log(err);
 		});
 	} else {
 		logger.log("REUSING EXISTING ORACLE CONNECTION");
+		pool = connections[connectionHash];
+		isConnected = true;
 	}
 
 	let queryCount = 0;
