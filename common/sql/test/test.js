@@ -19,8 +19,8 @@ describe.only('SQL', function() {
 		const MAX = 24531;
 		async.doWhilst((done) => {
 			if (!stream.write({
-				test: [++count, ++count, ++count]
-			})) {
+					test: [++count, ++count, ++count]
+				})) {
 				stream.once('drain', done);
 			} else {
 				done();
@@ -38,7 +38,6 @@ describe.only('SQL', function() {
 					host: "localhost",
 					user: "root",
 					port: 3306,
-					database: "datawarehouse",
 					password: "a",
 					connectionLimit: 10
 				}));

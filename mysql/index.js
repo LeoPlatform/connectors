@@ -5,7 +5,7 @@ const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum");
-const streamChanges = require('./lib/streamchanges');
+const streamChanges = require('./lib/listener');
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
@@ -33,33 +33,22 @@ module.exports = {
 			}, callback);
 		} else {
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(leo.read(bot_id, opts.inQueue, {start: opts.start})
-				, stats
-				, this.load(dbConfig, sql, domain, {
-						queue: opts.outQueue,
-						id: bot_id,
-						limit: opts.limit
-					}, dbConfig.id)
-				, ls.toLeo(bot_id)
-				, ls.devnull('done')
-				, err => {
-					if (err) return callback(err);
-					return stats.checkpoint(callback);
-				}
-			);
+			ls.pipe(leo.read(bot_id, opts.inQueue, {
+				start: opts.start
+			}), stats, this.load(dbConfig, sql, domain, {
+				queue: opts.outQueue,
+				id: bot_id,
+				limit: opts.limit
+			}, dbConfig.id), ls.toLeo(bot_id), ls.devnull('done'), err => {
+				if (err) return callback(err);
+				return stats.checkpoint(callback);
+			});
 		}
 	},
-	streamChanges: function(config, tables, opts = {}) {
-
-		// make sure we have user and database
+	streamChanges: function(config, opts = {}) {
 		config.user = config.user || config.username;
-		config.database = config.database || config.dbname;
 
-		opts.config = config;
-		return streamChanges(config, tables, opts);
-
-		// @todo change this to a connection. Zongji would have to be updated to work with mysql2
-		// return streamChanges(connect(config), tables, opts);
+		return streamChanges(config, opts);
 	},
 	connect: connect
 };
