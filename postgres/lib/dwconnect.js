@@ -413,6 +413,7 @@ module.exports = function(config, columnConfig) {
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
+		let queries = [].concat(definition.queries || []);
 
 		let ids = [];
 		Object.keys(definition.structure).forEach(f => {
@@ -429,6 +430,9 @@ module.exports = function(config, columnConfig) {
 
 			if (field == "nk" || field.nk) {
 				ids.push(f);
+			}
+			if (field.queries) {
+				queries = queries.concat(field.queries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -482,10 +486,14 @@ module.exports = function(config, columnConfig) {
 			}
 		}
 
+		queries.map(q => {
+			tasks.push(done => client.query(q, done));
+		});
 		async.series(tasks, callback);
 	};
 	client.updateTable = function(table, definition, callback) {
 		let fields = [];
+		let queries = [];
 		Object.keys(definition).forEach(f => {
 			let field = definition[f];
 			if (field == "sk") {
@@ -496,6 +504,9 @@ module.exports = function(config, columnConfig) {
 				field = {
 					type: field
 				};
+			}
+			if (field.queries) {
+				queries = queries.concat(field.queries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -525,6 +536,9 @@ module.exports = function(config, columnConfig) {
 			sqls = fields.map(f => `alter table  ${table} add column ${f}`);
 		}
 
+		queries.map(q => {
+			sqls.push(q);
+		});
 		async.eachSeries(sqls, function(sql, done) {
 			client.query(sql, done);
 		}, callback);
