@@ -1,0 +1,23 @@
+{
+	"name": "leo-connector-dynamodb",
+	"version": "1.0.0",
+	"description": "A DynamoDB connector for use with Leo Platform",
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/LeoPlatform/connectors.git"
+	},
+	"main": "index.js",
+	"scripts": {
+		"test": "mocha --recursive -w"
+	},
+	"author": "",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/LeoPlatform/connectors/issues"
+	},
+	"homepage": "https://github.com/LeoPlatform/connectors#readme",
+	"dependencies": {
+		"leo-aws": "^1.4.0",
+		"leo-logger": "^1.0.0"
+	}
+}
