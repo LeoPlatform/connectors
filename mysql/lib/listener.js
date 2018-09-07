@@ -173,16 +173,6 @@ ZongJi.prototype.start = function (options) {
 						self._fetchTableInfo(event, function () {
 							// merge the column info with metadata
 							event.updateColumnInfo();
-							let emitEvent = {
-								tableMap: {
-									timestamp: event.timestamp,
-									nextPosition: event.nextPosition,
-									tableName: event.tableName,
-									primaryKey: event.primaryKey
-								}
-							};
-
-							pass.write(emitEvent);
 							self.connection.resume();
 						});
 						return;
