@@ -8,7 +8,7 @@ const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum.js");
 
 const leo = require("leo-sdk");
-const ls = require('leo-streams');
+const ls = leo.streams;
 
 module.exports = {
 	load: function(config, sql, domain, idColumns, opts) {
