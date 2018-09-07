@@ -5,7 +5,7 @@ const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum");
-const streamChanges = require('./lib/streamchanges');
+const listener = require('./lib/listener');
 const leo = require("leo-sdk");
 const ls = leo.streams;
 
@@ -51,15 +51,12 @@ module.exports = {
 	},
 	streamChanges: function(config, tables, opts = {}) {
 
-		// make sure we have user and database
+		// make sure if we've passed in a user and database, that we use a regular format, or one from secrets manager.
 		config.user = config.user || config.username;
 		config.database = config.database || config.dbname;
 
 		opts.config = config;
-		return streamChanges(config, tables, opts);
-
-		// @todo change this to a connection. Zongji would have to be updated to work with mysql2
-		// return streamChanges(connect(config), tables, opts);
+		return listener(config, tables, opts);
 	},
 	connect: connect
 };
