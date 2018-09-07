@@ -1,9 +1,6 @@
 "use strict";
-// var aws = require("aws-sdk");
 const connect = require("./lib/connect");
-// require("leo-sdk/lib/logger").configure(/.*/, {
-// 	all: true
-// });
+const logger = require('leo-logger');
 
 module.exports = function(config) {
 	let client = connect(config);
@@ -13,13 +10,12 @@ module.exports = function(config) {
 		init: function(obj, callback) {
 			if (!obj.sql) {
 				obj.sql = `select ${obj.fields.join(', ')}
-				from "${obj.tableName}"
-				WHERE ${obj.id_column} __IDCOLUMNLIMIT__
-				`;
+					from "${obj.tableName}"
+					WHERE ${obj.id_column} __IDCOLUMNLIMIT__`;
 			}
 			client.query(`${obj.sql.replace('__IDCOLUMNLIMIT__', ' between 1 and 0')} LIMIT 0`, (err, results, fields) => {
 				let rFields = [];
-				console.log(fields);
+				logger.debug(fields);
 				fields.forEach((f, i) => {
 					let field = {
 						column: obj.fields ? obj.fields[i] : f.name,
@@ -43,9 +39,6 @@ module.exports = function(config) {
 		},
 		destroy: function() {
 			client.end();
-		},
-		escape: function(/*val*/) {
-
 		},
 		batch: (session, data, callback) => {
 			client.query(`select count(*) as count,
