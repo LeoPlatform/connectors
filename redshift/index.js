@@ -8,9 +8,8 @@ const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum.js");
 
 const leo = require("leo-sdk");
-const ls = leo.streams;
+const ls = require('leo-streams');
 
-const binlogReader = require("./lib/binlogreader");
 module.exports = {
 	load: function(config, sql, domain, idColumns, opts) {
 		if (Array.isArray(idColumns)) {
@@ -49,7 +48,6 @@ module.exports = {
 			});
 		}
 	},
-	streamChanges: binlogReader.stream,
 	connect: connect,
 	checksum: function(config, fieldsTable) {
 		return checksum(connect(config), fieldsTable);
