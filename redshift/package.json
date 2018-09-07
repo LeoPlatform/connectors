@@ -1,7 +1,7 @@
 {
-	"name": "leo-connector-postgres",
-	"version": "1.4.0",
-	"description": "A Postgres database connector for use with Leo Platform",
+	"name": "leo-connector-redshift",
+	"version": "1.0.0",
+	"description": "A Redshift database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
 		"url": "git://github.com/LeoPlatform/connectors.git"
