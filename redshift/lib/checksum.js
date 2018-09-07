@@ -46,15 +46,16 @@ module.exports = function(connection, fieldsTable) {
 
 			getFields(connection, event).then((table) => {
 				let fieldCalcs = table.fieldCalcs;
-				let batchQuery = `select count(*) as count,
-				sum(('x' || substring(hash, 1, 8))::bit(32)::bigint) as sum1,
-				sum(('x' || substring(hash, 9, 8))::bit(32)::bigint) as sum2,
-				sum(('x' || substring(hash, 17, 8))::bit(32)::bigint) as sum3,
-				sum(('x' || substring(hash, 25, 8))::bit(32)::bigint) as sum4
-			from (
-				select md5(${fieldCalcs.join(' || ')}) as hash
-				from (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i
-			) as t`;
+				let batchQuery = `
+					select count(*) as count,
+						cast(sum(trunc(strtol(substring(hash, 1, 8), 16))) as decimal) as sum1,
+						cast(sum(trunc(strtol(substring(hash, 9, 8), 16))) as decimal) as sum2,
+						cast(sum(trunc(strtol(substring(hash, 17, 8), 16))) as decimal) as sum3,
+						cast(sum(trunc(strtol(substring(hash, 25, 8), 16))) as decimal) as sum4
+					from (
+						select md5(${fieldCalcs.join(' || ')}) as hash
+						from (${table.sql.replace('__IDCOLUMNLIMIT__', where(data, settings))}) i
+					) as t`;
 
 				logger.log("Batch Query", batchQuery);
 				connection.query(batchQuery, (err, rows) => {
