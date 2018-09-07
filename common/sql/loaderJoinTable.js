@@ -53,12 +53,14 @@ const domainIdentifierFor = (row, key) => {
 };
 
 
-module.exports = function(sqlClient, idKeys, sql, domainObj, opts = {
-	source: "loader",
-	isSnapshot: false,
-	values: true
-}) {
+module.exports = function(sqlClient, idKeys, sql, domainObj, opts) {
 	let ids = [];
+	opts = merge({
+		source: "loader",
+		isSnapshot: false,
+		values: true,
+		limit: 5000
+	}, opts || {});
 
 	function submit(push, done) {
 		async.doWhilst((done) => {
