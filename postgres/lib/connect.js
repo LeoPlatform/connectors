@@ -296,8 +296,13 @@ function create(pool, parentCache) {
 			var stream;
 			let myClient = null;
 			let pending = null;
+			let ended = false;
 			pool.connect().then(c => {
 				client.describeTable(shortTable, (err, result) => {
+					if (ended) {
+						c.release(true);
+						return;
+					}
 					columns = result.map(f => f.column_name);
 					myClient = c;
 					logger.log(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`);
@@ -348,11 +353,16 @@ function create(pool, parentCache) {
 					done(null);
 				}
 			}, (done) => {
-				stream.on('end', () => {
-					myClient.release(true);
+				ended = true;
+				if (stream) {
+					stream.on('end', () => {
+						myClient.release(true);
+						done();
+					});
+					stream.end();
+				} else {
 					done();
-				});
-				stream.end();
+				}
 			}));
 		},
 		streamFromTable: function(table, opts) {

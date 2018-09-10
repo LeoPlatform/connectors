@@ -19,7 +19,7 @@ module.exports = function(config, columnConfig) {
 	}, columnConfig || {});
 
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
-
+	client.columnConfig = columnConfig;
 
 	let deletesSetup = function(table, tableDef, ids, stream) {
 
@@ -33,7 +33,7 @@ module.exports = function(config, columnConfig) {
 		if (!(deleteTableName in schema)) {
 			let colLookup = {};
 			schema[publicTbl].map(c => colLookup[c.column_name] = c);
-			schema[deleteTableName] = ids.concat(columnConfig._auditdate).map(c => colLookup[c]);
+			schema[deleteTableName] = [columnConfig._auditdate].concat(ids).map(c => colLookup[c]);
 			let delCreateCols = [];
 			schema[deleteTableName].map(c => {
 				delCreateCols.push(`${c.column_name} ${c.data_type}`);
@@ -62,10 +62,10 @@ module.exports = function(config, columnConfig) {
 		});
 
 		let loadTask = done => ls.pipe(stream, ls.through((obj, cb) => {
-			if (obj.__leo_delete__) {
+			if (obj.__leo_delete__ && obj.__leo_delete_id__) {
 				deleteColumnsUsed[obj.__leo_delete__] = true;
 				cb(null, {
-					[obj.__leo_delete__]: obj.id,
+					[obj.__leo_delete__]: obj.__leo_delete_id__,
 					[columnConfig._auditdate]: dwClient.auditdate
 				});
 			} else {
@@ -108,7 +108,13 @@ module.exports = function(config, columnConfig) {
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
 		tasks.push(done => {
 			async.parallel([
-				done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done),
+				done => ls.pipe(stream, ls.through((obj, done) => {
+					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
+						done();
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTable(schemaStagingTbl), done),
 				deleteTasks.loadTask
 			], done);
 		});
@@ -204,7 +210,13 @@ module.exports = function(config, columnConfig) {
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
 		tasks.push(done => {
 			async.parallel([
-				done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done),
+				done => ls.pipe(stream, ls.through((obj, done) => {
+					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
+						done();
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTable(schemaStagingTbl), done),
 				deleteTasks.loadTask
 			], done);
 		});
@@ -758,7 +770,11 @@ module.exports = function(config, columnConfig) {
 		} else {
 			tasks.push((done) => {
 				let ids = table.nks.map(nk => `${schemaStagingTbl}.${nk}=${tableName}.${nk}`).join(' and ');
-				client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
+				if (ids.length) {
+					client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
+				} else {
+					done();
+				}
 			});
 		}
 		tasks.push(function(done) {

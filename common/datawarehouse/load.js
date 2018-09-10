@@ -40,7 +40,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							field: entity.field,
 							data: {
 								__leo_delete__: entity.field || "id",
-								id: id
+								__leo_delete_id__: id
 							}
 						}
 					}));
