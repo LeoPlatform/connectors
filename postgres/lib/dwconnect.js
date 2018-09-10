@@ -19,8 +19,72 @@ module.exports = function(config, columnConfig) {
 	}, columnConfig || {});
 
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
+	client.columnConfig = columnConfig;
 
-	client.importFact = function(stream, table, ids, callback) {
+	let deletesSetup = function(table, tableDef, ids, stream) {
+
+		const publicTbl = `public.${table}`;
+		let deleteTableName = `public.del_${table}`;
+		let deleteSchema = {};
+		let schema = client.getSchemaCache();
+
+		let tasks = [];
+		// Create Delete table if needed
+		if (!(deleteTableName in schema)) {
+			let colLookup = {};
+			schema[publicTbl].map(c => colLookup[c.column_name] = c);
+			schema[deleteTableName] = [columnConfig._auditdate].concat(ids).map(c => colLookup[c]);
+			let delCreateCols = [];
+			schema[deleteTableName].map(c => {
+				delCreateCols.push(`${c.column_name} ${c.data_type}`);
+			});
+			tasks.push(done => client.query(`create table if not exists ${deleteTableName} (${delCreateCols.join(",")})`, done));
+		}
+		schema[deleteTableName].map(c => {
+			deleteSchema[c.column_name] = c;
+		});
+
+		let deleteTasks = [];
+		let deleteColumnsUsed = {};
+		new Set(ids.concat(tableDef.deleteColumns || [])).forEach(col => {
+			let def = schema[publicTbl].filter(c => c.column_name == col)[0];
+			if (def) {
+				deleteTasks.push(done => deleteColumnsUsed[col] ? client.query(`delete from ${publicTbl} where ${col} in (select ${col} from ${deleteTableName} where ${col} is not null and ${columnConfig._auditdate} = ${dwClient.auditdate})`, done) : done());
+				if (!(col in deleteSchema)) {
+					deleteSchema[col] = Object.assign({}, def, {
+						table_name: `del_${table}`
+					});
+					// Add field to schema cache
+					schema[deleteTableName].push(deleteSchema[col]);
+					tasks.push(done => client.query(`alter table ${deleteTableName} add column if not exists ${col} ${def.data_type};`, done));
+				}
+			}
+		});
+
+		let loadTask = done => ls.pipe(stream, ls.through((obj, cb) => {
+			if (obj.__leo_delete__ && obj.__leo_delete_id__) {
+				deleteColumnsUsed[obj.__leo_delete__] = true;
+				cb(null, {
+					[obj.__leo_delete__]: obj.__leo_delete_id__,
+					[columnConfig._auditdate]: dwClient.auditdate
+				});
+			} else {
+				cb();
+			}
+		}), client.streamToTable(deleteTableName), (err) => {
+			if (err) {
+				return done(err);
+			}
+			async.series(deleteTasks, done);
+		});
+
+		return {
+			setupTasks: tasks,
+			loadTask: loadTask
+		};
+	};
+
+	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
 		const schemaTbl = `staging_${table}`;
 		const schemaStagingTbl = `${columnConfig.stageSchema}.${schemaTbl}`;
 		const publicTbl = `public.${table}`;
@@ -33,13 +97,28 @@ module.exports = function(config, columnConfig) {
 		schema[schemaStagingTbl] = schema[publicTbl];
 
 		let tasks = [];
-		// tasks.push(done => client.query(`alter table ${table} add primary key (${ids.join(',')})`, done));
+
+		let deleteTasks = deletesSetup(table, tableDef, [].concat(ids), stream);
+		deleteTasks.setupTasks.map(t => tasks.push(t));
 
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
 		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${publicTbl})`, done));
 		tasks.push(done => client.query(`create index ${schemaTbl}_id on ${schemaStagingTbl} (${ids.join(', ')})`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => {
+			async.parallel([
+				done => ls.pipe(stream, ls.through((obj, done) => {
+					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
+						done();
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTable(schemaStagingTbl), done),
+				deleteTasks.loadTask
+			], done);
+		});
+
 		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
 
 		client.describeTable(table, (err, result) => {
@@ -104,7 +183,7 @@ module.exports = function(config, columnConfig) {
 		});
 	};
 
-	client.importDimension = function(stream, table, sk, nk, scds, callback) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTbl = `staging_${table}`;
 		const schemaStagingTbl = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const publicTbl = `public.${table}`;
@@ -120,12 +199,28 @@ module.exports = function(config, columnConfig) {
 		schema[schemaStagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
 
 		let tasks = [];
+		let deleteTasks = deletesSetup(table, tableDef, [].concat(nk), stream);
+		deleteTasks.setupTasks.map(t => tasks.push(t));
+
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
 		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${publicTbl})`, done));
 		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${schemaStagingTbl} (${nk.join(', ')})`, done));
 		tasks.push(done => client.query(`alter table ${schemaStagingTbl} drop column ${sk}`, done));
-		tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => {
+			async.parallel([
+				done => ls.pipe(stream, ls.through((obj, done) => {
+					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
+						done();
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTable(schemaStagingTbl), done),
+				deleteTasks.loadTask
+			], done);
+		});
+
 		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
 
 		client.describeTable(table, (err, result) => {
@@ -485,7 +580,6 @@ module.exports = function(config, columnConfig) {
 				tasks.push(done => client.query(`create index ${table}_bk on ${table} using btree(${ids.join(',')})`, done));
 			}
 		}
-
 		queries.map(q => {
 			tasks.push(done => client.query(q, done));
 		});
@@ -676,7 +770,11 @@ module.exports = function(config, columnConfig) {
 		} else {
 			tasks.push((done) => {
 				let ids = table.nks.map(nk => `${schemaStagingTbl}.${nk}=${tableName}.${nk}`).join(' and ');
-				client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
+				if (ids.length) {
+					client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
+				} else {
+					done();
+				}
 			});
 		}
 		tasks.push(function(done) {

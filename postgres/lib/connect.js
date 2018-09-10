@@ -83,7 +83,7 @@ function create(pool, parentCache) {
 			});
 		},
 		disconnect: pool.end.bind(pool),
-		end: pool.end.bind(pool),	
+		end: pool.end.bind(pool),
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
@@ -113,7 +113,7 @@ function create(pool, parentCache) {
 					}
 					schema[tblSch].push(r);
 				});
-				Object.keys(schema).map((t)=>{
+				Object.keys(schema).map((t) => {
 					let parts = t.match(/^public\.(.*)$/);
 					if (parts) {
 						schema[parts[1]] = schema[t];
@@ -288,7 +288,7 @@ function create(pool, parentCache) {
 				schema = ts[0];
 				shortTable = ts[1];
 			}
-					
+
 			// opts = Object.assign({
 			// 	records: 10000
 			// }, opts || {});
@@ -296,10 +296,16 @@ function create(pool, parentCache) {
 			var stream;
 			let myClient = null;
 			let pending = null;
+			let ended = false;
 			pool.connect().then(c => {
 				client.describeTable(shortTable, (err, result) => {
+					if (ended) {
+						c.release(true);
+						return;
+					}
 					columns = result.map(f => f.column_name);
 					myClient = c;
+					logger.log(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`);
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
 					stream.on("error", function(err) {
 						console.log(`COPY error: ${err.where}`, err);
@@ -347,11 +353,16 @@ function create(pool, parentCache) {
 					done(null);
 				}
 			}, (done) => {
-				stream.on('end', () => {
-					myClient.release(true);
+				ended = true;
+				if (stream) {
+					stream.on('end', () => {
+						myClient.release(true);
+						done();
+					});
+					stream.end();
+				} else {
 					done();
-				});
-				stream.end();
+				}
 			}));
 		},
 		streamFromTable: function(table, opts) {
