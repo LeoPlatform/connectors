@@ -25,9 +25,35 @@ module.exports = function(client, tableConfig, stream, callback) {
 		});
 	});
 
+	let checkforDelete = ls.through(function(obj, done) {
+		if (obj.payload.type == "delete") {
+			let data = obj.payload.data || {};
+			let ids = data.in || [];
+			let entities = data.entities || [];
+			ids.map(id => {
+				entities.map(entity => {
+					this.push(Object.assign({}, obj, {
+						payload: {
+							type: entity.type,
+							entity: entity.name,
+							command: "delete",
+							field: entity.field,
+							data: {
+								__leo_delete__: entity.field || "id",
+								id: id
+							}
+						}
+					}));
+				});
+			});
+			done();
+		} else {
+			done(null, obj);
+		}
+	});
 
 	let usedTables = {};
-	ls.pipe(stream, combine(tableNks), ls.write((obj, done) => {
+	ls.pipe(stream, checkforDelete, combine(tableNks), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
@@ -59,14 +85,14 @@ module.exports = function(client, tableConfig, stream, callback) {
 								tableStatuses[t] = "First Load";
 							}
 							done(err);
-						});
+						}, tableConfig[t]);
 					} else {
 						client.importFact(obj[t].stream, t, nk, (err, tableInfo) => {
 							if (!err && tableInfo && tableInfo.count === 0) {
 								tableStatuses[t] = "First Load";
 							}
 							done(err);
-						});
+						}, tableConfig[t]);
 					}
 				});
 			}

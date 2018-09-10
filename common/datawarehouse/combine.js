@@ -118,7 +118,11 @@ function combine(file) {
 				process.exit();
 			}
 			if (lastObj && id === lastId) {
-				lastObj = merge(lastObj, data);
+				if (data.__leo_delete__) {
+					lastObj = data;
+				} else {
+					lastObj = merge(lastObj, data);
+				}
 			} else {
 				if (lastObj) {
 					push(lastObj);
