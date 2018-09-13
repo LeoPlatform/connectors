@@ -3,8 +3,7 @@
 const refUtil = require('leo-sdk/lib/reference.js');
 const async = require('async');
 const MAX = 5000;
-
-const moment = require('moment');
+const sqlstring = require('sqlstring');
 
 module.exports = function(event, context, sdk) {
 	if (!event || !context || !sdk) {
@@ -36,12 +35,13 @@ module.exports = function(event, context, sdk) {
 
 		let tables = {},
 			joins = {},
-			sqlQuery;
+			sqlQuery,
+			databases = [];
 
 		return {
 			// Table => primary key || SELECT query to get the primary key
 			mapDomainId: function(table, pk) {
-				tables[table] = pk;
+				tables[table] = pk || true;
 
 				return this;
 			},
@@ -58,6 +58,22 @@ module.exports = function(event, context, sdk) {
 				return this;
 			},
 
+			includeSchema: function(database) {
+				if (Array.isArray(database)) {
+					database.forEach(d => {
+						if (databases.indexOf(d) === -1) {
+							databases.push(d);
+						}
+					});
+				} else {
+					if (databases.indexOf(database) === -1) {
+						databases.push(database);
+					}
+				}
+
+				return this;
+			},
+
 			// do stuff to build the domain objects
 			run: function (callback) {
 				let readParams = {};
@@ -68,38 +84,28 @@ module.exports = function(event, context, sdk) {
 				params.connector.domainObjectLoader(event.botId, params.connection, (obj, done) => {
 					let objArray = [];
 
-					Object.keys(tables).forEach((table) => {
+					// @todo handle deletes separately
+					if (obj.update) {
+						obj = obj.update;
+					}
 
-						// @todo handle deletes separatley
-						if (obj.update && obj.update[table]) {
-							obj[table] = obj.update[table];
-						}
+					Object.keys(obj).forEach(database => {
+						// if it's an array than it's a table, not a database
+						if (Array.isArray(obj[database])) {
+							let table = database;
 
-						// only process if we have any data for this table
-						if (obj[table] && obj[table].length) {
-							if (Array.isArray(tables[table])) { // if we passed in an array of primary keys
-								// turn the object into an array of items
-								objArray.push(obj[table].map(row => {
-									let array = [];
-									for (let key of tables[table]) {
-										array.push(row[key]);
+							if (tables[table]) {
+								processIds(obj, objArray, table, tables);
+							}
+						} else if (typeof obj[database] === 'object') {
+							// then it's actually a database
+							if (databases.length && databases.indexOf(database) !== -1 || !databases.length) {
+								Object.keys(obj[database]).forEach(table => {
+									// process if this is one of the tables we have selected for processing.
+									if (tables[table]) {
+										processIds(obj[database], objArray, table, tables);
 									}
-
-									return array;
-								}));
-
-							// if the value of any of the tables is a SELECT query, replace ? with the IDs in obj[table]
-							} else if (tables[table].match(/^SELECT/)) {
-								async.doWhilst((done) => {
-
-									// split the ID's up into no more than 5k for each query
-									let ids = obj[table].splice(0, params.limit || MAX);
-									objArray.push(tables[table].replace(/\?/g, ids.filter(id => {return id != undefined}).join()));
-									done();
-								}, () => obj[table].length);
-							} else {
-								// we just have id's. Push them into the object
-								objArray.push(obj[table]);
+								});
 							}
 						}
 					});
@@ -109,7 +115,13 @@ module.exports = function(event, context, sdk) {
 				function (ids, builder) {
 					let idsList = ids;
 					if (Array.isArray(ids)) {
-						idsList = ids.filter(id => {return id != undefined}).join();
+						idsList = ids.filter(id => {return id != undefined}).map(id => {
+							if (isNaN(id)) {
+								return sqlstring.escape(id);
+							}
+
+							return id;
+						}).join();
 					}
 
 					let builderSql = builder(params.pk, sqlQuery.replace(/\?/g, idsList));
@@ -263,6 +275,7 @@ module.exports = function(event, context, sdk) {
 		}
 
 		let trackedTables = {};
+		let omitTables = [];
 
 		// get the starting point
 		let queue = refUtil.ref(event.source);
@@ -281,7 +294,23 @@ module.exports = function(event, context, sdk) {
 				trackedTables[table] = pk;
 				return this;
 			},
+			omitTable: function(table) {
+				if (Array.isArray(table)) {
+					table.forEach(t => {
+						if (omitTables.indexOf(t) === -1) {
+							omitTables.push(t);
+						}
+					});
+				} else {
+					if (omitTables.indexOf(table) === -1) {
+						omitTables.push(table);
+					}
+				}
+
+				return this;
+			},
 			run: function(callback) {
+				params.omitTables = omitTables;
 				let stream = params.connector.streamChanges(params.connection, trackedTables, params);
 
 				let end;
@@ -301,4 +330,40 @@ module.exports = function(event, context, sdk) {
 			}
 		};
 	};
+
+	// add an alias so this makes more sense
+	this.trackDatabaseChanges = this.trackTableChanges;
 };
+
+function processIds(obj, objArray, table, tables)
+{
+	// only process if we have any data for this table
+	if (obj[table] && obj[table].length) {
+		if (Array.isArray(tables[table])) { // if we passed in an array of primary keys
+			// turn the object into an array of items
+			objArray.push(obj[table].map(row => {
+				let array = [];
+				for (let key of tables[table]) {
+					array.push(row[key]);
+				}
+
+				return array;
+			}));
+
+			// if the value of any of the tables is a SELECT query, replace ? with the IDs in obj[table]
+		} else if (typeof tables[table] === 'string' && tables[table].match(/^SELECT/)) {
+			async.doWhilst((done) => {
+
+				// split the ID's up into no more than 5k for each query
+				let ids = obj[table].splice(0, params.limit || MAX);
+				objArray.push(tables[table].replace(/\?/g, ids.filter(id => {
+					return id != undefined
+				}).join()));
+				done();
+			}, () => obj[table].length);
+		} else {
+			// we just have id's. Push them into the object
+			objArray.push(obj[table]);
+		}
+	}
+}

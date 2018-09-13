@@ -1,5 +1,5 @@
 "use strict";
-const logger = require("leo-sdk/lib/logger")("leo.connector.sql");
+const logger = require("leo-logger")("leo.connector.sql");
 const async = require("async");
 const leo = require("leo-sdk");
 const lib = require("./loader/lib");
@@ -48,7 +48,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 
 		if (obj.jointable) {
 			submit(push, done);
-		} else if (typeof sql == "function") {
+		} else if (typeof sql === "function") {
 			lib.processIds(sqlClient, obj, sql, null, (err, newIds) => {
 				if (err) {
 					console.log(err);
@@ -82,7 +82,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					});
 				}
 			});
-			async.parallelLimit(tasks, 10, (err, results) => {
+			async.parallelLimit(tasks, 10, (err) => {
 				if (err) {
 					done(err);
 				} else {
@@ -110,7 +110,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 	function buildEntities(ids, push, callback) {
 
 		let r = domainObj(ids, builder.createLoader);
-		if (typeof r.get == "function") {
+		if (typeof r.get === "function") {
 			r = r.get();
 		}
 		let obj = Object.assign({
@@ -125,15 +125,9 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 		ids.forEach(id => {
 			domains[id] = {};
 			Object.keys(obj.joins).forEach(name => {
-				let t = obj.joins[name];
-				if (t.type === "one_to_many") {
-					domains[id][name] = [];
-				} else {
-					domains[id][name] = {};
-				}
+				domains[id][name] = [];
 			});
 		});
-
 
 		function mapResults(results, fields, each) {
 			let mappings = [];
@@ -175,6 +169,7 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 			});
 		}
 
+		// handle the main query for the domain object loader
 		tasks.push(done => {
 			if (!obj.id) {
 				logger.log('[FATAL ERROR]: No ID specified');
@@ -189,11 +184,11 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 					let id = row[obj.id];
 					if (!id) {
 						logger.error('ID: "' + obj.id + '" not found in object:');
-					} else if (!domains[row[obj.id]]) {
-						logger.error('ID: "' + obj.id + '" with a value of: "' + row[obj.id] + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+					} else if (!domains[id]) {
+						logger.error('ID: "' + obj.id + '" with a value of: "' + id + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
 					} else {
 						//We need to keep the domain relationships in tact
-						domains[row[obj.id]] = Object.assign(domains[row[obj.id]], row);
+						domains[id] = Object.assign(domains[id], row);
 					}
 				});
 				done();
@@ -202,10 +197,12 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 			});
 		});
 
-
+		// handle join queries
 		Object.keys(obj.joins).forEach(name => {
 			let t = obj.joins[name];
-			if (t.type === "one_to_many") {
+			if (t.type && t.type === "one_to_one") {
+				logger.error('one-to-one joins are not supported as a separate function. Please include them in the main query.')
+			} else {
 				tasks.push(done => {
 					sqlClient.query(t.sql, (err, results, fields) => {
 						if (err) {
@@ -225,30 +222,10 @@ module.exports = function(sqlClient, sql, domainObj, opts) {
 						inRowMode: true
 					});
 				});
-			} else {
-				tasks.push(done => {
-					sqlClient.query(t.sql, (err, results, fields) => {
-						if (err) {
-							return done(err);
-						} else if (!results.length) {
-							return done();
-						}
-
-						mapResults(results, fields, row => {
-							if (row.length) {
-								if (t.transform) {
-									row = t.transform(row);
-								}
-								domains[row[t.on]][name] = row;
-							}
-						});
-						done();
-					}, {
-						inRowMode: true
-					});
-				});
 			}
 		});
+
+		// process all the tasks
 		async.parallelLimit(tasks, 5, (err) => {
 			if (err) {
 				callback(err);
