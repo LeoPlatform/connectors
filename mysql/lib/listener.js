@@ -5,6 +5,7 @@ const ls = require('leo-streams');
 const logger = require('leo-logger')('leo-connector-mysql/listener');
 const generateBinlog = require('zongji/lib/sequence/binlog');
 const util = require('util');
+const merge = require('lodash.merge');
 
 ZongJi.prototype._init = function () {
 	let self = this;
@@ -235,9 +236,16 @@ ZongJi.prototype.start = function (options) {
 	return pass;
 };
 
-module.exports = function (connection, tables, opts = {}) {
-	// make sure we have a start
-	opts.start = opts.start || '0::0';
+module.exports = function (connection, tables, opts) {
+	opts = merge({
+		config: {},
+		duration: undefined,
+		start: '0::0',
+		batch: undefined,
+		omitTables: undefined,
+		source: 'system:mysql'
+	}, opts);
+
 	let start = opts.start.split('::');
 
 	// Client code
@@ -304,8 +312,10 @@ module.exports = function (connection, tables, opts = {}) {
 			}
 
 			obj.data.map(item => {
-				if (item.after) {
-					return item.after;
+				// don't process omitted tables
+				if (opts.omitTables && opts.omitTables.indexOf(obj.table) !== -1) {
+					logger.debug('Omitting record from table', obj.table);
+					return;
 				}
 
 				let writeEvent = {
