@@ -95,7 +95,7 @@ module.exports = function(event, context, sdk) {
 							let table = database;
 
 							if (tables[table]) {
-								processIds(obj, objArray, table, tables);
+								processIds(obj, objArray, table, tables, params);
 							}
 						} else if (typeof obj[database] === 'object') {
 							// then it's actually a database
@@ -103,7 +103,7 @@ module.exports = function(event, context, sdk) {
 								Object.keys(obj[database]).forEach(table => {
 									// process if this is one of the tables we have selected for processing.
 									if (tables[table]) {
-										processIds(obj[database], objArray, table, tables);
+										processIds(obj[database], objArray, table, tables, params);
 									}
 								});
 							}
@@ -335,7 +335,7 @@ module.exports = function(event, context, sdk) {
 	this.trackDatabaseChanges = this.trackTableChanges;
 };
 
-function processIds(obj, objArray, table, tables)
+function processIds(obj, objArray, table, tables, params)
 {
 	// only process if we have any data for this table
 	if (obj[table] && obj[table].length) {
