@@ -8,6 +8,14 @@ const checksum = require("./lib/checksum");
 const streamChanges = require('./lib/listener');
 const leo = require("leo-sdk");
 const ls = leo.streams;
+let dol = require("leo-connector-common/dol");
+
+function DomainObjectLoader(client) {
+	if (typeof client.query !== "function") {
+		client = connect(client);
+	}
+	return new dol(client)
+}
 
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
@@ -50,5 +58,7 @@ module.exports = {
 
 		return streamChanges(config, opts);
 	},
-	connect: connect
+	connect: connect,
+	dol: DomainObjectLoader,
+	DomainObjectLoader: DomainObjectLoader,
 };
