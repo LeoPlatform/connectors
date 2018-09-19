@@ -49,7 +49,7 @@ module.exports = function(c) {
 
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query.slice(0, 300));
+			log.info(`SQL query #${queryId} is `, query.slice(0, 300), params && params.length ? params : "");
 			log.time(`Ran Query #${queryId}`);
 
 			m.query({

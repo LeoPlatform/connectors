@@ -1,36 +1,37 @@
 {
-	"name": "leo-connector-mysql",
-	"version": "1.6.0",
-	"description": "A MySQL database connector for use with Leo Platform",
-	"repository": {
-		"type": "git",
-		"url": "git://github.com/LeoPlatform/connectors.git"
-	},
-	"main": "index.js",
-	"scripts": {
-		"test": "mocha --recursive -w"
-	},
-	"author": "",
-	"license": "ISC",
-	"bugs": {
-		"url": "https://github.com/LeoPlatform/connectors/issues"
-	},
-	"homepage": "https://github.com/LeoPlatform/connectors#readme",
-	"dependencies": {
-		"chai": "^4.1.2",
-		"leo-connector-common": "^1.5.0",
-		"leo-logger": "^1.0.0",
-		"leo-sdk": "^2.0.1",
-		"mysql2": "^1.6.1",
-		"zongji": "^0.4.6"
-	},
-	"config": {
-		"leo": {
-			"build": {
-				"include": [
-					"mysql2"
-				]
-			}
-		}
-	}
+  "name": "leo-connector-mysql",
+  "version": "2.0.0",
+  "description": "A MySQL database connector for use with Leo Platform",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/LeoPlatform/connectors.git"
+  },
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --recursive -w"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LeoPlatform/connectors/issues"
+  },
+  "homepage": "https://github.com/LeoPlatform/connectors#readme",
+  "dependencies": {
+    "chai": "^4.1.2",
+    "leo-connector-common": "^1.4.0",
+    "leo-logger": "^1.0.0",
+    "leo-sdk": "^2.0.1",
+    "leo-streams": "^1.0.1",
+    "mysql2": "^1.6.1",
+    "zongji": "^0.4.6"
+  },
+  "config": {
+    "leo": {
+      "build": {
+        "include": [
+          "mysql2"
+        ]
+      }
+    }
+  }
 }

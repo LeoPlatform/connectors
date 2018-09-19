@@ -2,110 +2,29 @@
 
 const ZongJi = require("zongji");
 const ls = require('leo-streams');
-const logger = require('leo-logger')('leo-connector-mysql/listener');
-const generateBinlog = require('zongji/lib/sequence/binlog');
-const util = require('util');
-const merge = require('lodash.merge');
+const moment = require("moment");
+const logger = require("leo-logger")("mysql").sub("binloglistener");
+logger.configure(/mysql\.binloglistener/, {
+	info: true
+});
 
-ZongJi.prototype._init = function () {
-	let self = this;
-	let binlogOptions = {
-		tableMap: self.tableMap,
-	};
-	let firstLog = {
-		filename: null,
-		logNumber: null,
-		position: 4
-	};
-
-	let asyncMethods = [
-		{
-			name: '_isChecksumEnabled',
-			callback: function (checksumEnabled) {
-				self.useChecksum = checksumEnabled;
-				binlogOptions.useChecksum = checksumEnabled;
-			}
-		},
-		{
-			name: '_findBinlogs',
-			callback: function (result) {
-				if (result && result.length) {
-					if (self.options.startAtEnd) {
-						let row = result[result.length - 1];
-						binlogOptions.filename = row.Log_name;
-						binlogOptions.position = row.File_size;
-					} else {
-						firstLog.filename = result[0].Log_name;
-						let logNumber = firstLog.filename.match(/\.(\d+)$/);
-						firstLog.logNumber = logNumber && logNumber[1];
-					}
-				}
-			}
-		}
-	];
-
-	let methodIndex = 0;
-	let nextMethod = function () {
-		let method = asyncMethods[methodIndex];
-		self[method.name](function (/* args */) {
-			method.callback.apply(this, arguments);
-			methodIndex++;
-			if (methodIndex < asyncMethods.length) {
-				nextMethod();
-			}
-			else {
-				ready();
-			}
-		});
-	};
-	nextMethod();
-
-	let ready = function () {
-		// Run asynchronously from _init(), as serverId option set in start()
-		if (self.options.serverId !== undefined) {
-			binlogOptions.serverId = self.options.serverId;
-		}
-
-		if (self.options.binlogName && self.options.binlogNextPos) {
-			binlogOptions.filename = self.options.binlogName;
-			binlogOptions.position = self.options.binlogNextPos;
-
-			let selectedLogNumber = binlogOptions.filename.match(/\.(\d+)$/);
-			if (selectedLogNumber && selectedLogNumber[1] && selectedLogNumber[1] < firstLog.logNumber) {
-				binlogOptions.filename = firstLog.filename;
-				binlogOptions.position = firstLog.position;
-			}
-		}
-
-		self.binlog = generateBinlog.call(self, binlogOptions);
-		self.ready = true;
-		self._executeCtrlCallbacks();
-	};
+let typeMap = {
+	writerows: 'update',
+	updaterows: 'update',
+	deleterows: 'delete'
 };
 
-ZongJi.prototype._findBinlogs = function (next) {
-	let self = this;
-	self.ctrlConnection.query('SHOW BINARY LOGS', function (err, rows) {
-		if (err) {
-			// Errors should be emitted
-			self.emit('error', err);
-			return;
-		}
-		next(rows);
-	});
-};
+ZongJi.prototype._fetchTableInfo = function(tableMapEvent, next) {
+	var self = this;
+	var sql = `SELECT COLUMN_NAME, COLLATION_NAME, CHARACTER_SET_NAME, COLUMN_COMMENT, COLUMN_TYPE, COLUMN_KEY
+		FROM information_schema.columns WHERE table_schema='${tableMapEvent.schemaName}' 
+		AND table_name='${tableMapEvent.tableName}'`;
 
-let tableInfoQueryTemplate = `SELECT 
-	COLUMN_NAME, COLLATION_NAME, CHARACTER_SET_NAME, 
-	COLUMN_COMMENT, COLUMN_TYPE, COLUMN_KEY 
-	FROM information_schema.columns WHERE table_schema='%s' AND table_name='%s'`;
+	if (self.__ended) {
+		return;
+	}
 
-ZongJi.prototype._fetchTableInfo = function (tableMapEvent, next) {
-	let self = this;
-	let sql = util.format(tableInfoQueryTemplate,
-		tableMapEvent.schemaName, tableMapEvent.tableName);
-
-	this.ctrlConnection.query(sql, function (err, rows) {
+	this.ctrlConnection.query(sql, function(err, rows) {
 		if (err) {
 			// Errors should be emitted
 			self.emit('error', err);
@@ -113,7 +32,6 @@ ZongJi.prototype._fetchTableInfo = function (tableMapEvent, next) {
 			// processed since next() will never be called
 			return;
 		}
-
 		if (rows.length === 0) {
 			self.emit('error', new Error(
 				'Insufficient permissions to access: ' +
@@ -122,103 +40,98 @@ ZongJi.prototype._fetchTableInfo = function (tableMapEvent, next) {
 			// processed since next() will never be called
 			return;
 		}
-
 		self.tableMap[tableMapEvent.tableId] = {
 			columnSchemas: rows,
 			parentSchema: tableMapEvent.schemaName,
 			tableName: tableMapEvent.tableName,
-			primaryKey: rows.filter(r => r.COLUMN_KEY === 'PRI').map(r => r.COLUMN_NAME)
+			primaryKey: rows.filter(r => r.COLUMN_KEY == "PRI").map(r => r.COLUMN_NAME)
 		};
 
 		next();
 	});
 };
 
-ZongJi.prototype.start = function (options) {
-	let self = this;
+ZongJi.prototype.start = function(options) {
+	var self = this;
 	self.set(options);
 
 	let pass = ls.passthrough({
 		objectMode: true
 	});
 
+	// Pass along any errors from the connection
+	self.on("error", error => pass.emit("error", error));
+
 	let passEnd = pass.end;
-	pass.end = function () {
+	pass.end = function() {
+		self.__ended = true;
 		self.connection.destroy();
 
+		logger.debug("Ending binglog stream");
 		self.ctrlConnection.query(
 			'KILL ' + self.connection.threadId,
-			function () {
+			function() {
 				if (self.ctrlConnectionOwner) {
 					self.ctrlConnection.destroy();
 				}
-
 				passEnd.call(pass);
 			}
 		);
 	};
 
-	let _start = function () {
+	var _start = function() {
 		self.connection._implyConnect();
-		self.connection._protocol._enqueue(new self.binlog(function (error, event) {
-			if (error) return pass.emit('error', error);
+		if (self.options.binlogName) {
+			logger.log(`Starting from ${self.options.source} ${self.options.binlogName}::${self.options.binlogNextPos}`);
+		} else {
+			logger.log(`Starting from ${self.options.source} latest`);
+		}
+		self.connection._protocol._enqueue(new self.binlog(function(error, event) {
+			if (error) return self.emit('error', error);
 			// Do not emit events that have been filtered out
 			if (event === undefined || event._filtered === true) return;
 
-			switch (event.getTypeName()) {
-				case 'TableMap':
-					let tableMap = self.tableMap[event.tableId];
 
+			let eventName = event.getTypeName().toLowerCase();
+			switch (eventName) {
+				case 'tablemap':
+					var tableMap = self.tableMap[event.tableId];
 					if (!tableMap) {
 						self.connection.pause();
-						self._fetchTableInfo(event, function () {
+						self._fetchTableInfo(event, function() {
 							// merge the column info with metadata
 							event.updateColumnInfo();
 							self.connection.resume();
 						});
-						return;
 					}
+					return;
 					break;
-
-				case 'Rotate':
+				case 'rotate':
 					if (self.binlogName !== event.binlogName) {
 						self.binlogName = event.binlogName;
 					}
-
-					let emitEvent = {
-						rotate: {
-							position: event.position,
-							binlogName: event.binlogName
-						}
-					};
-					pass.write(emitEvent);
 					return;
 					break;
 			}
 			self.binlogNextPos = event.nextPosition;
 
-			let type = event.getTypeName().toLowerCase();
-			if (type === 'writerows' || type === 'updaterows') {
-				type = 'update';
-			} else if (type === 'deleterows') {
-				type = 'delete';
-			}
-
-			let emitEvent = {
-				timestamp: event.timestamp,
-				nextPosition: event.nextPosition,
-				binlogName: event._zongji && event._zongji.binlogName && event._zongji.binlogName,
-				binlogNextPos: event._zongji && event._zongji.binlogNextPos && event._zongji.binlogNextPos,
-				type: type,
-				database: event.tableMap[event.tableId].parentSchema,
-				table: event.tableMap[event.tableId].tableName,
-				primaryKey: event.tableMap[event.tableId].primaryKey,
-				data: event.rows
-			};
-
-			let result = pass.write(emitEvent);
-
-			if (!result) {
+			let tableName = event.tableMap[event.tableId].tableName;
+			let schema = event.tableMap[event.tableId].parentSchema;
+			if (event.tableMap[event.tableId].primaryKey.length && !pass.write({
+					timestamp: event.timestamp,
+					event_source_timestamp: event.timestamp,
+					correlation_id: {
+						source: self.options.source || 'system:mysql',
+						start: self.binlogName + "::" + event.nextPosition
+					},
+					payload: {
+						schema: schema,
+						tableName: tableName,
+						primaryKey: event.tableMap[event.tableId].primaryKey,
+						type: typeMap[eventName],
+						rows: event.rows
+					}
+				})) {
 				self.connection.pause();
 				pass.once('drain', () => {
 					self.connection.resume();
@@ -226,7 +139,6 @@ ZongJi.prototype.start = function (options) {
 			}
 		}));
 	};
-
 	if (this.ready) {
 		_start();
 	} else {
@@ -236,176 +148,119 @@ ZongJi.prototype.start = function (options) {
 	return pass;
 };
 
-module.exports = function (connection, tables, opts) {
-	opts = merge({
-		config: {},
-		duration: undefined,
-		start: '0::0',
-		batch: undefined,
-		omitTables: undefined,
-		source: 'system:mysql'
-	}, opts);
-
-	let start = opts.start.split('::');
-
-	// Client code
-	// @todo change connection from config to an actual connection
-	let listener = new ZongJi(connection);
-
-	let includeSchema = {};
-	let excludeSchema = {};
-	if (opts.config.database) {
-		if (tables && tables.length) {
-			// log only selected tables
-			includeSchema[opts.config.database] = Object.keys(tables);
-		} else {
-			// log all table changes for the selected database
-			includeSchema[opts.config.database] = true;
-		}
-	} else {
-		// undefined for all databases except the excluded
-		includeSchema = undefined;
-
-		// omit default mysql tables
-		excludeSchema = {
+module.exports = function(config, opts) {
+	opts = Object.assign({
+		server_id: 99999,
+		includeSchema: undefined,
+		excludeSchema: {
 			information_schema: true,
 			mysql: true,
 			performance_schema: true,
 			sys: true
-		};
-	}
+		},
+		fullEvent: false,
+		startAtEnd: true
+	}, opts || {});
 
-	let stream = listener.start({
-		binlogName: start[0] || undefined,
-		binlogNextPos: parseInt(start[1]) > 3 && start[1] || undefined,
-		serverId: opts.config.server_id || 1,
-		includeEvents: ['rotate', 'tablemap', 'writerows', 'updaterows', 'deleterows'],
-		includeSchema: includeSchema,
-		excludeSchema: excludeSchema
-	});
 
-	// by default, pass in 1000 records or whatever we get in 1 second
-	let batch = ls.batch(opts.batch || {
-		count: 1000,
-		size: 1024 * 1024 * 3,
-		time: {
-			seconds: 1
+	let position = opts.position || {};
+	if (typeof position === "string") {
+		let [binlogName, binlogNextPos] = position.split("::");
+		position = {
+			binlogName,
+			binlogNextPos
 		}
-	});
-
-	if (opts.duration) {
-		// End the stream and listener after 285 seconds (4:45)
-		setTimeout(() => {
-			stream.end();
-		}, opts.duration * 0.8);
 	}
 
-	return ls.pipeline(stream
-		, ls.through(function (obj, done) {
+	let startParams = {
+		binlogName: position.binlogName,
+		binlogNextPos: parseInt(position.binlogNextPos || 0),
+		startAtEnd: opts.startAtEnd,
+		serverId: opts.server_id,
+		includeEvents: ['rotate', 'tablemap', 'writerows', 'updaterows', 'deleterows'],
+		includeSchema: opts.includeSchema,
+		excludeSchema: opts.excludeSchema,
+		source: opts.source
+	}
+	// Require a Starting location
+	if (!startParams.binlogName) {
+		throw new Error("opts.binlogName and opts.binlogNextPos are required");
+	}
 
-			if (!obj.data) {
+	let z = new ZongJi(config);
+	let stream = z.start(startParams);
+
+	let timeoutHandle;
+	if (opts.stopTime) {
+		timeoutHandle = setTimeout(() => stream.end(), Math.min(2147483647, moment(opts.stopTime) - moment()));
+	} else if (opts.duration) {
+		timeoutHandle = setTimeout(() => stream.end(), Math.min(2147483647, moment.duration(opts.duration).asMilliseconds()));
+	}
+	if (timeoutHandle) {
+		stream.on("finish", () => clearTimeout(timeoutHandle));
+	}
+
+	if (opts.fullEvent) {
+		return stream;
+	} else {
+		let groupP = null;
+		let units = 0;
+
+		return ls.pipeline(stream, ls.batch({
+			count: 1000,
+			size: 1024 * 1024 * 3,
+			time: {
+				milliseconds: 400
+			},
+			recordCount: p => p.rows ? p.rows.length : 0
+		}), ls.through((obj, done) => {
+			if (!obj.payload || !obj.payload.length) {
 				return done();
 			}
 
-			if (!Array.isArray(obj.data)) {
-				obj.data = [obj.data];
-			}
-
-			obj.data.map(item => {
-				// don't process omitted tables
-				if (opts.omitTables && opts.omitTables.indexOf(obj.table) !== -1) {
-					logger.debug('Omitting record from table', obj.table);
-					return;
-				}
-
-				let writeEvent = {
-					type: obj.type,
-					database: obj.database,
-					table: obj.table,
-					payload: item.after || item,
-					binlogName: obj.binlogName,
-					binlogNextPos: obj.binlogNextPos,
-					primaryKey: obj.primaryKey,
-					timestamp: obj.timestamp
-				};
-
-				this.push(writeEvent);
-			});
-
-			done();
-		})
-		, batch
-		, ls.through((batch, done) => {
-			let payload = {
-				update: {},
-				delete: {}
+			let event = {
+				timestamp: obj.timestamp,
+				event_source_timestamp: obj.event_source_timestamp,
+				correlation_id: obj.correlation_id,
+				payload: {}
 			};
-
-			batch.correlation_id = {
-				start: '',
-				end: '',
-				source: opts.source || 'system:mysql'
-			};
-
-			batch.payload.forEach(row => {
-				let eid = row.binlogName + '::' + row.binlogNextPos;
-
-				// set the correlation data
-				// set start only if it doesn't exist (it'll be our first result)
-				if (!batch.correlation_id.start) {
-					batch.correlation_id.start = eid;
+			let payload = event.payload;
+			event.correlation_id.units = 0;
+			obj.payload.map(o => {
+				let p = o.payload;
+				if (!(p.type in payload)) {
+					payload[p.type] = {};
 				}
-
-				// always set the end. It'll end up being the last one in the batch.
-				batch.correlation_id.end = eid;
-				// batch.eid = eid;
-				// batch.event_source_timestamp = row.timestamp;
-				logger.info('eid', eid);
-
-				// set the payload
-				if (!payload[row.type]) {
-					payload[type] = {};
+				if (!(p.schema in payload[p.type])) {
+					payload[p.type][p.schema] = {};
 				}
-				if (!payload[row.type][row.database]) {
-					payload[row.type][row.database] = {};
+				if (!(p.tableName in payload[p.type][p.schema])) {
+					payload[p.type][p.schema][p.tableName] = [];
 				}
-				if (!payload[row.type][row.database][row.table]) {
-					payload[row.type][row.database][row.table] = [];
-				}
+				event.correlation_id.units += p.rows.length;
 
-				// tables[table] will be the either a single PK or a Composite Key
-				if (tables && tables[row.table]) {
-					if (typeof tables[row.table] === 'string') {
-						payload[row.type][row.database][row.table].push(row.payload[tables[row.table]]);
-					} else {
-						// handle composite keys
-						let tmp = {};
-						for (let id of tables[row.table]) {
-							tmp[id] = row.payload[id];
+				let ids = payload[p.type][p.schema][p.tableName];
+
+				if (p.primaryKey.length == 1) {
+					p.rows.forEach(r => {
+						if ('after' in r) {
+							r = r.after;
 						}
-
-						payload[row.type][row.database][row.table].push(tmp);
-					}
-				} else if (row.primaryKey && row.primaryKey.length) {
-					// only create a payload if we have one or more primary keys
-					// primary key is an array
-					let tmp = {};
-
-					if (row.primaryKey.length > 1) {
-						for (let id of row.primaryKey) {
-							tmp[id] = row.payload[id];
+						ids.push(r[p.primaryKey[0]]);
+					});
+				} else {
+					p.rows.forEach(r => {
+						if ('after' in r) {
+							r = r.after;
 						}
-					} else {
-						tmp = row.payload[row.primaryKey[0]];
-					}
-
-					payload[row.type][row.database][row.table].push(tmp);
+						ids.push(p.primaryKey.reduce((arr, key) => {
+							arr[key] = r[key];
+							return arr;
+						}, {}));
+					});
 				}
 			});
-
-			batch.payload = payload;
-
-			done(null, batch);
-		})
-	);
+			done(null, event);
+		}));
+	}
 };

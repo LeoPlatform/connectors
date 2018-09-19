@@ -5,9 +5,17 @@ const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum");
-const listener = require('./lib/listener');
+const streamChanges = require('./lib/listener');
 const leo = require("leo-sdk");
 const ls = leo.streams;
+let dol = require("leo-connector-common/dol");
+
+function DomainObjectLoader(client) {
+	if (typeof client.query !== "function") {
+		client = connect(client);
+	}
+	return new dol(client)
+}
 
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
@@ -33,30 +41,24 @@ module.exports = {
 			}, callback);
 		} else {
 			let stats = ls.stats(bot_id, opts.inQueue);
-			ls.pipe(leo.read(bot_id, opts.inQueue, {start: opts.start})
-				, stats
-				, this.load(dbConfig, sql, domain, {
-						queue: opts.outQueue,
-						id: bot_id,
-						limit: opts.limit
-					}, dbConfig.id)
-				, ls.toLeo(bot_id)
-				, ls.devnull('done')
-				, err => {
-					if (err) return callback(err);
-					return stats.checkpoint(callback);
-				}
-			);
+			ls.pipe(leo.read(bot_id, opts.inQueue, {
+				start: opts.start
+			}), stats, this.load(dbConfig, sql, domain, {
+				queue: opts.outQueue,
+				id: bot_id,
+				limit: opts.limit
+			}, dbConfig.id), ls.toLeo(bot_id), ls.devnull('done'), err => {
+				if (err) return callback(err);
+				return stats.checkpoint(callback);
+			});
 		}
 	},
-	streamChanges: function(config, tables, opts = {}) {
-
-		// make sure if we've passed in a user and database, that we use a regular format, or one from secrets manager.
+	streamChanges: function(config, opts = {}) {
 		config.user = config.user || config.username;
-		config.database = config.database || config.dbname;
 
-		opts.config = config;
-		return listener(config, tables, opts);
+		return streamChanges(config, opts);
 	},
-	connect: connect
+	connect: connect,
+	dol: DomainObjectLoader,
+	DomainObjectLoader: DomainObjectLoader,
 };
