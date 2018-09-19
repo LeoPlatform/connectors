@@ -10,7 +10,7 @@ Change tracking must first be enabled at the database level:
 ```sql
 ALTER DATABASE <databaseName>
 SET CHANGE_TRACKING = ON
-(CHANGE_RETENTION = 7 DAYS, AUTO_CLEANUP = ON)```
+(CHANGE_RETENTION = 7 DAYS, AUTO_CLEANUP = ON)
 ```
 
 Enable change tracking for each table you want tracked:
