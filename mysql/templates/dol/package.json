@@ -1,0 +1,30 @@
+{
+	"name": "____DIRNAME_____dol",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"directories": {
+		"test": "test"
+	},
+	"scripts": {
+		"test": "leo-cli test . "
+	},
+	"config": {
+		"leo": {
+			"type": "cron",
+			"memory": 128,
+			"timeout": 300,
+			"role": "ApiRole",
+			"env": {},
+			"cron": {
+				"triggers": ["mysql_changes"]
+			}
+		}
+	},
+	"dependencies": {
+		"leo-streams": ">=1.0.1",
+		"leo-sdk": ">=2.0.1",
+		"leo-config": ">=1.0.7",
+		"leo-connector-mysql": ">=1.6.0"
+	}
+}

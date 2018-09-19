@@ -118,7 +118,7 @@ ZongJi.prototype.start = function(options) {
 			let tableName = event.tableMap[event.tableId].tableName;
 			let schema = event.tableMap[event.tableId].parentSchema;
 			if (event.tableMap[event.tableId].primaryKey.length && !pass.write({
-					timestamp: event.timestamp,
+					timestamp: Date.now(),
 					event_source_timestamp: event.timestamp,
 					correlation_id: {
 						source: self.options.source || 'system:mysql',
