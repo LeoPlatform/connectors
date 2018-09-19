@@ -59,6 +59,9 @@ ZongJi.prototype.start = function(options) {
 		objectMode: true
 	});
 
+	// Pass along any errors from the connection
+	self.on("error", error => pass.emit("error", error));
+
 	let passEnd = pass.end;
 	pass.end = function() {
 		self.__ended = true;
