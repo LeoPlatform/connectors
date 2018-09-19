@@ -68,9 +68,10 @@ module.exports = {
 				fields = tables[t];
 				order = order || tables[t] + ' asc';
 			}
+			let changeVersion = (version - 1 >= 0) ? version - 1 : 0;
 
 			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
-				FROM  CHANGETABLE(CHANGES ${t}, ${version - 1}) AS CT
+				FROM  CHANGETABLE(CHANGES ${t}, ${changeVersion}) AS CT
 				where SYS_CHANGE_VERSION > ${version}${where}`;
 
 			logger.log(query);
