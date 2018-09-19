@@ -7,9 +7,11 @@ module.exports = {
 			let ids = [];
 			let tasks = [];
 			idlist.forEach(idthing => {
+				// array of ids
 				if (Array.isArray(idthing)) {
 					ids = ids.concat(idthing);
-				} else if (idthing && typeof idthing == "object") {
+				} else if (idthing && typeof idthing === "object") {
+					// idthing is an object with ids
 					if (idthing.ids && idthing.ids.length >= 1) {
 						tasks.push((done) => {
 							async.doWhilst((done) => {
@@ -49,7 +51,8 @@ module.exports = {
 							});
 						});
 					}
-				} else if (typeof idthing == "string") {
+				} else if (typeof idthing === "string") {
+					// idthing is a query string
 					tasks.push((done) => {
 						sqlClient.query(idthing, (err, results, fields) => {
 							if (!err && results.length) {

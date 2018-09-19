@@ -11,6 +11,7 @@ let aggregations = {};
 
 let bucketAliases = {
 	'alltime': '',
+	'secondly': 'YYYY-MM-DD HH:mm:ss',
 	'minutely': 'YYYY-MM-DD HH:mm',
 	'hourly': 'YYYY-MM-DD HH',
 	'monthly': 'YYYY-MM',
@@ -177,7 +178,7 @@ module.exports = {
 		});
 		return hash;
 	},
-	aggregator: function (tableName, ns, t) {
+	aggregator: function(tableName, ns, t) {
 		if (!t) {
 			t = ns;
 			ns = "";
@@ -209,7 +210,9 @@ module.exports = {
 					bucket: aggregations[hash].bucket
 				}));
 
-			let stream = leo.streams.toDynamoDB(tableName, {records: 500});
+			let stream = leo.streams.toDynamoDB(tableName, {
+				records: 500
+			});
 			let seenHashes = {};
 
 			dynamodb.batchGetTable(tableName, ids, (err, result) => {
@@ -229,7 +232,10 @@ module.exports = {
 
 				Object.keys(aggregations)
 					.filter(hash => !(hash in seenHashes))
-					.map(hash => (Object.assign({p: {}, start: start}, aggregations[hash])))
+					.map(hash => (Object.assign({
+						p: {},
+						start: start
+					}, aggregations[hash])))
 					.forEach(a => stream.write(a));
 
 				stream.end((err) => {
@@ -238,7 +244,9 @@ module.exports = {
 					done(err, []);
 				});
 			});
-		}, {}, {records: 1000});
+		}, {}, {
+			records: 1000
+		});
 	},
 	/**
 	 * Get current value from aggregate data
@@ -247,7 +255,7 @@ module.exports = {
 	 * @param key (name of child object you want to look in)
 	 * @returns {*|{}}
 	 */
-	getCurrent: function (obj, key) {
+	getCurrent: function(obj, key) {
 		if (key) {
 			return obj.d[key] && obj.d[key].v || {};
 		}
@@ -261,7 +269,7 @@ module.exports = {
 	 * @param key
 	 * @returns {{}}
 	 */
-	getCurrentMeta: function (obj, key) {
+	getCurrentMeta: function(obj, key) {
 		if (key) {
 			return obj.d[key] || {};
 		}
@@ -275,7 +283,7 @@ module.exports = {
 	 * @param key (name of child object you want to look in)
 	 * @returns {*|{}}
 	 */
-	getPrevious: function (obj, key) {
+	getPrevious: function(obj, key) {
 		if (key) {
 			return obj.p[key] && obj.p[key].v || {};
 		}
@@ -289,7 +297,7 @@ module.exports = {
 	 * @param key
 	 * @returns {{}}
 	 */
-	getPreviousMeta: function (obj, key) {
+	getPreviousMeta: function(obj, key) {
 		if (key) {
 			return obj.p[key] || {};
 		}
@@ -303,7 +311,7 @@ module.exports = {
 	 * @param opts
 	 * @returns {Promise<any[]>}
 	 */
-	query: async function (table, items, opts) {
+	query: async function(table, items, opts) {
 		opts = merge({
 			start: null,
 			end: null,
