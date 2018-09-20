@@ -242,7 +242,7 @@ module.exports = {
 						}
 					}).sync(opts, function(result, done) {
 						if (stream) {
-							if (!stream.write(result)) {
+							if (!stream.write(Object.assign({}, result))) {
 								stream.once('drain', done);
 							} else {
 								done();
@@ -315,6 +315,7 @@ module.exports = {
 		function invoke(method) {
 			return (data) => {
 				return new Promise((resolve, reject) => {
+					logger.debug(id, method, "invoke", data);
 					lambdaInvoker.invoke({
 						FunctionName: lambdaName,
 						InvocationType: 'RequestResponse',
@@ -332,6 +333,7 @@ module.exports = {
 						}),
 						Qualifier: qualifier
 					}, function(err, data) {
+						logger.debug(id, method, "response", data);
 						let payload = undefined;
 						if (!err && data.FunctionError) {
 							err = data.Payload;
