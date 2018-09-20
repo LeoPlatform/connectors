@@ -59,7 +59,7 @@ module.exports = function(local, remote, opts) {
 					start,
 					end
 				}).then(result => {
-					done(null, result)
+					done(null, result);
 				}, callback);
 			}, (err, batchResults) => {
 				if (err) {
@@ -132,7 +132,7 @@ module.exports = function(local, remote, opts) {
 					remoteLookup[o.id] = i;
 					if (!(o.id in localLookup)) {
 						if (o._id) {
-							results.map[o.id] = o._id
+							results.map[o.id] = o._id;
 						}
 						results.extra.push(o.id);
 					}
@@ -140,12 +140,12 @@ module.exports = function(local, remote, opts) {
 				localData.checksums.map((o, i) => {
 					if (!(o.id in remoteLookup)) {
 						if (o._id) {
-							results.map[o.id] = o._id
+							results.map[o.id] = o._id;
 						}
-						results.missing.push(o.id)
+						results.missing.push(o.id);
 					} else if (o.hash != remoteData.checksums[remoteLookup[o.id]].hash) {
 						if (o._id) {
-							results.map[o.id] = o._id
+							results.map[o.id] = o._id;
 						}
 						results.incorrect.push(o.id);
 					}
@@ -173,9 +173,9 @@ module.exports = function(local, remote, opts) {
 					let paddedLocalName = local.name;
 					let paddedRemoteName = remote.name;
 					if (paddedRemoteName.length > paddedLocalName.length) {
-						paddedLocalName = paddedLocalName + " ".repeat(paddedRemoteName.length - paddedLocalName.length)
+						paddedLocalName = paddedLocalName + " ".repeat(paddedRemoteName.length - paddedLocalName.length);
 					} else if (paddedLocalName.length > paddedRemoteName.length) {
-						paddedRemoteName = paddedRemoteName + " ".repeat(paddedLocalName.length - paddedRemoteName.length)
+						paddedRemoteName = paddedRemoteName + " ".repeat(paddedLocalName.length - paddedRemoteName.length);
 					}
 					localData.ids = localData.ids.sort();
 					localData.checksums.forEach((l, i) => {
@@ -184,18 +184,20 @@ module.exports = function(local, remote, opts) {
 						if (!r) {
 							return;
 						}
+						let offset = Math.max(0, l.length - fieldNames.length);
 						l.forEach((v, k) => {
 							if (r && v !== r[k]) {
-								let name = fieldNames[k - 1] || k;
+								let name = fieldNames[k - offset] || k;
 								diff[name] = {
 									[paddedLocalName]: v,
 									[paddedRemoteName]: r[k] || null
 								};
 							}
 						});
+						offset = Math.max(0, r.length - fieldNames.length);
 						r.forEach((v, k) => {
 							if (l && !(k in l)) {
-								let name = fieldNames[k - 1] || k;
+								let name = fieldNames[k - offset] || k;
 								diff[name] = {
 									[paddedLocalName]: null,
 									[paddedRemoteName]: v
@@ -229,10 +231,10 @@ module.exports = function(local, remote, opts) {
 				let streak = (!opts.stopOnStreak || data.streak < opts.stopOnStreak) ? false : "streak";
 				let other = (!until || until(nibble));
 				stopReason = other || streak;
-				return !streak && !other
+				return !streak && !other;
 			},
 			onInit: function(nibble) {
-				nibble.progress = data.progress
+				nibble.progress = data.progress;
 			},
 			onEnd: function(err, nibble, callback) {
 				logger.log(`Summary`);
@@ -241,7 +243,7 @@ module.exports = function(local, remote, opts) {
 			},
 			onError: function(err, result, nibble, done) {
 				if (err && !result) {
-					return done(err)
+					return done(err);
 				}
 				if (nibble.limit <= 20000 || result.qty < 20000 || opts.skipBatch) { //It is small enough, we need to do individual checks
 					compareIndividual(nibble.start, nibble.end, (err, dataResult) => {
@@ -268,7 +270,7 @@ module.exports = function(local, remote, opts) {
 								let d = done;
 								done = function() {
 									opts.stats(nibble, dataResult, data, d);
-								}
+								};
 							}
 
 							if (opts.sample && dataResult.missing.length) {
@@ -287,7 +289,7 @@ module.exports = function(local, remote, opts) {
 								remote.delete({
 									ids: dataResult.extra
 								}).then(result => {
-									logger.log("deleted records")
+									logger.log("deleted records");
 								}, err => {
 									logger.log(err);
 								});
@@ -295,7 +297,7 @@ module.exports = function(local, remote, opts) {
 
 							if (opts.sample && dataResult.incorrect.length) {
 								sample(dataResult.incorrect.slice(0).sort(() => {
-									return 0.5 - Math.random()
+									return 0.5 - Math.random();
 								}).slice(0, 4), () => {
 									done();
 								});
@@ -332,7 +334,7 @@ module.exports = function(local, remote, opts) {
 							let d = done;
 							done = function() {
 								opts.stats(nibble, result, data, d);
-							}
+							};
 						}
 
 						done(null, result);
@@ -343,7 +345,7 @@ module.exports = function(local, remote, opts) {
 
 		opts = Object.assign(opts, nibblerOpts);
 		return sync(opts, function(err) {
-			callback(err, data, err || stopReason || "complete")
+			callback(err, data, err || stopReason || "complete");
 		});
 	};
 
