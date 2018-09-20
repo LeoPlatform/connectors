@@ -58,6 +58,7 @@ module.exports = () => {
 					[settings.id_column, 1]
 				]
 			}).stream(), ls.through(function(obj, done) {
+				this.invalid = () => {};
 				let result = extract.call(this, obj);
 				done(null, result != undefined ? result : undefined);
 			}));
@@ -107,6 +108,7 @@ module.exports = () => {
 						[settings.id_column, 1]
 					]
 				}).stream(), ls.through(function(obj, done) {
+					this.invalid = () => {};
 					let result = extract.call(this, obj);
 					done(null, result != undefined ? result : undefined);
 				}), ls.through((o, done) => {
@@ -156,6 +158,13 @@ module.exports = () => {
 							} else {
 								r1 = (r1 && (getid(r1) > getid(obj))) ? r1 : obj;
 							}
+						},
+						invalid: (obj) => {
+							if (!reverse) {
+								r1 = (r1 && (getid(r1) < getid(obj))) ? r1 : obj;
+							} else {
+								r1 = (r1 && (getid(r1) > getid(obj))) ? r1 : obj;
+							}
 						}
 					}, rows[1]);
 					r1 = r1 || r || rows[1];
@@ -163,6 +172,13 @@ module.exports = () => {
 					let r0;
 					r = rows[0] && extract.call({
 						push: (obj) => {
+							if (!reverse) {
+								r0 = (r0 && (getid(r0) > getid(obj))) ? r0 : obj;
+							} else {
+								r0 = (r0 && (getid(r0) < getid(obj))) ? r0 : obj;
+							}
+						},
+						invalid: (obj) => {
 							if (!reverse) {
 								r0 = (r0 && (getid(r0) > getid(obj))) ? r0 : obj;
 							} else {
@@ -180,111 +196,117 @@ module.exports = () => {
 			}).catch(callback);
 		},
 		range: async function(start, end, callback) {
-			logger.log("Calling Range", start, end);
-			let settings = this.settings;
-			getCollection(settings).then(collection => {
+				logger.log("Calling Range", start, end);
+				let settings = this.settings;
+				getCollection(settings).then(collection => {
 
-				let min = Object.assign({}, settings.where);
-				let max = Object.assign({}, settings.where);
-				let total = Object.assign({}, settings.where);
+					let min = Object.assign({}, settings.where);
+					let max = Object.assign({}, settings.where);
+					let total = Object.assign({}, settings.where);
 
-				let getid = getId.bind(null, settings);
-				let id = getQueryIdFunction(settings);
-				let extract = buildExtractFunction(settings);
+					let getid = getId.bind(null, settings);
+					let id = getQueryIdFunction(settings);
+					let extract = buildExtractFunction(settings);
 
-				if (start || end) {
-					total[settings.id_column] = {}
-				}
-				if (start) {
-					min[settings.id_column] = {
-						$gte: id(start)
-					};
-					total[settings.id_column].$gte = id(start);
-				}
-				if (end) {
-					max[settings.id_column] = {
-						$lte: id(end)
-					};
-					total[settings.id_column].$lte = id(end);
-				}
-				let method = settings.method || "findOne";
-
-				collection[method](min, settings.projectionFields || {}, {
-					'sort': [
-						[settings.id_column, 1]
-					],
-					"limit": 1
-				}, (err, start) => {
-					if (err) {
-						return callback(err);
+					if (start || end) {
+						total[settings.id_column] = {}
 					}
-					collection[method](max, settings.projectionFields || {}, {
+					if (start) {
+						min[settings.id_column] = {
+							$gte: id(start)
+						};
+						total[settings.id_column].$gte = id(start);
+					}
+					if (end) {
+						max[settings.id_column] = {
+							$lte: id(end)
+						};
+						total[settings.id_column].$lte = id(end);
+					}
+					let method = settings.method || "findOne";
+
+					collection[method](min, settings.projectionFields || {}, {
 						'sort': [
-							[settings.id_column, -1]
+							[settings.id_column, 1]
 						],
 						"limit": 1
-					}, (err, end) => {
+					}, (err, start) => {
 						if (err) {
 							return callback(err);
 						}
-						collection.count(total, (err, total) => {
+						collection[method](max, settings.projectionFields || {}, {
+							'sort': [
+								[settings.id_column, -1]
+							],
+							"limit": 1
+						}, (err, end) => {
 							if (err) {
 								return callback(err);
 							}
-							let s;
-							let r = extract.call({
-								push: (obj) => {
-									s = (s && (getid(s) < getid(obj))) ? s : obj;
+							collection.count(total, (err, total) => {
+								if (err) {
+									return callback(err);
 								}
-							}, start);
-							s = s || r || start;
+								let s;
+								let r = extract.call({
+									push: (obj) => {
+										s = (s && (getid(s) < getid(obj))) ? s : obj;
+									},
+									invalid: (obj) => {
+										s = (s && (getid(s) < getid(obj))) ? s : obj;
+									}
+								}, start);
+								s = s || r || start;
 
-							let e;
-							r = extract.call({
-								push: (obj) => {
-									e = (e && (getid(e) > getid(obj))) ? e : obj;
-								}
-							}, end);
-							e = e || r || end;
-							callback(null, {
-								min: getid(s) || 0,
-								max: getid(e),
-								total: total
+								let e;
+								r = extract.call({
+									push: (obj) => {
+										e = (e && (getid(e) > getid(obj))) ? e : obj;
+									},
+									invalid: (obj) => {
+										e = (e && (getid(e) > getid(obj))) ? e : obj;
+									}
+								}, end);
+								e = e || r || end;
+								callback(null, {
+									min: getid(s) || 0,
+									max: getid(e),
+									total: total
+								});
 							});
 						});
 					});
-				});
-			}).catch(callback);
-		},
-		initialize: (data) => {
-			console.log("Calling Initialize", data)
-			return Promise.resolve({});
-		},
-		destroy: function(data, callback) {
-			console.log("Calling Destroy", data);
-			callback();
-		},
-		delete: function(ids, callback) {
-			console.log("Calling Delete", ids);
-			let settings = this.settings;
-			let idFn = getQueryIdFunction(settings);
-			getCollection(settings).then(collection => {
-				let where = Object.assign({}, settings.where, {
-					[settings.id_column]: {
-						$in: ids.map(idFn)
-					}
-				});
+				}).catch(callback);
+			},
+			initialize: (data) => {
+				console.log("Calling Initialize", data)
+				return Promise.resolve({});
+			},
+			destroy: function(data, callback) {
+				console.log("Calling Destroy", data);
+				callback();
+			},
+			delete: function(ids, callback) {
+				console.log("Calling Delete", ids);
+				let settings = this.settings;
+				let idFn = getQueryIdFunction(settings);
+				getCollection(settings).then(collection => {
+					let where = Object.assign({}, settings.where, {
+						[settings.id_column]: {
+							$in: ids.map(idFn)
+						}
+					});
 
-				collection.deleteMany(where, (err, obj) => {
-					if (err) {
-						console.log(err)
-					} else {
-						console.log(`Deleted ${obj.result.n} Objects`)
-					}
-					callback()
-				});
-			}).catch(callback);
-		}
+					collection.deleteMany(where, (err, obj) => {
+						if (err) {
+							console.log(err)
+						} else {
+							console.log(`Deleted ${obj.result.n} Objects`)
+						}
+						callback()
+					});
+				}).catch(callback);
+			}
 	});
 
 	async function getCollection(settings) {
