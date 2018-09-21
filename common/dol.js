@@ -9,7 +9,7 @@ module.exports = function DomainObjectLoader(client) {
 			opts = Object.assign({
 				count: 1000,
 				time: {
-					seconds: 1
+					milliseconds: 200
 				}
 			}, opts);
 			return ls.pipeline(
@@ -22,7 +22,7 @@ module.exports = function DomainObjectLoader(client) {
 				ls.batch({
 					count: 1000,
 					time: {
-						seconds: 1
+						milliseconds: 200
 					}
 				}),
 				translateIdsCombineStream()
@@ -71,6 +71,9 @@ module.exports = function DomainObjectLoader(client) {
 					//Query for these domain Objects
 
 					buildDomainObject(client, domainObject, obj.ids, addCorrelation, (err, results = []) => {
+						if (err) {
+							return done(err);
+						}
 						if (results.length) {
 							let i = 0;
 							for (; i < results.length - 1; i++) {
