@@ -72,6 +72,7 @@ module.exports = function DomainObjectLoader(client) {
 
 					buildDomainObject(client, domainObject, obj.ids, addCorrelation, (err, results = []) => {
 						if (err) {
+							console(JSON.stringify(obj));
 							return done(err);
 						}
 						if (results.length) {
