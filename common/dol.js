@@ -72,6 +72,7 @@ module.exports = function DomainObjectLoader(client) {
 
 					buildDomainObject(client, domainObject, obj.ids, addCorrelation, (err, results = []) => {
 						if (err) {
+							console.log(JSON.stringify(obj, null, 2));
 							return done(err);
 						}
 						if (results.length) {
@@ -359,10 +360,12 @@ function translateIdsCombineStream() {
 		let ids = {};
 		for (var i = 0; i < obj.payload.length; i++) {
 			let p = obj.payload[i];
-			if (!(p.s in ids)) {
-				ids[p.s] = new Set();
+			if (p.s !== undefined && p.id !== undefined) {
+				if (!(p.s in ids)) {
+					ids[p.s] = new Set();
+				}
+				ids[p.s].add(p.id);
 			}
-			ids[p.s].add(p.id);
 
 			let record = p;
 			if (record.correlation_id.start) {
