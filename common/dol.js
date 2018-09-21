@@ -360,10 +360,12 @@ function translateIdsCombineStream() {
 		let ids = {};
 		for (var i = 0; i < obj.payload.length; i++) {
 			let p = obj.payload[i];
-			if (!(p.s in ids)) {
-				ids[p.s] = new Set();
+			if (p.s !== undefined && p.id !== undefined) {
+				if (!(p.s in ids)) {
+					ids[p.s] = new Set();
+				}
+				ids[p.s].add(p.id);
 			}
-			ids[p.s].add(p.id);
 
 			let record = p;
 			if (record.correlation_id.start) {
