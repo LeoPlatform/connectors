@@ -9,6 +9,14 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const logger = require("leo-sdk/lib/logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
+const dol = require("leo-connector-common/dol");
+
+function DomainObjectLoader(client) {
+  if (typeof client.query !== "function") {
+    client = connect(client);
+  }
+  return new dol(client)
+}
 
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
@@ -138,5 +146,7 @@ module.exports = {
 	checksum: function(config) {
 		return checksum(connect(config));
 	},
-	connect: connect
+	connect: connect,
+  dol: DomainObjectLoader,
+  DomainObjectLoader: DomainObjectLoader
 };
