@@ -586,7 +586,8 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 						event: opts.queue,
 						id: opts.id,
 						payload: domains[id],
-						schema: schema
+						schema: schema,
+						domain_id: id
 					};
 					push(event);
 				});
