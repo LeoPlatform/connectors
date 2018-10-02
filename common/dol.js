@@ -29,7 +29,7 @@ module.exports = function DomainObjectLoader(client) {
 			);
 		},
 		domainObjectTransform: function(domainObject) {
-			if (typeof domainObject.get == "function") {
+			if (typeof domainObject.get === "function") {
 				domainObject = domainObject.get();
 			}
 			domainObject = Object.assign({
@@ -136,9 +136,9 @@ module.exports = function DomainObjectLoader(client) {
 					transform,
 					type: "one_to_many"
 				};
+        this.transform = () => self.domainObjectTransform(this);
 				return this;
-			},
-			this.transfrom = () => self.domainObjectTransform(this);
+			};
 		}
 	};
 };
@@ -586,7 +586,8 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 						event: opts.queue,
 						id: opts.id,
 						payload: domains[id],
-						schema: schema
+						schema: schema,
+						domain_id: id
 					};
 					push(event);
 				});

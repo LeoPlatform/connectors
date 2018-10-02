@@ -424,4 +424,29 @@ base.Request.prototype.queryRow = function(command, callback) {
 
 		connection[this._isBatch ? 'execSqlBatch' : 'execSql'](req);
 	});
+
+  const parameterCorrection = function (value) {
+    if (value instanceof Table) {
+      const tvp = {
+        name: value.name,
+        schema: value.schema,
+        columns: [],
+        rows: value.rows
+      }
+
+      for (let col of value.columns) {
+        tvp.columns.push({
+          name: col.name,
+          type: getTediousType(col.type),
+          length: col.length,
+          scale: col.scale,
+          precision: col.precision
+        })
+      }
+
+      return tvp
+    } else {
+      return value
+    }
+  }
 };
