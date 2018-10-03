@@ -7,6 +7,7 @@ module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
 	columnConfig = Object.assign({
+		_deleted: '_deleted',
 		_auditdate: '_auditdate',
 		_startdate: '_startdate',
 		_enddate: '_enddate',
@@ -21,68 +22,54 @@ module.exports = function(config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
-	let deletesSetup = function(table, tableDef, ids, stream) {
-
-		const publicTbl = `public.${table}`;
-		let deleteTableName = `public.del_${table}`;
-		let deleteSchema = {};
-		let schema = client.getSchemaCache();
-
-		let tasks = [];
-		// Create Delete table if needed
-		if (!(deleteTableName in schema)) {
-			let colLookup = {};
-			schema[publicTbl].map(c => colLookup[c.column_name] = c);
-			schema[deleteTableName] = [columnConfig._auditdate].concat(ids).map(c => colLookup[c]);
-			let delCreateCols = [];
-			schema[deleteTableName].map(c => {
-				delCreateCols.push(`${c.column_name} ${c.data_type}`);
-			});
-			tasks.push(done => client.query(`create table if not exists ${deleteTableName} (${delCreateCols.join(",")})`, done));
+	function deletesSetup(publicTbl, schema, field, value, where = "") {
+		let colLookup = {};
+		schema.map(col => {
+			colLookup[col.column_name] = true;
+		});
+		let toDelete = {};
+		let toDeleteCount = 0;
+		if (where) {
+			where = `and ${where}`;
 		}
-		schema[deleteTableName].map(c => {
-			deleteSchema[c.column_name] = c;
-		});
 
-		let deleteTasks = [];
-		let deleteColumnsUsed = {};
-		new Set(ids.concat(tableDef.deleteColumns || [])).forEach(col => {
-			let def = schema[publicTbl].filter(c => c.column_name == col)[0];
-			if (def) {
-				deleteTasks.push(done => deleteColumnsUsed[col] ? client.query(`delete from ${publicTbl} where ${col} in (select ${col} from ${deleteTableName} where ${col} is not null and ${columnConfig._auditdate} = ${dwClient.auditdate})`, done) : done());
-				if (!(col in deleteSchema)) {
-					deleteSchema[col] = Object.assign({}, def, {
-						table_name: `del_${table}`
-					});
-					// Add field to schema cache
-					schema[deleteTableName].push(deleteSchema[col]);
-					tasks.push(done => client.query(`alter table ${deleteTableName} add column if not exists ${col} ${def.data_type};`, done));
-				}
-			}
-		});
-
-		let loadTask = done => ls.pipe(stream, ls.through((obj, cb) => {
-			if (obj.__leo_delete__ && obj.__leo_delete_id__) {
-				deleteColumnsUsed[obj.__leo_delete__] = true;
-				cb(null, {
-					[obj.__leo_delete__]: obj.__leo_delete_id__,
-					[columnConfig._auditdate]: dwClient.auditdate
+		function tryFlushDelete(done, force = false) {
+			if (force || toDeleteCount >= 1000) {
+				let deleteTasks = Object.keys(toDelete).map(col => {
+					return deleteDone => client.query(`update ${publicTbl} set ${field} = ${value} where ${col} in (${toDelete[col].join(",")}) ${where}`, deleteDone);
+				});
+				async.parallelLimit(deleteTasks, 1, (err) => {
+					if (!err) {
+						toDelete = {};
+						toDeleteCount = 0;
+					}
+					done(err);
 				});
 			} else {
-				cb();
+				done();
 			}
-		}), client.streamToTable(deleteTableName), (err) => {
-			if (err) {
-				return done(err);
-			}
-			async.series(deleteTasks, done);
-		});
+		}
 
 		return {
-			setupTasks: tasks,
-			loadTask: loadTask
+			add: function(obj, done) {
+				let field = obj.__leo_delete__;
+				let id = obj.__leo_delete_id__;
+				if (id !== undefined && colLookup[field]) {
+					if (!(field in toDelete)) {
+						toDelete[field] = [];
+					}
+					toDelete[field].push(id);
+					toDeleteCount++;
+					tryFlushDelete(done);
+				} else {
+					done();
+				}
+			},
+			flush: (callback) => {
+				tryFlushDelete(callback, true);
+			}
 		};
-	};
+	}
 
 	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
 		const schemaTbl = `staging_${table}`;
@@ -98,8 +85,7 @@ module.exports = function(config, columnConfig) {
 
 		let tasks = [];
 
-		let deleteTasks = deletesSetup(table, tableDef, [].concat(ids), stream);
-		deleteTasks.setupTasks.map(t => tasks.push(t));
+		let deleteHandler = deletesSetup(publicTbl, schema[publicTbl], columnConfig._deleted, true);
 
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
@@ -107,16 +93,22 @@ module.exports = function(config, columnConfig) {
 		tasks.push(done => client.query(`create index ${schemaTbl}_id on ${schemaStagingTbl} (${ids.join(', ')})`, done));
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
 		tasks.push(done => {
-			async.parallel([
-				done => ls.pipe(stream, ls.through((obj, done) => {
-					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
-						done();
-					} else {
-						done(null, obj);
+			ls.pipe(stream, ls.through((obj, done, push) => {
+				if (obj.__leo_delete__) {
+					if (obj.__leo_delete__ == "id") {
+						push(obj);
 					}
-				}), client.streamToTable(schemaStagingTbl), done),
-				deleteTasks.loadTask
-			], done);
+					deleteHandler.add(obj, done);
+				} else {
+					done(null, obj);
+				}
+			}), client.streamToTable(schemaStagingTbl), (err) => {
+				if (err) {
+					return done(err);
+				} else {
+					deleteHandler.flush(done);
+				}
+			});
 		});
 
 		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
@@ -145,7 +137,7 @@ module.exports = function(config, columnConfig) {
 					});
 					tasks.push(done => {
 						client.query(`Update ${publicTbl} prev
-								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._auditdate} = ${dwClient.auditdate}
+								SET  ${columns.map(f=>`${f} = coalesce(staging.${f}, prev.${f})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
 								FROM ${schemaStagingTbl} staging
 								where ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
@@ -154,8 +146,8 @@ module.exports = function(config, columnConfig) {
 
 					//Now insert any we were missing
 					tasks.push(done => {
-						client.query(`INSERT INTO ${publicTbl} (${columns.join(',')},${columnConfig._auditdate})
-								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}
+						client.query(`INSERT INTO ${publicTbl} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
+								SELECT ${columns.map(f=>`coalesce(staging.${f}, prev.${f})`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
 								FROM ${schemaStagingTbl} staging
 								LEFT JOIN ${publicTbl} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
@@ -199,8 +191,7 @@ module.exports = function(config, columnConfig) {
 		schema[schemaStagingTbl] = schema[publicTbl].filter(c => c.column_name != sk);
 
 		let tasks = [];
-		let deleteTasks = deletesSetup(table, tableDef, [].concat(nk), stream);
-		deleteTasks.setupTasks.map(t => tasks.push(t));
+		let deleteHandler = deletesSetup(publicTbl, schema[publicTbl], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
 		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
@@ -209,16 +200,22 @@ module.exports = function(config, columnConfig) {
 		tasks.push(done => client.query(`alter table ${schemaStagingTbl} drop column ${sk}`, done));
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
 		tasks.push(done => {
-			async.parallel([
-				done => ls.pipe(stream, ls.through((obj, done) => {
-					if (obj.__leo_delete__ && Object.keys(obj).length == 2) {
-						done();
-					} else {
-						done(null, obj);
+			ls.pipe(stream, ls.through((obj, done, push) => {
+				if (obj.__leo_delete__) {
+					if (obj.__leo_delete__ == "id") {
+						push(obj);
 					}
-				}), client.streamToTable(schemaStagingTbl), done),
-				deleteTasks.loadTask
-			], done);
+					deleteHandler.add(obj, done);
+				} else {
+					done(null, obj);
+				}
+			}), client.streamToTable(schemaStagingTbl), (err) => {
+				if (err) {
+					return done(err);
+				} else {
+					deleteHandler.flush(done);
+				}
+			});
 		});
 
 		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
@@ -482,6 +479,9 @@ module.exports = function(config, columnConfig) {
 							return acc;
 						}, {});
 						let missingFields = {};
+						if (!structures[table].isDimension) {
+							structures[table].structure[columnConfig._deleted] = structures[table].structure[columnConfig._deleted] || "boolean";
+						}
 						Object.keys(structures[table].structure).forEach(f => {
 							if (!(f in fieldLookup)) {
 								missingFields[f] = structures[table].structure[f];
@@ -573,6 +573,7 @@ module.exports = function(config, columnConfig) {
 			}
 		} else {
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
+			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._deleted} boolean`, done));
 
 			// redshift doesn't support create index
 			if (config.version != "redshift") {
