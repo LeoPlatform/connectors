@@ -136,7 +136,6 @@ module.exports = function DomainObjectLoader(client) {
 					transform,
 					type: "one_to_many"
 				};
-        this.transform = () => self.domainObjectTransform(this);
 				return this;
 			};
 		}

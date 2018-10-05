@@ -32,14 +32,16 @@ module.exports = function(client, tableConfig, stream, callback) {
 			let entities = data.entities || [];
 			ids.map(id => {
 				entities.map(entity => {
+					let field = entity.field || "id";
 					this.push(Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
 							entity: entity.name,
 							command: "delete",
-							field: entity.field,
+							field: field,
 							data: {
-								__leo_delete__: entity.field || "id",
+								id: field == "id" ? id : `_del_${id}`,
+								__leo_delete__: field,
 								__leo_delete_id__: id
 							}
 						}

@@ -86,14 +86,16 @@ module.exports = function(botId, client, table, id, domain, opts, callback) {
 			if (Array.isArray(id)) {
 				transform = loaderJoin(client, id, null, domain, {
 					source: 'snapshot',
-					isSnapshot: true
+					isSnapshot: true,
+					id: botId
 				});
 			} else {
 				transform = loader(client, (obj) => {
 					return [obj[table]];
 				}, domain, {
 					source: 'snapshot',
-					isSnapshot: true
+					isSnapshot: true,
+					id: botId
 				});
 			}
 			transform.destroy = transform.destroy || transform.close || (() => {});
