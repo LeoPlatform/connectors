@@ -508,7 +508,12 @@ module.exports = function(config, columnConfig) {
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
-		let queries = [].concat(definition.queries || []);
+		let dbType = config.type.toLowerCase();
+		let defQueries = definition.queries;
+		if (defQueries && !Array.isArray(defQueries)) {
+			defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version];
+		}
+		let queries = [].concat(defQueries || []);
 
 		let ids = [];
 		Object.keys(definition.structure).forEach(f => {
@@ -527,7 +532,11 @@ module.exports = function(config, columnConfig) {
 				ids.push(f);
 			}
 			if (field.queries) {
-				queries = queries.concat(field.queries);
+				let defQueries = field.queries;
+				if (!Array.isArray(defQueries)) {
+					defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version] || [];
+				}
+				queries = queries.concat(defQueries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -582,7 +591,7 @@ module.exports = function(config, columnConfig) {
 			}
 		}
 		queries.map(q => {
-			tasks.push(done => client.query(q, done));
+			tasks.push(done => client.query(q, err => done(err)));
 		});
 		async.series(tasks, callback);
 	};
@@ -601,7 +610,12 @@ module.exports = function(config, columnConfig) {
 				};
 			}
 			if (field.queries) {
-				queries = queries.concat(field.queries);
+				let defQueries = field.queries;
+				if (!Array.isArray(defQueries)) {
+					let dbType = config.type.toLowerCase();
+					defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version] || [];
+				}
+				queries = queries.concat(defQueries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -635,7 +649,7 @@ module.exports = function(config, columnConfig) {
 			sqls.push(q);
 		});
 		async.eachSeries(sqls, function(sql, done) {
-			client.query(sql, done);
+			client.query(sql, err => done(err));
 		}, callback);
 	};
 
