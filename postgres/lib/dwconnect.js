@@ -58,7 +58,7 @@ module.exports = function(config, columnConfig) {
 					if (!(field in toDelete)) {
 						toDelete[field] = [];
 					}
-					toDelete[field].push(id);
+					toDelete[field].push(client.escapeValueNoToLower(id));
 					toDeleteCount++;
 					tryFlushDelete(done);
 				} else {
