@@ -1,36 +1,37 @@
 {
-  "name": "leo-connector-entity-table",
-  "version": "2.1.1",
-  "description": "A Leo entity table connector",
-  "repository": {
-    "type": "git",
-    "url": "git://github.com/LeoPlatform/connectors.git"
-  },
-  "main": "index.js",
-  "scripts": {
-    "test": "mocha ./test/unit/**/*.test.js",
-    "test:int": "mocha ./test/integration/**/*.test.js"
-  },
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/LeoPlatform/connectors/issues"
-  },
-  "homepage": "https://github.com/LeoPlatform/connectors#readme",
-  "dependencies": {
-    "async": "^2.6.1",
-    "aws-sdk": "^2.213.1",
-    "backoff": "^2.5.0",
-    "leo-sdk": "^2.0.0",
-    "lodash.merge": "^4.6.1"
-  },
-  "devDependencies": {
-    "chai": "^4.1.2",
-    "eslint": "^4.19.1",
-    "mocha": "^5.0.5",
-    "sinon": "^4.4.8"
-  },
-  "config": {
-    "leo": {}
-  }
+	"name": "leo-connector-entity-table",
+	"version": "2.1.1",
+	"description": "A Leo entity table connector",
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/LeoPlatform/connectors.git"
+	},
+	"main": "index.js",
+	"scripts": {
+		"test": "mocha ./test/unit/**/*.test.js",
+		"test:int": "mocha ./test/integration/**/*.test.js"
+	},
+	"author": "",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/LeoPlatform/connectors/issues"
+	},
+	"homepage": "https://github.com/LeoPlatform/connectors#readme",
+	"dependencies": {
+		"async": "^2.6.1",
+		"aws-sdk": "^2.213.1",
+		"backoff": "^2.5.0",
+		"leo-sdk": "^2.0.0",
+		"lodash.merge": "^4.6.1"
+	},
+	"devDependencies": {
+		"chai": "^4.1.2",
+		"eslint": "^4.19.1",
+		"mocha": "^5.0.5",
+		"sinon": "^4.4.8",
+		"js-beautify": "^1.8.6"
+	},
+	"config": {
+		"leo": {}
+	}
 }

@@ -9,7 +9,7 @@ exports.handler = require("leo-sdk/wrappers/cron.js")((event, context, callback)
 		let hashed = hash(queueName, payload.id);
 
 		return Object.assign({}, payload, {
-			id: payload.id.toString(),
+			id: __id_parsed__,
 			partition: hashed
 		});
 	};
