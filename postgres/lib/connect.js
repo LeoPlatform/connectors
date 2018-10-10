@@ -42,6 +42,7 @@ function create(pool, parentCache) {
 		timestamp: parentCache && parentCache.timestamp || null
 	};
 	let client = {
+		setAuditdate,
 		connect: function(opts) {
 			opts = opts || {};
 			return pool.connect().then(c => {
@@ -591,5 +592,10 @@ function create(pool, parentCache) {
 			}
 		}
 	};
+
+	function setAuditdate() {
+		client.auditdate =  "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'"
+	}
+
 	return client;
 }
