@@ -27,7 +27,7 @@ module.exports = function(config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
-	function deletesSetup(qualifiedTableName, schema, field, value, where = "") {
+	function deletesSetup(qualifiedTable, schema, field, value, where = "") {
 		let colLookup = {};
 		schema.map(col => {
 			colLookup[col.column_name] = true;
@@ -41,7 +41,7 @@ module.exports = function(config, columnConfig) {
 		function tryFlushDelete(done, force = false) {
 			if (force || toDeleteCount >= 1000) {
 				let deleteTasks = Object.keys(toDelete).map(col => {
-					return deleteDone => client.query(`update ${qualifiedTableName} set ${field} = ${value} where ${col} in (${toDelete[col].join(",")}) ${where}`, deleteDone);
+					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value} where ${col} in (${toDelete[col].join(",")}) ${where}`, deleteDone);
 				});
 				async.parallelLimit(deleteTasks, 1, (err) => {
 					if (!err) {
@@ -77,26 +77,26 @@ module.exports = function(config, columnConfig) {
 	}
 
 	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
-		const schemaTbl = `staging_${table}`;
-		const schemaStagingTbl = `${columnConfig.stageSchema}.${schemaTbl}`;
-		const qualifiedTableName = `public.${table}`;
+		const stagingTable = `staging_${table}`;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
+		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(ids)) {
 			ids = [ids];
 		}
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
-		schema[schemaStagingTbl] = schema[qualifiedTableName];
+		schema[qualifiedStagingTable] = schema[qualifiedTable];
 
 		let tasks = [];
 
-		let deleteHandler = deletesSetup(qualifiedTableName, schema[qualifiedTableName], columnConfig._deleted, true);
+		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
-		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
-		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${qualifiedTableName})`, done));
-		tasks.push(done => client.query(`create index ${schemaTbl}_id on ${schemaStagingTbl} (${ids.join(', ')})`, done));
-		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
+		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
+		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+		tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
+		//tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -107,7 +107,7 @@ module.exports = function(config, columnConfig) {
 				} else {
 					done(null, obj);
 				}
-			}), client.streamToTable(schemaStagingTbl), (err) => {
+			}), client.streamToTable(qualifiedStagingTable), (err) => {
 				if (err) {
 					return done(err);
 				} else {
@@ -116,7 +116,7 @@ module.exports = function(config, columnConfig) {
 			});
 		});
 
-		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
+		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
 
 		client.describeTable(table, (err, result) => {
 			let columns = result.filter(field => !field.column_name.match(/^_/)).map(field => `"${field.column_name}"`);
@@ -132,7 +132,7 @@ module.exports = function(config, columnConfig) {
 					//The following code relies on the fact that now() will return the same time during all transaction events
 					tasks.push(done => connection.query(`Begin Transaction`, done));
 					tasks.push(done => {
-						connection.query(`select 1 as total from ${qualifiedTableName} limit 1`, (err, results) => {
+						connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
 							if (err) {
 								return done(err);
 							}
@@ -141,9 +141,9 @@ module.exports = function(config, columnConfig) {
 						});
 					});
 					tasks.push(done => {
-						connection.query(`Update ${qualifiedTableName} prev
+						connection.query(`Update ${qualifiedTable} prev
 								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
-								FROM ${schemaStagingTbl} staging
+								FROM ${qualifiedStagingTable} staging
 								where ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
 					});
@@ -151,10 +151,10 @@ module.exports = function(config, columnConfig) {
 
 					//Now insert any we were missing
 					tasks.push(done => {
-						connection.query(`INSERT INTO ${qualifiedTableName} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
+						connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
 								SELECT ${columns.map(column => `coalesce(staging.${column}, prev.${column})`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
-								FROM ${schemaStagingTbl} staging
-								LEFT JOIN ${qualifiedTableName} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
+								FROM ${qualifiedStagingTable} staging
+								LEFT JOIN ${qualifiedTable} as prev on ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
 							`, done);
 					});
@@ -182,28 +182,28 @@ module.exports = function(config, columnConfig) {
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTbl = `staging_${table}`;
-		const schemaStagingTbl = `${columnConfig.stageSchema}.${stagingTbl}`;
-		const qualifiedTableName = `public.${table}`;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
+		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(nk)) {
 			nk = [nk];
 		}
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
-		if (typeof schema[qualifiedTableName] === 'undefined') {
-			throw new Error(`${qualifiedTableName} not found in schema`);
+		if (typeof schema[qualifiedTable] === 'undefined') {
+			throw new Error(`${qualifiedTable} not found in schema`);
 		}
-		schema[schemaStagingTbl] = schema[qualifiedTableName].filter(c => c.column_name != sk);
+		schema[qualifiedStagingTable] = schema[qualifiedTable].filter(c => c.column_name != sk);
 
 		let tasks = [];
-		let deleteHandler = deletesSetup(qualifiedTableName, schema[qualifiedTableName], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
+		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
-		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}`, done));
-		tasks.push(done => client.query(`drop table if exists ${schemaStagingTbl}_changes`, done));
-		tasks.push(done => client.query(`create table ${schemaStagingTbl} (like ${qualifiedTableName})`, done));
-		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${schemaStagingTbl} (${nk.join(', ')})`, done));
-		tasks.push(done => client.query(`alter table ${schemaStagingTbl} drop column ${sk}`, done));
-		//tasks.push(done => ls.pipe(stream, client.streamToTable(schemaStagingTbl), done));
+		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
+		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
+		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
+		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
+		//tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -214,7 +214,7 @@ module.exports = function(config, columnConfig) {
 				} else {
 					done(null, obj);
 				}
-			}), client.streamToTable(schemaStagingTbl), (err) => {
+			}), client.streamToTable(qualifiedStagingTable), (err) => {
 				if (err) {
 					return done(err);
 				} else {
@@ -223,7 +223,7 @@ module.exports = function(config, columnConfig) {
 			});
 		});
 
-		tasks.push(done => client.query(`analyze ${schemaStagingTbl}`, done));
+		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
 
 		client.describeTable(table, (err, result) => {
 			client.connect().then(connection => {
@@ -274,11 +274,11 @@ module.exports = function(config, columnConfig) {
 					}
 
 					//let's figure out which SCDs needs to happen
-					connection.query(`create table ${schemaStagingTbl}_changes as 
+					connection.query(`create table ${qualifiedStagingTable}_changes as 
 				select ${nk.map(id=>`s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
-					FROM ${schemaStagingTbl} s
-					LEFT JOIN ${qualifiedTableName} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
+					FROM ${qualifiedStagingTable} s
+					LEFT JOIN ${qualifiedTable} d on ${nk.map(id=>`d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
 						if (err) {
 							console.log(err);
 							process.exit();
@@ -286,9 +286,9 @@ module.exports = function(config, columnConfig) {
 						let tasks = [];
 						let rowId = null;
 						let totalRecords = 0;
-						tasks.push(done => connection.query(`analyze ${schemaStagingTbl}_changes`, done));
+						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
 						tasks.push(done => {
-							connection.query(`select max(${sk}) as maxid from ${qualifiedTableName}`, (err, results) => {
+							connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
 								if (err) {
 									return done(err);
 								}
@@ -304,11 +304,11 @@ module.exports = function(config, columnConfig) {
 
 						tasks.push(done => {
 							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
-							connection.query(`INSERT INTO ${qualifiedTableName} (${fields.join(',')})
+							connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
 								SELECT row_number() over () + ${rowId}, ${allColumns.map(column=>`coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-								FROM ${schemaStagingTbl}_changes changes  
-								JOIN ${schemaStagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-								LEFT JOIN ${qualifiedTableName} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+								FROM ${qualifiedStagingTable}_changes changes  
+								JOIN ${qualifiedStagingTable} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+								LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
 								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 								`, done);
 						});
@@ -320,17 +320,17 @@ module.exports = function(config, columnConfig) {
 							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
 							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
-							connection.query(`update ${qualifiedTableName} as prev
+							connection.query(`update ${qualifiedTable} as prev
 										set  ${columns.join(', ')}
-										FROM ${schemaStagingTbl}_changes changes
-										JOIN ${schemaStagingTbl} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+										FROM ${qualifiedStagingTable}_changes changes
+										JOIN ${qualifiedStagingTable} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
 										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
 
-						tasks.push(done => connection.query(`drop table ${schemaStagingTbl}_changes`, done));
-						tasks.push(done => connection.query(`drop table ${schemaStagingTbl}`, done));
+						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
+						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
@@ -747,12 +747,12 @@ module.exports = function(config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let schemaStagingTbl = `${columnConfig.stageSchema}.staging_${tableName}`;
+		let qualifiedStagingTable = `${columnConfig.stageSchema}.staging_${tableName}`;
 		tasks.push((done) => {
-			client.query(`drop table if exists ${schemaStagingTbl}`, done);
+			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
 		tasks.push((done) => {
-			client.query(`create /*temporary*/ table ${schemaStagingTbl} (like ${tableName})`, done);
+			client.query(`create /*temporary*/ table ${qualifiedStagingTable} (like ${tableName})`, done);
 		});
 		tasks.push((done) => {
 			let needs = {
@@ -776,7 +776,7 @@ module.exports = function(config, columnConfig) {
 				if (file.match(/\.manifest$/)) {
 					manifest = "MANIFEST";
 				}
-				client.query(`copy ${schemaStagingTbl} (${f})
+				client.query(`copy ${qualifiedStagingTable} (${f})
           from '${file}' ${manifest} ${opts.role?`credentials 'aws_iam_role=${opts.role}'`: ""}
 		  NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
 			} else {
@@ -785,29 +785,29 @@ module.exports = function(config, columnConfig) {
 		});
 		if (table.isDimension) {
 			tasks.push((done) => {
-				client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${schemaStagingTbl}.${table.sk}=${tableName}.${table.sk}`, done);
+				client.query(`delete from ${tableName} using ${qualifiedStagingTable} where ${qualifiedStagingTable}.${table.sk}=${tableName}.${table.sk}`, done);
 			});
 		} else {
 			tasks.push((done) => {
-				let ids = table.nks.map(nk => `${schemaStagingTbl}.${nk}=${tableName}.${nk}`).join(' and ');
+				let ids = table.nks.map(nk => `${qualifiedStagingTable}.${nk}=${tableName}.${nk}`).join(' and ');
 				if (ids.length) {
-					client.query(`delete from ${tableName} using ${schemaStagingTbl} where ${ids}`, done);
+					client.query(`delete from ${tableName} using ${qualifiedStagingTable} where ${ids}`, done);
 				} else {
 					done();
 				}
 			});
 		}
 		tasks.push(function(done) {
-			client.query(`insert into ${tableName} select * from ${schemaStagingTbl}`, done);
+			client.query(`insert into ${tableName} select * from ${qualifiedStagingTable}`, done);
 		});
 		tasks.push(function(done) {
-			client.query(`select count(*) from ${schemaStagingTbl}`, (err, result) => {
+			client.query(`select count(*) from ${qualifiedStagingTable}`, (err, result) => {
 				loadCount = result && parseInt(result[0].count);
 				done(err);
 			});
 		});
 		tasks.push(function(done) {
-			client.query(`drop table if exists ${schemaStagingTbl}`, done);
+			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
 		async.series(tasks, (err) => {
 			callback(err, loadCount);

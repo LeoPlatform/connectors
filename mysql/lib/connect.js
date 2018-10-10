@@ -107,8 +107,8 @@ module.exports = function(c) {
 		disconnect: function(callback) {
 			return this.end(callback);
 		},
-		release: function () {
-			return
+		release: function (destroy) {
+			pool.release && pool.release(destroy);
 		},
 		describeTable: function(table, callback) {
 			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
@@ -125,7 +125,7 @@ module.exports = function(c) {
 			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(tableInfo => {
-					const tableName = `${tableSchema}.${tableInfo.table_name}`;
+					const tableName = `\`${tableSchema}\`.\`${tableInfo.table_name}\``;
 					if (!schema[tableName]) {
 						schema[tableName] = [];
 					}
