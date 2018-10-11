@@ -113,7 +113,7 @@ module.exports = function(c) {
 		describeTable: function(table, callback) {
 			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
 				FROM information_schema.columns
-				WHERE table_schema = ? and table_name = ? order by ordinal_position asc`, [config.database, table], (err, result) => {
+				WHERE table_schema = '${config.database}' and table_name = ? order by ordinal_position asc`, [ table ], (err, result) => {
 				callback(err, result);
 			});
 		},
@@ -167,7 +167,7 @@ module.exports = function(c) {
 			let total = 0;
 			client.query(`SELECT column_name 
 					FROM information_schema.columns 
-					WHERE table_schema = ? and table_name = ? order by ordinal_position asc`, [config.database, table], (err, results) => {
+					WHERE table_schema = '${config.database}' and table_name = ? order by ordinal_position asc`, [ table ], (err, results) => {
 				columns = results.map(r => r.column_name);
 				ready = true;
 				if (pending) {
@@ -200,7 +200,7 @@ module.exports = function(c) {
 				if (opts.useReplaceInto) {
 					cmd = "REPLACE INTO ";
 				}
-				client.query(`${cmd} ??.?? (??) VALUES ?`, [config.database, table, columns, values], function(err) {
+				client.query(`${cmd} ${config.database}.?? (??) VALUES ?`, [ table, columns, values ], function(err) {
 					if (err) {
 						callback(err);
 					} else {

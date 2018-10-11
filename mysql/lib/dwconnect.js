@@ -440,7 +440,7 @@ module.exports = function(config, columnConfig) {
 					}
 					let dimTableNk = tableNks[field.dimension][0];
 					unions[field.dimension].push(`select ${table}.${column} as id
-						from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column}
+						from ${columnConfig.stageSchema}.${table} left join ${columnConfig.stageSchema}.${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column}
 						where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
 				}
 			});
@@ -650,7 +650,7 @@ module.exports = function(config, columnConfig) {
 			fields.push(`?? ${field.type}`);
 		});
 
-		let sql = `create table ${table} (
+		let sql = `create table ${columnConfig.stageSchema}.?? (
 				${fields.join(',\n')}
 			)`;
 
@@ -659,7 +659,7 @@ module.exports = function(config, columnConfig) {
 			@todo if dimension, add empty row
 		*/
 		let tasks = [];
-        tasks.push(done => client.query(sql, params, done));
+        tasks.push(done => client.query(sql, [ table, ...params], done));
 
 		if (definition.isDimension) {
             tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
@@ -667,13 +667,13 @@ module.exports = function(config, columnConfig) {
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._enddate} timestamp`, [ table ], done));
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._current} boolean`, [ table ], done));
 			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (??)`, [ `${table}_bk`, table, ids.concat(columnConfig._current) ], done));
-			tasks.push(done => client.query(`create index ?? on ?? (??)`, [ `${table}_bk2`, table, ids.concat(columnConfig._startdate) ], done));
-			tasks.push(done => client.query(`create index ?? on ?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
+			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (??)`, [ `${table}_bk2`, table, ids.concat(columnConfig._startdate) ], done));
+			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
 		} else {
-            tasks.push(done => client.query(`alter table ?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
-			tasks.push(done => client.query(`alter table ?? add column ${columnConfig._deleted} boolean`, [ table ], done));
-			tasks.push(done => client.query(`create index ?? on ?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
-			tasks.push(done => client.query(`create index ?? on ?? (??)`, [ `${table}_bk`, table, ids ], done));
+            tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
+			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._deleted} boolean`, [ table ], done));
+			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
+			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (??)`, [ `${table}_bk`, table, ids ], done));
 		}
 		queries.map(q => {
 			tasks.push(done => client.query(q, err => done(err)));
@@ -705,47 +705,34 @@ module.exports = function(config, columnConfig) {
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
-					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
+					fields.push({ key: `${columnConfig.dimColumnTransform(key, field)}_date`, type: `integer` });
+					fields.push({ key: `${columnConfig.dimColumnTransform(key, field)}_time`, type: `integer` });
 				}
 			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
+					fields.push({ key: `${columnConfig.dimColumnTransform(key, field)}_date`, type: `integer` });
 				}
 			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
+					fields.push({ key: `${columnConfig.dimColumnTransform(key, field)}_time`, type: `integer` });
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				fields.push({ key: `${columnConfig.dimColumnTransform(key, field)}`, type: `integer` });
 			}
-			fields.push(`\`${key}\` ${field.type}`);
+			fields.push({ key, type: field.type });
 		});
-		let sqls = [`alter table  ${table} 
-				add column ${fields.join(',\n add column ')}
-			`];
 
-		// redshift doesn't support multi 'add column' in one query
-		if (config.version == "redshift") {
-			sqls = fields.map(field => `alter table  ${table} add column ${field}`);
-		}
-
-		queries.map(q => {
-			sqls.push(q);
-		});
-		async.eachSeries(sqls, function(sql, done) {
-			client.query(sql, err => done(err));
-		}, callback);
+		client.query(`alter table ?? ${fields.map(field => `add column ?? ${field.type}`).join(`,\n`)}`, [ table, ...fields.map(i => i.key) ], callback);
 	};
 
 	client.findAuditDate = function(table, callback) {
-		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ??`, [ table ], (err, auditdate) => {
+		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ${columnConfig.stageSchema}.??`, [ table ], (err, auditdate) => {
 			if (err) {
 				callback(err);
 			} else {
 				let audit = auditdate && auditdate[0].max;
 				let auditdateCompare = audit != null ? `${columnConfig._auditdate} >= ${client.escapeValue(audit)}` : `${columnConfig._auditdate} is null`;
-				client.query(`select count(*) as count FROM ?? where ${auditdateCompare}`, [ table ], (err, count) => {
+				client.query(`select count(*) as count FROM ${columnConfig.stageSchema}.?? where ${auditdateCompare}`, [ table ], (err, count) => {
 					callback(err, {
 						auditdate: audit,
 						count: count && count[0].count
@@ -757,7 +744,7 @@ module.exports = function(config, columnConfig) {
 
 	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
 		let auditdateCompare = remoteAuditdate.auditdate != null ? `${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
-		client.query(`select count(*) as count FROM ?? WHERE ${auditdateCompare}`, [ table ], (err, result) => {
+		client.query(`select count(*) as count FROM ${columnConfig.stageSchema}.?? WHERE ${auditdateCompare}`, [ table ], (err, result) => {
 			let where = "";
 
 			let mysqlAuditDate = parseInt(result[0].count);
@@ -768,9 +755,9 @@ module.exports = function(config, columnConfig) {
 				where = `WHERE ${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}`;
 			}
 			client.query(`select to_char(min(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as oldest, count(*) as count
-        FROM ${client.escapeId(table)}
-        ${where}
-        `, (err, result) => {
+				FROM ${columnConfig.stageSchema}.??
+				${where}
+				`, [ table ], (err, result) => {
 
 				if (result[0].count) {
 					let totalCount = parseInt(result[0].count);
@@ -783,18 +770,18 @@ module.exports = function(config, columnConfig) {
 					};
 					var field = fields.map(field => {
 						needs[field] = false;
-						return `\`${field}\``;
+						return field;
 					});
 					Object.keys(needs).map(key => {
 						if (needs[key]) {
-							field.push(`\`${key}\``);
+							field.push(key);
 						}
 					});
 
 					if (config.version == "redshift") {
 						let fileBase = `s3://${opts.bucket}${opts.file}/${table}`;
-						let query = `UNLOAD ('select ${field} from ?? ${where}') to '${fileBase}' MANIFEST OVERWRITE ESCAPE iam_role '${opts.role}';`;
-						client.query(query, [ table ], (err) => {
+						let query = `UNLOAD ('select ?? from ${columnConfig.stageSchema}.?? ${where}') to '${fileBase}' MANIFEST OVERWRITE ESCAPE iam_role '${opts.role}';`;
+						client.query(query, [ field, table ], (err) => {
 							callback(err, fileBase + ".manifest", totalCount, result[0].oldest);
 						});
 					} else {
