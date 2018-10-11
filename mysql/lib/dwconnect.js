@@ -78,8 +78,8 @@ module.exports = function(config, columnConfig) {
 
 	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
 		const stagingTable = `staging_${table}`;
-		const qualifiedStagingTable = `\`${columnConfig.stageSchema}\`.\`${stagingTable}\``;
-		const qualifiedTable = `\`${columnConfig.stageSchema}\`.\`${table}\``;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${client.escapeId(stagingTable)}`;
+		const qualifiedTable = `${columnConfig.stageSchema}.${client.escapeId(table)}`;
 		if (!Array.isArray(ids)) {
 			ids = [ids];
 		}
@@ -202,8 +202,8 @@ module.exports = function(config, columnConfig) {
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTable = `staging_${table}`;
-		const qualifiedStagingTable = `\`${columnConfig.stageSchema}\`.\`${stagingTable}\``;
-		const qualifiedTable = `\`${columnConfig.stageSchema}\`.\`${table}\``;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${client.escapeId(stagingTable)}`;
+		const qualifiedTable = `${columnConfig.stageSchema}.${client.escapeId(table)}`;
 		if (!Array.isArray(nk)) {
 			nk = [nk];
 		}
