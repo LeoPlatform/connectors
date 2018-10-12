@@ -1,6 +1,7 @@
 {
 	"name": "__bot01_id__",
 	"version": "1.0.0",
+	"private": true,
 	"description": "Takes data from a queue and loads into the entity table (__Entities__)",
 	"main": "index.js",
 	"directories": {
