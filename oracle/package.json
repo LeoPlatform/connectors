@@ -20,20 +20,22 @@
 		"leo-connector-common": "^1.4.3",
 		"leo-logger": "^1.0.0",
 		"leo-sdk": "^2.0.1",
-		"oracledb": "^2.3.0",
-		"uuid": "^3.2.1"
+		"oracledb": "^2.3.0"
 	},
 	"config": {
 		"leo": {
 			"build": {
-				"include": [{
-					"src": "lambda/node_modules",
-					"dest": ".",
-					"external": "oracledb"
-				}, {
-					"src": "./inc/lib",
-					"dest": "."
-				}]
+				"include": [
+					{
+						"src": "lambda/node_modules",
+						"dest": ".",
+						"external": "oracledb"
+					},
+					{
+						"src": "./inc/lib",
+						"dest": "."
+					}
+				]
 			}
 		}
 	}
