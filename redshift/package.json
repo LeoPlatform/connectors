@@ -23,6 +23,7 @@
 		"leo-sdk": "^2.0.1",
 		"pg": "^7.4.1",
 		"pg-copy-streams": "^1.2.0",
+		"pg-native": "^2.2.0",
 		"pg-format": "^1.0.4"
 	},
 	"devDependencies": {
