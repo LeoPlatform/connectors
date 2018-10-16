@@ -167,24 +167,26 @@ module.exports = {
 				logger.error(err);
 				clearTimeout(walCheckpointHeartBeatTimeoutId);
 				if (replicationClient) {
-					replicationClient.removeAllListeners();
 					try {
+						replicationClient.removeAllListeners();
+						replicationClient = null;
 						wrapperClient.end(err => {
-							logger.debug("wrapperClient.end", err);
+							if (err) {
+								return logger.error(`(${config.database}) wrapperClient.end ERROR:`, err);
+							}
+							logger.debug("wrapperClient.end");
+							wrapperClient = null;
+							replicationClient.end(err => {
+								if (err) {
+									return logger.error(`(${config.database}) replicationClient.end ERROR:`, err);
+								}
+								logger.debug("replicationClient.end");
+								retry.backoff(err);
+							});
 						});
-					} catch (walCheckpointHeartBeat) {
-						logger.error(`(${config.database}) Cannot end WrapperClient`);
+					} catch (err) {
+						logger.error(`(${config.database}) Error Closing Database Connections`, err);
 					}
-					try {
-						replicationClient.end(err => {
-							logger.debug("replicationClient.end", err);
-						});
-					} catch (walCheckpointHeartBeat) {
-						logger.error(`(${config.database}) Cannot end replicationClient`);
-					}
-					replicationClient = null;
-					wrapperClient = null;
-					retry.backoff(err);
 				}
 			};
 			replicationClient.on('error', dieError);
