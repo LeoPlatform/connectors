@@ -18,7 +18,7 @@ module.exports = function(config, columnConfig) {
 			if (dimCol) {
 				return dimCol;
 			}
-			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/,'').replace(/^d_/,'')}`
+			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/,'').replace(/^d_/,'')}`;
 		},
 		useSurrogateDateKeys: true,
 		stageSchema: config.database || 'datawarehouse'
@@ -141,16 +141,16 @@ module.exports = function(config, columnConfig) {
 						});
 					});
 					tasks.push(done => {
-						const params = []
+						const params = [];
 						ids.forEach(id => {
-							params.push(id)
-							params.push(id)
-						})
+							params.push(id);
+							params.push(id);
+						});
 						columns.forEach(column => {
-							params.push(column)
-							params.push(column)
-							params.push(column)
-						})
+							params.push(column);
+							params.push(column);
+							params.push(column);
+						});
 						connection.query(`Update ${qualifiedTable} prev
 							join ${qualifiedStagingTable} staging on ${ids.map(() => `prev.?? = staging.??`).join(' and ')}
 							SET  ${columns.map(() => `prev.?? = coalesce(staging.??, prev.??)`)}, prev.${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), prev.${columnConfig._auditdate} = ${dwClient.auditdate}
@@ -160,16 +160,16 @@ module.exports = function(config, columnConfig) {
 
 					//Now insert any we were missing
 					tasks.push(done => {
-						const params = [ [ ...columns, columnConfig._deleted, columnConfig._auditdate ] ]
+						const params = [ [ ...columns, columnConfig._deleted, columnConfig._auditdate ] ];
 						columns.forEach(column => {
-							params.push(column)
-							params.push(column)
-						})
+							params.push(column);
+							params.push(column);
+						});
 						ids.forEach(id => {
-							params.push(id)
-							params.push(id)
-						})
-						params.push(ids[0])
+							params.push(id);
+							params.push(id);
+						});
+						params.push(ids[0]);
 						connection.query(`INSERT INTO ${qualifiedTable} (??)
 							SELECT ${columns.map(() => `coalesce(staging.??, prev.??)`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
 							FROM ${qualifiedStagingTable} staging
@@ -188,7 +188,7 @@ module.exports = function(config, columnConfig) {
 								});
 							});
 						} else {
-							console.log('ROLLBACK import fact tasks error:', err)
+							console.log('ROLLBACK import fact tasks error:', err);
 							connection.query(`rollback`, (e, d) => {
 								connection.release();
 								callback(e, d);
@@ -268,69 +268,69 @@ module.exports = function(config, columnConfig) {
 
 
 					let scdSQL = [];
-					const params = [ `${stagingTable}_changes` ]
+					const params = [ `${stagingTable}_changes` ];
 					nk.forEach(id => {
-						params.push(id)
-					})
-					params.push(nk[0])
+						params.push(id);
+					});
+					params.push(nk[0]);
 
 					//if (!scd2.length && !scd3.length && !scd6.length) {
 					//	scdSQL.push(`1 as runSCD1`);
 					//} else 
 					if (scd1.length) {
 						scdSQL.push(`CASE WHEN md5(${scd1.map(f => {
-							params.push(f)
-							return "md5(coalesce(staging.??,''))"
+							params.push(f);
+							return "md5(coalesce(staging.??,''))";
 						}).join(' || ')}) = md5(${scd1.map(f => {
-							params.push(f)
-							return "md5(coalesce(prev.??,''))" 
+							params.push(f);
+							return "md5(coalesce(prev.??,''))" ;
 						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD1`);
-						params.push(nk[0])
+						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD1`);
 					}
 					if (scd2.length) {
-						params.push(nk[0])
+						params.push(nk[0]);
 						scdSQL.push(`CASE WHEN prev.?? is null then 1 WHEN md5(${scd2.map(f => {
-							params.push(f)
-							return "md5(coalesce(staging.??,''))" 
+							params.push(f);
+							return "md5(coalesce(staging.??,''))";
 						}).join(' || ')}) = md5(${scd2.map(f => {
-							params.push(f)
-							return "md5(coalesce(prev.??,''))" 
+							params.push(f);
+							return "md5(coalesce(prev.??,''))";
 						}).join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
 					} else {
-						params.push(nk[0])
+						params.push(nk[0]);
 						scdSQL.push(`CASE WHEN prev.?? is null then 1 ELSE 0 END as runSCD2`);
 					}
 					if (scd3.length) {
 						scdSQL.push(`CASE WHEN md5(${scd3.map(f => {
-							params.push(f)
-							return "md5(coalesce(staging.??,''))"
+							params.push(f);
+							return "md5(coalesce(staging.??,''))";
 						}).join(' || ')}) = md5(${scd3.map(f => {
-							params.push(f)
-							return "md5(coalesce(prev.??,''))"
+							params.push(f);
+							return "md5(coalesce(prev.??,''))";
 						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD3`);
-						params.push(nk[0])
+						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD3`);
 					}
 					if (scd6.length) {
 						scdSQL.push(`CASE WHEN md5(${scd6.map(f => {
-							params.push(f)
-							return "md5(coalesce(staging.??,''))"
+							params.push(f);
+							return "md5(coalesce(staging.??,''))";
 						}).join(' || ')}) = md5(${scd6.map(f => {
-							params.push(f)
-							return "md5(coalesce(prev.??,''))"
+							params.push(f);
+							return "md5(coalesce(prev.??,''))";
 						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD6`);
-						params.push(nk[0])
+						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD6`);
 					}
 					
 					nk.forEach(id => {
-						params.push(id)
-						params.push(id)
-					})
+						params.push(id);
+						params.push(id);
+					});
 
 					//let's figure out which SCDs needs to happen
 					connection.query(`create table ${columnConfig.stageSchema}.?? as 
@@ -353,18 +353,18 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							const params = [ allColumns.concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]) ];
 							allColumns.forEach(column => {
-								params.push(column)
-								params.push(column)
-							})
-							params.push(`${stagingTable}_changes`)
+								params.push(column);
+								params.push(column);
+							});
+							params.push(`${stagingTable}_changes`);
 							nk.forEach(id => {
-								params.push(id)
-								params.push(id)
-							})
+								params.push(id);
+								params.push(id);
+							});
 							nk.forEach(id => {
-								params.push(id)
-								params.push(id)
-							})
+								params.push(id);
+								params.push(id);
+							});
 							connection.query(`INSERT INTO ${qualifiedTable} (??)
 								SELECT ${allColumns.map(() => `coalesce(staging.??, prev.??)`).join(', ')}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 								FROM ${columnConfig.stageSchema}.?? changes
@@ -381,7 +381,7 @@ module.exports = function(config, columnConfig) {
 							columns.push(`prev.\`${columnConfig._enddate}\` = case when changes.runSCD2 =1 then now() else prev.\`${columnConfig._enddate}\` END`);
 							columns.push(`prev.\`${columnConfig._current}\` = case when changes.runSCD2 =1 then false else prev.\`${columnConfig._current}\` END`);
 							columns.push(`prev.\`${columnConfig._auditdate}\` = ${dwClient.auditdate}`);
-							const params = [`${stagingTable}_changes`]
+							const params = [`${stagingTable}_changes`];
 							connection.query(`update ${qualifiedTable} as prev
 										JOIN ${columnConfig.stageSchema}.?? changes on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')}
 										JOIN ${qualifiedStagingTable} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
@@ -402,7 +402,7 @@ module.exports = function(config, columnConfig) {
 									});
 								});
 							} else {
-								console.log('ROLLBACK import dimension tasks error:', err)
+								console.log('ROLLBACK import dimension tasks error:', err);
 								connection.query(`rollback`, (e, d) => {
 									connection.release();
 									callback(e, d);
@@ -452,11 +452,10 @@ module.exports = function(config, columnConfig) {
 				let unionQuery = unions[table].join("\nUNION\n");
 				client.query(`insert into ${columnConfig.stageSchema}.?? (??, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current})
 					select sub.id, max(${_auditdate}), '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`,
-					[ table, nk ],
-					(err) => {
-						callback(err);
-					}
-				);
+				[ table, nk ],
+				(err) => {
+					callback(err);
+				});
 			};
 		});
 		async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
@@ -485,29 +484,29 @@ module.exports = function(config, columnConfig) {
 				let joinTables = links.map(link => {
 					if (link.table == "d_datetime" || link.table == "datetime" || link.table == "dim_datetime") {
 						if (columnConfig.useSurrogateDateKeys) {
-							setParams.push(`${link.destination}_date`)
-							setParams.push(link.source)
-							setParams.push(`${link.destination}_time`)
-							setParams.push(link.source)
-							sets.push(`t.?? = coalesce(DATE(t.??) - DATE('1400-01-01') + 10000, 1)`);
+							setParams.push(`${link.destination}_date`);
+							setParams.push(link.source);
+							setParams.push(`${link.destination}_time`);
+							setParams.push(link.source);
+							sets.push(`t.?? = coalesce(DATEDIFF(t.??, '1400-01-01') + 10000, 1)`);
 							sets.push(`t.?? = coalesce(TIME_TO_SEC(t.??) + 10000, 1)`);
 						}
 					} else if (link.table == "d_date" || link.table == "date" || link.table == "dim_date") {
 						if (columnConfig.useSurrogateDateKeys) {
-							setParams.push(`${link.destination}_date`)
-							setParams.push(link.source)
-							sets.push(`t.?? = coalesce(DATE(t.??) - DATE('1400-01-01') + 10000, 1)`);
+							setParams.push(`${link.destination}_date`);
+							setParams.push(link.source);
+							sets.push(`t.?? = coalesce(DATEDIFF(t.??, '1400-01-01') + 10000, 1)`);
 						}
 					} else if (link.table == "d_time" || link.table == "time" || link.table == "dim_time") {
 						if (columnConfig.useSurrogateDateKeys) {
-							setParams.push(`${link.destination}_time`)
-							setParams.push(link.source)
+							setParams.push(`${link.destination}_time`);
+							setParams.push(link.source);
 							sets.push(`t.?? = coalesce(TIME_TO_SEC(t.??) + 10000, 1)`);
 						}
 					} else {
-						setParams.push(link.destination)
-						setParams.push(`${link.source}_join_table`)
-						setParams.push(link.sk)
+						setParams.push(link.destination);
+						setParams.push(`${link.source}_join_table`);
+						setParams.push(link.sk);
 						sets.push(`t.?? = coalesce(??.??, 1)`);
 						joinParams.push(...[
 							link.table,
@@ -520,7 +519,7 @@ module.exports = function(config, columnConfig) {
 							link.link_date,
 							`${link.source}_join_table`,
 							`${link.source}_join_table`
-						])
+						]);
 						return `LEFT JOIN ?? ??
 							on ??.?? = t.??
 								and t.?? >= ??.${columnConfig._startdate}
@@ -554,7 +553,7 @@ module.exports = function(config, columnConfig) {
 			tableResults[table] = "Unmodified";
 			tasks.push(done => {
 				client.describeTable(table, (err, fields) => {
-                    if (err) return done(err);
+					if (err) return done(err);
 					if (!fields || !fields.length) {
 						tableResults[table] = "Created";
 						client.createTable(table, structures[table], done);
@@ -578,7 +577,7 @@ module.exports = function(config, columnConfig) {
 						} else {
 							done();
 						}
-                    }
+					}
 				});
 			});
 		});
@@ -602,7 +601,7 @@ module.exports = function(config, columnConfig) {
 
 		let ids = [];
 		const params = [];
-        Object.keys(definition.structure).forEach(key => {
+		Object.keys(definition.structure).forEach(key => {
 			let field = definition.structure[key];
 			if (field == "sk") {
 				field = {
@@ -627,26 +626,26 @@ module.exports = function(config, columnConfig) {
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
-					params.push(`${columnConfig.dimColumnTransform(key, field)}_date`)
+					params.push(`${columnConfig.dimColumnTransform(key, field)}_date`);
 					fields.push(`?? integer`);
-					params.push(`${columnConfig.dimColumnTransform(key, field)}_time`)
+					params.push(`${columnConfig.dimColumnTransform(key, field)}_time`);
 					fields.push(`?? integer`);
 				}
 			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
-					params.push(`${columnConfig.dimColumnTransform(key, field)}_date`)
+					params.push(`${columnConfig.dimColumnTransform(key, field)}_date`);
 					fields.push(`?? integer`);
 				}
 			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_time") {
 				if (columnConfig.useSurrogateDateKeys) {
-					params.push(`${columnConfig.dimColumnTransform(key, field)}_time`)
+					params.push(`${columnConfig.dimColumnTransform(key, field)}_time`);
 					fields.push(`?? integer`);
 				}
 			} else if (field.dimension) {
-				params.push(`${columnConfig.dimColumnTransform(key, field)}`)
+				params.push(`${columnConfig.dimColumnTransform(key, field)}`);
 				fields.push(`?? integer`);
 			}
-			params.push(key)
+			params.push(key);
 			fields.push(`?? ${field.type}`);
 		});
 
@@ -659,10 +658,10 @@ module.exports = function(config, columnConfig) {
 			@todo if dimension, add empty row
 		*/
 		let tasks = [];
-        tasks.push(done => client.query(sql, [ table, ...params], done));
+		tasks.push(done => client.query(sql, [ table, ...params], done));
 
 		if (definition.isDimension) {
-            tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
+			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._startdate} timestamp`, [ table ], done));
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._enddate} timestamp`, [ table ], done));
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._current} boolean`, [ table ], done));
@@ -670,7 +669,7 @@ module.exports = function(config, columnConfig) {
 			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (??)`, [ `${table}_bk2`, table, ids.concat(columnConfig._startdate) ], done));
 			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
 		} else {
-            tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
+			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._auditdate} timestamp`, [ table ], done));
 			tasks.push(done => client.query(`alter table ${columnConfig.stageSchema}.?? add column ${columnConfig._deleted} boolean`, [ table ], done));
 			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (${columnConfig._auditdate})`, [ `${table}${columnConfig._auditdate}`, table ], done));
 			tasks.push(done => client.query(`create index ?? on ${columnConfig.stageSchema}.?? (??)`, [ `${table}_bk`, table, ids ], done));
