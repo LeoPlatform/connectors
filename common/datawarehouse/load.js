@@ -139,13 +139,24 @@ module.exports = function(client, tableConfig, stream, callback) {
 										source: f
 									};
 									let nks = tableNks[field.dimension];
-									if (nks && nks.length == 1) {
-										link.on = nks[0];
-									}
+                                    if (field.on && typeof field.on == 'object' && !Array.isArray(field.on)) {
+                                        link.on = [];
+                                        link.source = [];
+                                        Object.entries(field.on).map(([key, val]) => {
+                                            link.on.push(val);
+                                            link.source.push(key);
+                                        })
+                                    } else if (nks && nks.length == 1) {
+                                        link.on = nks[0];
+                                    } else if (nks && nks.length > 1) {
+                                        link.on = nks;
+                                        link.source = field.on;
+                                    }
 								}
 								links.push(Object.assign({
 									table: null,
-									on: f,
+                                    join_id: f,
+                                    on: f,
 									destination: client.getDimensionColumn(f, field),
 									link_date: "_auditdate",
 									sk: tableSks[link.table]

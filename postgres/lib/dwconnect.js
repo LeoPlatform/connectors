@@ -434,13 +434,16 @@ module.exports = function(config, columnConfig) {
 							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 						}
 					} else {
-						sets.push(`${link.destination} = coalesce(${link.source}_join_table.${link.sk}, 1)`);
-						return `LEFT JOIN ${link.table} ${link.source}_join_table 
-							on ${link.source}_join_table.${link.on} = t.${link.source} 
-								and t.${link.link_date} >= ${link.source}_join_table.${columnConfig._startdate}
-								and (t.${link.link_date} <= ${link.source}_join_table.${columnConfig._enddate} or ${link.source}_join_table.${columnConfig._current})
-					`;
-					}
+                        sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
+                        var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
+                        if (Array.isArray(link.source)) {
+                            joinOn = link.source.map((v,i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ')
+                        }
+                        return `LEFT JOIN ${link.table} ${link.join_id}_join_table
+							on ${joinOn} 
+								and t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
+								and (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+                    }
 				});
 
 				if (sets.length) {
