@@ -511,7 +511,7 @@ module.exports = function(config, columnConfig) {
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
-		let dbType = config.type.toLowerCase();
+		let dbType = (config.type||"").toLowerCase();
 		let defQueries = definition.queries;
 		if (defQueries && !Array.isArray(defQueries)) {
 			defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version];
@@ -615,7 +615,7 @@ module.exports = function(config, columnConfig) {
 			if (field.queries) {
 				let defQueries = field.queries;
 				if (!Array.isArray(defQueries)) {
-					let dbType = config.type.toLowerCase();
+					let dbType = (config.type||"").toLowerCase();
 					defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version] || [];
 				}
 				queries = queries.concat(defQueries);
