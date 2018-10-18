@@ -251,7 +251,6 @@ module.exports = function(config, columnConfig) {
 					if (err) {
 						return callback(err);
 					}
-
 					// let scd0 = scds[0] || []; // Not Used
 					let scd2 = scds[2] || [];
 					let scd3 = scds[3] || [];
@@ -259,11 +258,11 @@ module.exports = function(config, columnConfig) {
 
 					let ignoreColumns = [columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current];
 					let allColumns = result.filter(field => {
-						return ignoreColumns.indexOf(field.column_name) === -1 && field.column_name !== sk;
+						return !ignoreColumns.includes(field.column_name) && field.column_name !== sk;
 					}).map(r => r.column_name);
 
 					let scd1 = result.map(r => r.column_name).filter(field => {
-						return ignoreColumns.indexOf(field) === -1 && scd2.indexOf(field) === -1 && scd3.indexOf(field) === -1 && field !== sk && nk.indexOf(field) === -1;
+						return !ignoreColumns.includes(field) && !scd2.includes(field) && !scd3.includes(field) && field !== sk && !nk.includes(field);
 					});
 
 
@@ -278,50 +277,50 @@ module.exports = function(config, columnConfig) {
 					//	scdSQL.push(`1 as runSCD1`);
 					//} else 
 					if (scd1.length) {
-						scdSQL.push(`CASE WHEN md5(${scd1.map(f => {
+						scdSQL.push(`CASE WHEN md5(concat(${scd1.map(f => {
 							params.push(f);
 							return "md5(coalesce(staging.??,''))";
-						}).join(' || ')}) = md5(${scd1.map(f => {
+						}).join(', ')})) = md5(concat(${scd1.map(f => {
 							params.push(f);
 							return "md5(coalesce(prev.??,''))" ;
-						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD1`);
+						}).join(', ')})) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD1`);
 						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD1`);
 					}
 					if (scd2.length) {
 						params.push(nk[0]);
-						scdSQL.push(`CASE WHEN prev.?? is null then 1 WHEN md5(${scd2.map(f => {
+						scdSQL.push(`CASE WHEN prev.?? is null then 1 WHEN md5(concat(${scd2.map(f => {
 							params.push(f);
 							return "md5(coalesce(staging.??,''))";
-						}).join(' || ')}) = md5(${scd2.map(f => {
+						}).join(', ')})) = md5(concat(${scd2.map(f => {
 							params.push(f);
 							return "md5(coalesce(prev.??,''))";
-						}).join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
+						}).join(', ')})) THEN 0 ELSE 1 END as runSCD2`);
 					} else {
 						params.push(nk[0]);
 						scdSQL.push(`CASE WHEN prev.?? is null then 1 ELSE 0 END as runSCD2`);
 					}
 					if (scd3.length) {
-						scdSQL.push(`CASE WHEN md5(${scd3.map(f => {
+						scdSQL.push(`CASE WHEN md5(concat(${scd3.map(f => {
 							params.push(f);
 							return "md5(coalesce(staging.??,''))";
-						}).join(' || ')}) = md5(${scd3.map(f => {
+						}).join(', ')})) = md5(concat(${scd3.map(f => {
 							params.push(f);
 							return "md5(coalesce(prev.??,''))";
-						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD3`);
+						}).join(', ')})) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD3`);
 						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD3`);
 					}
 					if (scd6.length) {
-						scdSQL.push(`CASE WHEN md5(${scd6.map(f => {
+						scdSQL.push(`CASE WHEN md5(concat(${scd6.map(f => {
 							params.push(f);
 							return "md5(coalesce(staging.??,''))";
-						}).join(' || ')}) = md5(${scd6.map(f => {
+						}).join(', ')})) = md5(concat(${scd6.map(f => {
 							params.push(f);
 							return "md5(coalesce(prev.??,''))";
-						}).join(' || ')}) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD6`);
+						}).join(', ')})) THEN 0 WHEN prev.?? is null then 0 ELSE 1 END as runSCD6`);
 						params.push(nk[0]);
 					} else {
 						scdSQL.push(`0 as runSCD6`);
@@ -339,7 +338,6 @@ module.exports = function(config, columnConfig) {
 						FROM ${qualifiedStagingTable} staging
 						LEFT JOIN ${qualifiedTable} prev on ${nk.map(() => `prev.?? = staging.??`).join(' and ')} and prev.${columnConfig._current}`, params, function (err) {
 						if (err) {
-							console.log(err);
 							process.exit();
 						}
 						let tasks = [];
@@ -366,12 +364,12 @@ module.exports = function(config, columnConfig) {
 								params.push(id);
 							});
 							connection.query(`INSERT INTO ${qualifiedTable} (??)
-								SELECT ${allColumns.map(() => `coalesce(staging.??, prev.??)`).join(', ')}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-								FROM ${columnConfig.stageSchema}.?? changes
-								JOIN ${qualifiedStagingTable} staging on ${nk.map(() => `staging.?? = changes.??`).join(' and ')}
-								LEFT JOIN ${qualifiedTable} as prev on ${nk.map(() => `prev.?? = changes.??`).join(' and ')} and prev.${columnConfig._current}
-								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
-								`, params, done);
+							SELECT ${allColumns.map(() => `coalesce(staging.??, prev.??)`).join(', ')}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+							FROM ${columnConfig.stageSchema}.?? changes
+							JOIN ${qualifiedStagingTable} staging on ${nk.map(() => `staging.?? = changes.??`).join(' and ')}
+							LEFT JOIN ${qualifiedTable} as prev on ${nk.map(() => `prev.?? = changes.??`).join(' and ')} and prev.${columnConfig._current}
+							WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
+							`, params, done);
 						});
 
 						//This needs to be done last
@@ -383,16 +381,16 @@ module.exports = function(config, columnConfig) {
 							columns.push(`prev.\`${columnConfig._auditdate}\` = ${dwClient.auditdate}`);
 							const params = [`${stagingTable}_changes`];
 							connection.query(`update ${qualifiedTable} as prev
-										JOIN ${columnConfig.stageSchema}.?? changes on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')}
-										JOIN ${qualifiedStagingTable} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
-										set ${columns.join(', ')}
-										where prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
-											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
-										`, params, done);
+							JOIN ${columnConfig.stageSchema}.?? changes on ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')}
+							JOIN ${qualifiedStagingTable} staging on ${nk.map(id=>`staging.${id} = changes.${id}`).join(' and ')}
+							set ${columns.join(', ')}
+							where prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+								and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
+							`, params, done);
 						});
 
-						tasks.push(done => connection.query(`drop table ${columnConfig.stageSchema}.??`, [ `${stagingTable}_changes` ], done));
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						// tasks.push(done => connection.query(`drop table ${columnConfig.stageSchema}.??`, [ `${stagingTable}_changes` ], done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
