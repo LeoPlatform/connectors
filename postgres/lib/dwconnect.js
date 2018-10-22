@@ -21,7 +21,7 @@ module.exports = function(config, columnConfig) {
 			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/,'').replace(/^d_/,'')}`
 		},
 		useSurrogateDateKeys: true,
-		stageSchema: config.database || 'public'
+		stageSchema: 'public'
 	}, columnConfig || {});
 
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
