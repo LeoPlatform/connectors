@@ -594,7 +594,7 @@ function create(pool, parentCache) {
 	};
 
 	function setAuditdate() {
-		client.auditdate =  "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'"
+		client.auditdate =  "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'";
 	}
 
 	return client;

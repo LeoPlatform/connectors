@@ -49,10 +49,10 @@ module.exports = function(c) {
 			return new Promise((resolve, reject) => {
 				pool.getConnection((error, connection) => {
 					if (error) {
-						reject(error)
+						reject(error);
 					}
 					resolve(connection);
-				})
+				});
 			});
 		},
 		query: function(query, params, callback, opts = {}) {
@@ -89,7 +89,7 @@ module.exports = function(c) {
 							schema: ''
 						};
 
-						Object.keys(data).filter(f => !f.match(/^\_/)).filter(f => data[f]).map(k => {
+						Object.keys(data).filter(f => !f.match(/^_/)).filter(f => data[f]).map(k => {
 							startingObj[k] = data[k];
 						});
 
@@ -113,7 +113,7 @@ module.exports = function(c) {
 		describeTable: function(table, callback) {
 			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
 				FROM information_schema.columns
-				WHERE table_schema = '${config.database}' and table_name = ? order by ordinal_position asc`, [ table ], (err, result) => {
+				WHERE table_schema = '${config.database}' and table_name = ${escapeValue(table)} order by ordinal_position asc`, (err, result) => {
 				callback(err, result);
 			});
 		},
@@ -125,7 +125,7 @@ module.exports = function(c) {
 			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(tableInfo => {
-					const tableName = `${tableSchema}.${this.escapeId(tableInfo.table_name)}`;
+					const tableName = `${tableSchema}.${escapeId(tableInfo.table_name)}`;
 					if (!schema[tableName]) {
 						schema[tableName] = [];
 					}
@@ -167,7 +167,7 @@ module.exports = function(c) {
 			let total = 0;
 			client.query(`SELECT column_name 
 					FROM information_schema.columns 
-					WHERE table_schema = '${config.database}' and table_name = ? order by ordinal_position asc`, [ table ], (err, results) => {
+					WHERE table_schema = '${config.database}' and table_name = ${escapeValue(table)} order by ordinal_position asc`, (err, results) => {
 				columns = results.map(r => r.column_name);
 				ready = true;
 				if (pending) {
@@ -200,7 +200,7 @@ module.exports = function(c) {
 				if (opts.useReplaceInto) {
 					cmd = "REPLACE INTO ";
 				}
-				client.query(`${cmd} ${config.database}.?? (??) VALUES ?`, [ table, columns, values ], function(err) {
+				client.query(`${cmd} ${config.database}.${escapeId(table)} (??) VALUES ?`, [ columns, values ], function(err) {
 					if (err) {
 						callback(err);
 					} else {
@@ -263,9 +263,7 @@ module.exports = function(c) {
 			}
 			client.query(sql, [id, table, id, start, id, end, id], callback);
 		},
-		escapeId: function(field) {
-			return '`' + field.replace('`', '').replace(/\.([^.]+)$/, '`.`$1') + '`';
-		},
+		escapeId,
 		escape: function(value) {
 			if (value.replace) {
 				return '`' + value.replace('`', '') + '`';
@@ -273,13 +271,7 @@ module.exports = function(c) {
 				return value;
 			}
 		},
-		escapeValue: function(value) {
-			if (value.replace) {
-				return "'" + value.replace("'", "\\'").toLowerCase() + "'";
-			} else {
-				return value;
-			}
-		},
+		escapeValue,
 		escapeValueNoToLower: function(value) {
 			if (value.replace) {
 				return "'" + value.replace("'", "\\'") + "'";
@@ -289,8 +281,20 @@ module.exports = function(c) {
 		}
 	};
 
+	function escapeId (field) {
+		return '`' + field.replace('`', '').replace(/\.([^.]+)$/, '`.`$1') + '`';
+	}
+
+	function escapeValue (value) {
+		if (value.replace) {
+			return "'" + value.replace("'", "\\'").toLowerCase() + "'";
+		} else {
+			return value;
+		}
+	}
+
 	function setAuditdate () {
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '').replace(/[A-Z]/, ' ') + "'"
+		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '').replace(/[A-Z]/, ' ') + "'";
 	}
 
 	return client;
