@@ -1,0 +1,25 @@
+{
+	"name": "__bot02_id__",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Reads from DynamoDB entity table and writes to a queue with entity changes",
+	"main": "index.js",
+	"directories": {
+		"test": "test"
+	},
+	"scripts": {
+		"test": "leo-cli test . "
+	},
+	"config": {
+		"leo": {
+			"type": "bot",
+			"memory": 256,
+			"timeout": 30,
+			"role": "__Entities__ChangesRole",
+			"env": {},
+			"cron": {
+				"settings": {}
+			}
+		}
+	}
+}

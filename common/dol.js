@@ -405,7 +405,7 @@ function translateIdsCombineStream() {
 function buildDomainObject(client, domainObject, ids, push, callback) {
 	let opts = {};
 	let sqlClient = client;
-
+	let joinsCount = Object.keys(domainObject.joins).length;
 	async.eachLimit(Object.entries(ids), 5, ([schema, ids], callback) => {
 		let tasks = [];
 		let domains = {};
@@ -575,9 +575,18 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				// let getEid = opts.getEid || ((id, obj, stats) => stats.end);
 				ids.forEach(id => {
 					// skip the domain if there is no data with it
-					if (Object.keys(domains[id]).length === 0) {
+					let keyCount = Object.keys(domains[id]).length;
+					if (keyCount === 0) {
 						console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						return;
+					} else if (keyCount <= joinsCount) {
+						let valid = Object.keys(domainObject.joins).some(k => {
+							return Object.keys(domains[id][k] || []).length > 0;
+						});
+						if (!valid) {
+							console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+							return;
+						}
 					}
 					// let eids = {}; // TODO: get event info
 					// let eid = getEid(id, domains[id], eids);

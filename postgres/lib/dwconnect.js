@@ -58,7 +58,7 @@ module.exports = function(config, columnConfig) {
 					if (!(field in toDelete)) {
 						toDelete[field] = [];
 					}
-					toDelete[field].push(id);
+					toDelete[field].push(client.escapeValueNoToLower(id));
 					toDeleteCount++;
 					tryFlushDelete(done);
 				} else {
@@ -434,13 +434,16 @@ module.exports = function(config, columnConfig) {
 							sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 						}
 					} else {
-						sets.push(`${link.destination} = coalesce(${link.source}_join_table.${link.sk}, 1)`);
-						return `LEFT JOIN ${link.table} ${link.source}_join_table 
-							on ${link.source}_join_table.${link.on} = t.${link.source} 
-								and t.${link.link_date} >= ${link.source}_join_table.${columnConfig._startdate}
-								and (t.${link.link_date} <= ${link.source}_join_table.${columnConfig._enddate} or ${link.source}_join_table.${columnConfig._current})
-					`;
-					}
+                        sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
+                        var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
+                        if (Array.isArray(link.source)) {
+                            joinOn = link.source.map((v,i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ')
+                        }
+                        return `LEFT JOIN ${link.table} ${link.join_id}_join_table
+							on ${joinOn} 
+								and t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
+								and (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+                    }
 				});
 
 				if (sets.length) {
@@ -483,8 +486,12 @@ module.exports = function(config, columnConfig) {
 							structures[table].structure[columnConfig._deleted] = structures[table].structure[columnConfig._deleted] || "boolean";
 						}
 						Object.keys(structures[table].structure).forEach(f => {
+							let field = structures[table].structure[f];
 							if (!(f in fieldLookup)) {
 								missingFields[f] = structures[table].structure[f];
+							} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
+								let missing_dim = columnConfig.dimColumnTransform(f, field);
+                                missingFields[missing_dim] = {type: 'integer'};
 							}
 						});
 						if (Object.keys(missingFields).length) {
@@ -508,7 +515,12 @@ module.exports = function(config, columnConfig) {
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
-		let queries = [].concat(definition.queries || []);
+		let dbType = (config.type||"").toLowerCase();
+		let defQueries = definition.queries;
+		if (defQueries && !Array.isArray(defQueries)) {
+			defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version];
+		}
+		let queries = [].concat(defQueries || []);
 
 		let ids = [];
 		Object.keys(definition.structure).forEach(f => {
@@ -527,7 +539,11 @@ module.exports = function(config, columnConfig) {
 				ids.push(f);
 			}
 			if (field.queries) {
-				queries = queries.concat(field.queries);
+				let defQueries = field.queries;
+				if (!Array.isArray(defQueries)) {
+					defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version] || [];
+				}
+				queries = queries.concat(defQueries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -582,7 +598,7 @@ module.exports = function(config, columnConfig) {
 			}
 		}
 		queries.map(q => {
-			tasks.push(done => client.query(q, done));
+			tasks.push(done => client.query(q, err => done(err)));
 		});
 		async.series(tasks, callback);
 	};
@@ -601,7 +617,12 @@ module.exports = function(config, columnConfig) {
 				};
 			}
 			if (field.queries) {
-				queries = queries.concat(field.queries);
+				let defQueries = field.queries;
+				if (!Array.isArray(defQueries)) {
+					let dbType = (config.type||"").toLowerCase();
+					defQueries = defQueries[`${dbType}-${config.version}`] || defQueries[dbType] || defQueries[config.version] || [];
+				}
+				queries = queries.concat(defQueries);
 			}
 
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
@@ -635,7 +656,7 @@ module.exports = function(config, columnConfig) {
 			sqls.push(q);
 		});
 		async.eachSeries(sqls, function(sql, done) {
-			client.query(sql, done);
+			client.query(sql, err => done(err));
 		}, callback);
 	};
 
