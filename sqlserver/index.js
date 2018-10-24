@@ -11,11 +11,14 @@ const logger = require("leo-sdk/lib/logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
 const dol = require("leo-connector-common/dol");
 
-function DomainObjectLoader(client) {
-  if (typeof client.query !== "function") {
-    client = connect(client);
-  }
-  return new dol(client)
+function getConnection(config) {
+	if (!config) {
+		throw new Error('Missing database connection credentials');
+	} else if (typeof config.query !== "function") {
+		config = connect(config);
+	}
+
+	return config;
 }
 
 module.exports = {
@@ -147,6 +150,13 @@ module.exports = {
 		return checksum(connect(config));
 	},
 	connect: connect,
-  dol: DomainObjectLoader,
-  DomainObjectLoader: DomainObjectLoader
+	dol: (config) => {
+		return new dol(getConnection(config));
+	},
+	DomainObjectLoader: (config) => {
+		return new dol(getConnection(config));
+	},
+	domainObjectBuilder: (config) => {
+		return new dol(getConnection(config));
+	},
 };

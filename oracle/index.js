@@ -4,6 +4,17 @@ const sqlLoader = require("leo-connector-common/sql/loader");
 const sqlLoaderJoin = require('leo-connector-common/sql/loaderJoinTable');
 const leo = require("leo-sdk");
 const ls = leo.streams;
+const dol = require("leo-connector-common/dol");
+
+function getConnection(config) {
+	if (!config) {
+		throw new Error('Missing database connection credentials');
+	} else if (typeof config.query !== "function") {
+		config = connect(config);
+	}
+
+	return config;
+}
 
 module.exports = {
 	load: function(config, sql, domain, opts, idColumns) {
@@ -13,6 +24,7 @@ module.exports = {
 			return sqlLoader(connect(config), sql, domain, opts);
 		}
 	},
+	// @deprecated
 	domainObjectLoader: function(bot_id, dbConfig, sql, domain, opts, callback) {
 		if (opts.snapshot) {
 			throw new Error('Snapshotting not implemented yet in Oracle');
@@ -38,5 +50,8 @@ module.exports = {
 			ls.pipe.apply(ls, params);
 		}
 	},
-	connect: connect
+	connect: connect,
+	domainObjectBuilder: (config) => {
+		return new dol(getConnection(config));
+	},
 };

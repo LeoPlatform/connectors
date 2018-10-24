@@ -6,9 +6,19 @@ const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const sqlSnapshotter = require("leo-connector-common/sql/snapshotter");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum.js");
-
+const dol = require("leo-connector-common/dol");
 const leo = require("leo-sdk");
 const ls = leo.streams;
+
+function getConnection(config) {
+	if (!config) {
+		throw new Error('Missing database connection credentials');
+	} else if (typeof config.query !== "function") {
+		config = connect(config);
+	}
+
+	return config;
+}
 
 module.exports = {
 	load: function(config, sql, domain, idColumns, opts) {
@@ -51,5 +61,8 @@ module.exports = {
 	connect: connect,
 	checksum: function(config, fieldsTable) {
 		return checksum(connect(config), fieldsTable);
-	}
+	},
+	domainObjectBuilder: (config) => {
+		return new dol(getConnection(config));
+	},
 };

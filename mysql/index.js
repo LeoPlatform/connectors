@@ -10,11 +10,14 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 let dol = require("leo-connector-common/dol");
 
-function DomainObjectLoader(client) {
-	if (typeof client.query !== "function") {
-		client = connect(client);
+function getConnection(config) {
+	if (!config) {
+		throw new Error('Missing database connection credentials');
+	} else if (typeof config.query !== "function") {
+		config = connect(config);
 	}
-	return new dol(client)
+
+	return config;
 }
 
 module.exports = {
@@ -59,6 +62,15 @@ module.exports = {
 		return streamChanges(config, opts);
 	},
 	connect: connect,
-	dol: DomainObjectLoader,
-	DomainObjectLoader: DomainObjectLoader,
+	// @deprecated
+	dol: (config) => {
+		return new dol(getConnection(config));
+	},
+	// @deprecated
+	DomainObjectLoader: (config) => {
+		return new dol(getConnection(config));
+	},
+	domainObjectBuilder: (config) => {
+		return new dol(getConnection(config));
+	},
 };
