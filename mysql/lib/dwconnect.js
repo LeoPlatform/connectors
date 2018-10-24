@@ -319,8 +319,8 @@ module.exports = function(config, columnConfig) {
 							`, done);
 						});
 
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingChangesTable}`, done));
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						tasks.push(done => connection.query(`drop table ${qualifiedStagingChangesTable}`, done));
+						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
