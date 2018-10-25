@@ -7,10 +7,11 @@ const parent = require('leo-connector-common/base');
 class connector extends parent {
 
 	constructor() {
-		super();
-		super.lib_connect = connect;
-		super.lib_checksum = checksum;
-		super.lib_listener = listener;
+		super({
+			connect: connect,
+			checksum: checksum,
+			listener: listener
+		});
 	}
 }
 

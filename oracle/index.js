@@ -5,8 +5,9 @@ const parent = require('leo-connector-common/base');
 class connector extends parent {
 
 	constructor() {
-		super();
-		super.lib_connect = connect;
+		super({
+			connect: connect,
+		});
 	}
 }
 
