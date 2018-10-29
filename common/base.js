@@ -8,7 +8,7 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 
 // @deprecated (used by domainObjectLoader)
-const snapShotter = require("leo-connector-common/sql/snapshotter");
+const snapShotter = require('./sql/snapshotter');
 
 module.exports = class Connector {
 	constructor(params) {
