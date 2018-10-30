@@ -101,7 +101,7 @@ module.exports = {
 			};
 			const isOldMsg = compareLsn(lastLsn, lsn) >= 0;
 			if (isOldMsg) return done(null);
-
+			
 			if (lsn.upper == 0 && lsn.lower == 0) {
 				return done(null);
 			}
@@ -246,8 +246,8 @@ module.exports = {
 					}
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
-						logger.info(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '0', "skip-empty-xacts" '1')`);
-						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '0', "skip-empty-xacts" '1')`, (err) => {
+						logger.info(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '1', "skip-empty-xacts" '0')`);
+						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '1', "skip-empty-xacts" '0')`, (err) => {
 							if (err) {
 								if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
 								if (err.message === "Connection terminated by user") {
