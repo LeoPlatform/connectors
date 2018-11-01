@@ -110,12 +110,16 @@ module.exports = function(c) {
 		release: function (destroy) {
 			pool.release && pool.release(destroy);
 		},
-		describeTable: function(table, callback) {
-			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
-				FROM information_schema.columns
-				WHERE table_schema = '${config.database}' and table_name = ${escapeValue(table)} order by ordinal_position asc`, (err, result) => {
-				callback(err, result);
-			});
+		describeTable: function (table, callback, tableSchema = config.database) {
+			const qualifiedTable = `${tableSchema}.${table}`;
+			if (cache.schema[qualifiedTable]) {
+				callback(null, cache.schema[qualifiedTable] || []);
+			} else {
+				this.clearSchemaCache();
+				this.describeTables((err, schema) => {
+					callback(err, schema && schema[qualifiedTable] || []);
+				}, tableSchema);
+			}
 		},
 		describeTables: function(callback, tableSchema = config.database) {
 			if (Object.keys(cache.schema || {}).length) {
@@ -125,7 +129,7 @@ module.exports = function(c) {
 			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(tableInfo => {
-					const tableName = `${tableSchema}.${escapeId(tableInfo.table_name)}`;
+					const tableName = `${tableSchema}.${tableInfo.table_name}`;
 					if (!schema[tableName]) {
 						schema[tableName] = [];
 					}

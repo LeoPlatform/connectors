@@ -78,9 +78,9 @@ module.exports = function(config, columnConfig) {
 
 	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
 		const stagingTable = `staging_${table}`;
-		const qualifiedStagingTable = `${columnConfig.stageSchema}.${client.escapeId(stagingTable)}`;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedStagingChangesTable = `${stagingTable}_changes`;
-		const qualifiedTable = `${columnConfig.stageSchema}.${client.escapeId(table)}`;
+		const qualifiedTable = `${columnConfig.stageSchema}.${table}`;
 		if (!Array.isArray(ids)) {
 			ids = [ids];
 		}
@@ -183,9 +183,9 @@ module.exports = function(config, columnConfig) {
 
 	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTable = `staging_${table}`;
-		const qualifiedStagingTable = `${columnConfig.stageSchema}.${client.escapeId(stagingTable)}`;
+		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedStagingChangesTable = `${stagingTable}_changes`;
-		const qualifiedTable = `${columnConfig.stageSchema}.${client.escapeId(table)}`;
+		const qualifiedTable = `${columnConfig.stageSchema}.${table}`;
 		if (!Array.isArray(nk)) {
 			nk = [nk];
 		}
@@ -393,7 +393,7 @@ module.exports = function(config, columnConfig) {
 	};
 
 	client.linkDimensions = function(table, links, nk, callback, tableStatus) {
-		const qualifiedTable = `${columnConfig.stageSchema}.${client.escapeId(table)}`;
+		const qualifiedTable = `${columnConfig.stageSchema}.${table}`;
 		client.describeTable(table, (err) => {
 			if (err) return callback(err);
 
