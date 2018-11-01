@@ -496,7 +496,7 @@ module.exports = function(config, columnConfig) {
 								missingFields[f] = structures[table].structure[f];
 							} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 								let missing_dim = columnConfig.dimColumnTransform(f, field);
-                                missingFields[missing_dim] = {type: 'integer'};
+								missingFields[missing_dim] = {type: 'integer'};
 							}
 						});
 						if (Object.keys(missingFields).length) {
