@@ -42,6 +42,7 @@ function create(pool, parentCache) {
 		timestamp: parentCache && parentCache.timestamp || null
 	};
 	let client = {
+		setAuditdate,
 		connect: function(opts) {
 			opts = opts || {};
 			return pool.connect().then(c => {
@@ -88,14 +89,14 @@ function create(pool, parentCache) {
 			pool.release && pool.release(destroy);
 		},
 		describeTable: function(table, callback, tableSchema = 'public') {
-			const tblSch = `${tableSchema}.${table}`;
-			if (cache.schema[tblSch]) {
-				logger.info(`Table "${tblSch}" schema from cache`, cache.timestamp);
-				callback(null, cache.schema[tblSch] || []);
+			const qualifiedTable = `${tableSchema}.${table}`;
+			if (cache.schema[qualifiedTable]) {
+				logger.info(`Table "${qualifiedTable}" schema from cache`, cache.timestamp);
+				callback(null, cache.schema[qualifiedTable] || []);
 			} else {
 				this.clearSchemaCache();
 				this.describeTables((err, schema) => {
-					callback(err, schema && schema[tblSch] || []);
+					callback(err, schema && schema[qualifiedTable] || []);
 				}, tableSchema);
 			}
 		},
@@ -107,11 +108,11 @@ function create(pool, parentCache) {
 			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 				let schema = {};
 				result && result.map(r => {
-					const tblSch = `${tableSchema}.${r.table_name}`;
-					if (!(tblSch in schema)) {
-						schema[tblSch] = [];
+					const qualifiedTable = `${tableSchema}.${r.table_name}`;
+					if (!(qualifiedTable in schema)) {
+						schema[qualifiedTable] = [];
 					}
-					schema[tblSch].push(r);
+					schema[qualifiedTable].push(r);
 				});
 				Object.keys(schema).map((t) => {
 					let parts = t.match(/^public\.(.*)$/);
@@ -591,5 +592,10 @@ function create(pool, parentCache) {
 			}
 		}
 	};
+
+	function setAuditdate() {
+		client.auditdate =  "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'";
+	}
+
 	return client;
 }

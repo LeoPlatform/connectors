@@ -22,9 +22,11 @@ module.exports = function(c) {
 	delete config.engine;
 	delete config.table;
 	delete config.id;
+	delete config.version;
+	delete config.type;
 
 	let connectionHash = JSON.stringify(config);
-	let m;
+	let pool;
 
 	if (!(connectionHash in connections)) {
 		console.log("CREATING NEW MYSQL CONNECTION");
@@ -32,10 +34,27 @@ module.exports = function(c) {
 	} else {
 		console.log("REUSING CONNECTION");
 	}
-	m = connections[connectionHash];
+	pool = connections[connectionHash];
+	
+	let cache = {
+		schema: {},
+		timestamp: null
+	};
 
 	let queryCount = 0;
 	let client = {
+		setAuditdate,
+		connect: function(opts) {
+			opts = opts || {};
+			return new Promise((resolve, reject) => {
+				pool.getConnection((error, connection) => {
+					if (error) {
+						reject(error);
+					}
+					resolve(connection);
+				});
+			});
+		},
 		query: function(query, params, callback, opts = {}) {
 			if (typeof params == "function") {
 				opts = callback;
@@ -49,10 +68,10 @@ module.exports = function(c) {
 
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query.slice(0, 300), params && params.length ? params : "");
+			log.info(`SQL query #${queryId} is `, query, params && params.length ? params : "");
 			log.time(`Ran Query #${queryId}`);
 
-			m.query({
+			pool.query({
 				sql: query,
 				rowsAsArray: opts.inRowMode
 			}, params, function(err, result, dbfields) {
@@ -70,7 +89,7 @@ module.exports = function(c) {
 							schema: ''
 						};
 
-						Object.keys(data).filter(f => !f.match(/^\_/)).filter(f => data[f]).map(k => {
+						Object.keys(data).filter(f => !f.match(/^_/)).filter(f => data[f]).map(k => {
 							startingObj[k] = data[k];
 						});
 
@@ -83,17 +102,60 @@ module.exports = function(c) {
 		},
 		end: function(callback) {
 			connections[connectionHash] = undefined;
-			return m.end(callback);
+			return pool.end(callback);
 		},
 		disconnect: function(callback) {
 			return this.end(callback);
 		},
-		describeTable: function(table, callback) {
-			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
-				FROM information_schema.columns
-				WHERE table_name = ? order by ordinal_position asc`, [table], (err, result) => {
-				callback(err, result);
+		release: function (destroy) {
+			pool.release && pool.release(destroy);
+		},
+		describeTable: function (table, callback, tableSchema = config.database) {
+			const qualifiedTable = `${tableSchema}.${table}`;
+			if (cache.schema[qualifiedTable]) {
+				callback(null, cache.schema[qualifiedTable] || []);
+			} else {
+				this.clearSchemaCache();
+				this.describeTables((err, schema) => {
+					callback(err, schema && schema[qualifiedTable] || []);
+				}, tableSchema);
+			}
+		},
+		describeTables: function(callback, tableSchema = config.database) {
+			if (Object.keys(cache.schema || {}).length) {
+				logger.info(`Tables schema from cache`, cache.timestamp);
+				return callback(null, cache.schema);
+			}
+			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
+				let schema = {};
+				result && result.map(tableInfo => {
+					const tableName = `${tableSchema}.${tableInfo.table_name}`;
+					if (!schema[tableName]) {
+						schema[tableName] = [];
+					}
+					schema[tableName].push(tableInfo);
+				});
+				Object.keys(schema).map((key) => {
+					let parts = key.match(/^datawarehouse\.(.*)$/);
+					if (parts) {
+						schema[parts[1]] = schema[key];
+					}
+				});
+				cache.schema = schema;
+				cache.timestamp = Date.now();
+				logger.info("Caching Schema Table", cache.timestamp);
+				callback(err, cache.schema);
 			});
+		},
+		getSchemaCache: function() {
+			return cache.schema || {};
+		},
+		setSchemaCache: function(schema) {
+			cache.schema = schema || {};
+		},
+		clearSchemaCache: function() {
+			logger.info(`Clearing Tables schema cache`);
+			cache.schema = {};
 		},
 		streamToTableFromS3: function(table, opts) {
 
@@ -109,7 +171,7 @@ module.exports = function(c) {
 			let total = 0;
 			client.query(`SELECT column_name 
 					FROM information_schema.columns 
-					WHERE table_name = ? order by ordinal_position asc`, [table], (err, results) => {
+					WHERE table_schema = '${config.database}' and table_name = ${escapeValue(table)} order by ordinal_position asc`, (err, results) => {
 				columns = results.map(r => r.column_name);
 				ready = true;
 				if (pending) {
@@ -142,7 +204,7 @@ module.exports = function(c) {
 				if (opts.useReplaceInto) {
 					cmd = "REPLACE INTO ";
 				}
-				client.query(`${cmd} ?? (??) VALUES ?`, [table, columns, values], function(err) {
+				client.query(`${cmd} ${config.database}.${escapeId(table)} (??) VALUES ?`, [ columns, values ], function(err) {
 					if (err) {
 						callback(err);
 					} else {
@@ -204,8 +266,40 @@ module.exports = function(c) {
                         `;
 			}
 			client.query(sql, [id, table, id, start, id, end, id], callback);
+		},
+		escapeId,
+		escape: function(value) {
+			if (value.replace) {
+				return '`' + value.replace('`', '') + '`';
+			} else {
+				return value;
+			}
+		},
+		escapeValue,
+		escapeValueNoToLower: function(value) {
+			if (value.replace) {
+				return "'" + value.replace("'", "\\'") + "'";
+			} else {
+				return value;
+			}
 		}
 	};
+
+	function escapeId (field) {
+		return '`' + field.replace('`', '').replace(/\.([^.]+)$/, '`.`$1') + '`';
+	}
+
+	function escapeValue (value) {
+		if (value.replace) {
+			return "'" + value.replace("'", "\\'").toLowerCase() + "'";
+		} else {
+			return value;
+		}
+	}
+
+	function setAuditdate () {
+		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '').replace(/[A-Z]/, ' ') + "'";
+	}
 
 	return client;
 };
