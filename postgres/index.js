@@ -6,11 +6,21 @@ const sqlNibbler = require("leo-connector-common/sql/nibbler");
 const sqlSnapshotter = require("leo-connector-common/sql/snapshotter");
 const snapShotter = require("leo-connector-common/sql/snapshotter");
 const checksum = require("./lib/checksum.js");
-
 const leo = require("leo-sdk");
 const ls = leo.streams;
-
+const dol = require("leo-connector-common/dol");
 const binlogReader = require("./lib/binlogreader");
+
+function getConnection(config) {
+	if (!config) {
+		throw new Error('Missing database connection credentials');
+	} else if (typeof config.query !== "function") {
+		config = connect(config);
+	}
+
+	return config;
+}
+
 module.exports = {
 	load: function(config, sql, domain, idColumns, opts) {
 		if (Array.isArray(idColumns)) {
@@ -25,6 +35,7 @@ module.exports = {
 	snapshot: function(config, table, id, domain) {
 		return sqlSnapshotter(connect(config), table, id, domain);
 	},
+	// @deprecated
 	domainObjectLoader: function(bot_id, dbConfig, sql, domain, opts, callback) {
 		if (opts.snapshot) {
 			snapShotter(bot_id, connect(dbConfig), dbConfig.table, dbConfig.id, domain, {
@@ -53,5 +64,8 @@ module.exports = {
 	connect: connect,
 	checksum: function(config, fieldsTable) {
 		return checksum(connect(config), fieldsTable);
-	}
+	},
+	domainObjectBuilder: (config) => {
+		return new dol(getConnection(config));
+	},
 };

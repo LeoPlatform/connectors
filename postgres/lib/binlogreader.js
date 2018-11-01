@@ -12,6 +12,18 @@ let Connection = require("pg/lib/connection.js");
 
 let shutdown = false;
 let copyDataThrough;
+
+// upper and lower is bigger
+function compareLsn(a, b) {
+	if (a.upper === b.upper && a.lower === b.lower) return 0;
+	if (a.upper === b.upper) {
+		if (a.lower > b.lower) return 1;
+		if (a.lower < b.lower) return -1;
+	}
+	if (a.upper > b.upper) return 1;
+	if (a.upper < b.upper) return -1;
+}
+
 Connection.prototype.attachListeners = function(stream) {
 	var self = this;
 
@@ -87,7 +99,9 @@ module.exports = {
 				upper: msg.chunk.readUInt32BE(1),
 				lower: msg.chunk.readUInt32BE(5),
 			};
-
+			const isOldMsg = compareLsn(lastLsn, lsn) >= 0;
+			if (isOldMsg) return done(null);
+			
 			if (lsn.upper == 0 && lsn.lower == 0) {
 				return done(null);
 			}
@@ -95,7 +109,7 @@ module.exports = {
 			if (msg.chunk[0] == 0x77) { // XLogData
 				count++;
 				if (count === 10000) {
-					logger.info("every 10000 processed", count, lsn);
+					logger.info("Processed:", count, lsn);
 					count = 0;
 				}
 				let log;
@@ -144,7 +158,7 @@ module.exports = {
 					shouldRespond
 				});
 				if (shouldRespond) {
-					logger.debug('Should Respond. LastLsn: ' + strLastLsn + ' THIS lsn: ' + lsn);
+					logger.debug('Should Respond. LastLsn: ' + strLastLsn + ' THIS lsn: ' + lsn.string);
 					walCheckpoint(replicationClient, lastLsn);
 				}
 				done(null);
@@ -167,24 +181,26 @@ module.exports = {
 				logger.error(err);
 				clearTimeout(walCheckpointHeartBeatTimeoutId);
 				if (replicationClient) {
-					replicationClient.removeAllListeners();
 					try {
+						replicationClient.removeAllListeners();
 						wrapperClient.end(err => {
-							logger.debug("wrapperClient.end", err);
+							if (err) {
+								return logger.error(`(${config.database}) wrapperClient.end ERROR:`, err);
+							}
+							logger.debug("wrapperClient.end");
+							wrapperClient = null;
+							replicationClient.end(err => {
+								if (err) {
+									return logger.error(`(${config.database}) replicationClient.end ERROR:`, err);
+								}
+								replicationClient = null;
+								logger.debug("replicationClient.end");
+								retry.backoff(err);
+							});
 						});
-					} catch (walCheckpointHeartBeat) {
-						logger.error(`(${config.database}) Cannot end WrapperClient`);
+					} catch (err) {
+						logger.error(`(${config.database}) Error Closing Database Connections`, err);
 					}
-					try {
-						replicationClient.end(err => {
-							logger.debug("replicationClient.end", err);
-						});
-					} catch (walCheckpointHeartBeat) {
-						logger.error(`(${config.database}) Cannot end replicationClient`);
-					}
-					replicationClient = null;
-					wrapperClient = null;
-					retry.backoff(err);
 				}
 			};
 			replicationClient.on('error', dieError);
@@ -230,8 +246,8 @@ module.exports = {
 					}
 					async.series(tasks, (err) => {
 						if (err) return dieError(err);
-						logger.info(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', include-xids" '0', "skip-empty-xacts" '1')`);
-						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '0', "skip-empty-xacts" '1')`, (err) => {
+						logger.info(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '1', "skip-empty-xacts" '0')`);
+						replicationClient.query(`START_REPLICATION SLOT ${opts.slot_name} LOGICAL ${lastLsn} ("include-timestamp" '1', "include-xids" '1', "skip-empty-xacts" '0')`, (err) => {
 							if (err) {
 								if (err.code === '58P01') requestedWalSegmentAlreadyRemoved = true;
 								if (err.message === "Connection terminated by user") {
@@ -335,3 +351,4 @@ function walCheckpoint(replicationClient, lsn) {
 
 	replicationClient.connection.sendCopyFromChunk(response);
 }
+

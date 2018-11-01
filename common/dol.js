@@ -2,9 +2,9 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const async = require("async");
 
-module.exports = function DomainObjectLoader(client) {
-	let self = this;
-	return {
+module.exports = function domainObjectLoader(client) {
+
+	let obj = {
 		translateIds: function(translations, opts) {
 			opts = Object.assign({
 				count: 1000,
@@ -110,7 +110,7 @@ module.exports = function DomainObjectLoader(client) {
 				}
 			});
 		},
-		DomainObject: function(query, domainIdColumn = "_domain_id", transform) {
+		domainObject: function(query, domainIdColumn = "_domain_id", transform) {
 			if (typeof domainIdColumn === "function") {
 				transform = domainIdColumn;
 				domainIdColumn = "_domain_id";
@@ -138,15 +138,16 @@ module.exports = function DomainObjectLoader(client) {
 				};
 				return this;
 			};
-		}
+		},
 	};
+
+	// create an alias for existing implementations
+	obj.DomainObject = obj.domainObject;
+
+	return obj;
 };
 
-
-
 function translateIdsStartStream(idTranslation) {
-	// let bufferIds = {};
-	// let lastFullEid = null;
 
 	return ls.through((obj, done, push) => {
 		if (!obj.payload.update) {
@@ -161,14 +162,14 @@ function translateIdsStartStream(idTranslation) {
 		let count = 0;
 		let updates = obj.payload.update;
 		for (let schema in updates) {
-			for (var t in idTranslation) {
+			for (let t in idTranslation) {
 				let ids = updates[schema][t];
 				if (!ids) {
 					continue;
 				}
 
 				ids = Array.from(new Set(ids)); // Dedub the ids
-				for (var i = 0; i < ids.length; i++) {
+				for (let i = 0; i < ids.length; i++) {
 					if (count) push(last);
 					last = {
 						s: schema,
@@ -176,7 +177,6 @@ function translateIdsStartStream(idTranslation) {
 						id: ids[i],
 						correlation_id: {
 							source: obj.event,
-							//start: lastFullEid
 							partial: obj.eid,
 							units: 1
 						}
@@ -186,9 +186,7 @@ function translateIdsStartStream(idTranslation) {
 			}
 		}
 
-		// lastFullEid = obj.eid;
 		if (last) {
-			count++;
 			last.correlation_id = {
 				source: obj.event,
 				start: obj.eid,
@@ -208,7 +206,6 @@ function translateIdsStartStream(idTranslation) {
 }
 
 function translateIdsLookupStream(client, idTranslation) {
-	// let lastFullEid = null;
 	let handlers = {};
 	Object.keys(idTranslation).map(v => {
 		let translation = idTranslation[v];
@@ -247,7 +244,6 @@ function translateIdsLookupStream(client, idTranslation) {
 				ids[record.s][record.t].add(record.id);
 			}
 
-
 			if (record.correlation_id.start) {
 				if (!startEid) {
 					startEid = record.correlation_id.start;
@@ -257,8 +253,6 @@ function translateIdsLookupStream(client, idTranslation) {
 			} else if (record.correlation_id.partial) {
 				partialEid = record.correlation_id.partial;
 			}
-
-			//console.log((record.correlation_id.start ? "start" : ""), record.correlation_id.partial ? "partial" : "", ":", record.correlation_id.start, record.correlation_id.partial);
 		}
 
 		let tasks = [];
@@ -311,12 +305,10 @@ function translateIdsLookupStream(client, idTranslation) {
 				return done(null, {
 					correlation_id: {
 						source: obj.correlation_id.source,
-						//start: obj.correlation_id.end || obj.correlation_id.start,
 						start: startEid,
 						end: endEid,
 						partial: partialEid,
 						units: p.length
-						//units: obj.correlation_id.units
 					}
 				});
 			}
@@ -324,8 +316,6 @@ function translateIdsLookupStream(client, idTranslation) {
 			for (; i < domainIds.length - 1; i++) {
 				domainIds[i].correlation_id = {
 					source: obj.correlation_id.source,
-					// start: lastFullEid,
-					// units: obj.correlation_id.units
 					start: startEid,
 					end: endEid,
 					partial: partialEid,
@@ -333,12 +323,9 @@ function translateIdsLookupStream(client, idTranslation) {
 				};
 				push(domainIds[i]);
 			}
-			// lastFullEid = obj.correlation_id.end || obj.correlation_id.start;
+
 			domainIds[i].correlation_id = {
 				source: obj.correlation_id.source,
-				//start: lastFullEid,
-				//units: obj.correlation_id.units || 1
-
 				start: startEid,
 				end: endEid,
 				partial: partialEid,
@@ -354,10 +341,9 @@ function translateIdsCombineStream() {
 		let startEid;
 		let endEid;
 		let partialEid;
-		//let units = 0;
 
 		let ids = {};
-		for (var i = 0; i < obj.payload.length; i++) {
+		for (let i = 0; i < obj.payload.length; i++) {
 			let p = obj.payload[i];
 			if (p.s !== undefined && p.id !== undefined) {
 				if (!(p.s in ids)) {
@@ -373,12 +359,9 @@ function translateIdsCombineStream() {
 				}
 				partialEid = record.correlation_id.partial;
 				endEid = record.correlation_id.start || endEid;
-				//units += (record.correlation_id.units || record.correlation_id.records || 1);
 			} else if (record.correlation_id.partial) {
 				partialEid = record.correlation_id.partial;
 			}
-
-			//console.log("combine", (record.correlation_id.start ? "start" : ""), record.correlation_id.partial ? "partial" : "", ":", record.correlation_id.start, record.correlation_id.partial);
 		}
 		Object.keys(ids).map(k => {
 			ids[k] = Array.from(ids[k]);
@@ -388,8 +371,6 @@ function translateIdsCombineStream() {
 			ids: ids,
 			correlation_id: {
 				source: obj.correlation_id.source,
-				//start: obj.correlation_id.start || obj.correlation_id.end,
-				//units: obj.correlation_id.units
 				start: startEid,
 				end: endEid,
 				partial: partialEid,
@@ -399,12 +380,10 @@ function translateIdsCombineStream() {
 	});
 }
 
-
-
-
 function buildDomainObject(client, domainObject, ids, push, callback) {
 	let opts = {};
 	let sqlClient = client;
+	let joinsCount = Object.keys(domainObject.joins).length;
 
 	async.eachLimit(Object.entries(ids), 5, ([schema, ids], callback) => {
 		let tasks = [];
@@ -421,7 +400,6 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				}
 			});
 		});
-
 
 		function mapResults(results, fields, each) {
 			let mappings = [];
@@ -487,7 +465,7 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 						row = domainObject.transform(row);
 					}
 					delete row._domain_id;
-					//row._schema = schema;
+
 					if (!domainId) {
 						console.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
 					} else if (!domains[domainId]) {
@@ -502,7 +480,6 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				inRowMode: true
 			});
 		});
-
 
 		Object.keys(domainObject.joins).forEach(name => {
 			let t = domainObject.joins[name];
@@ -572,12 +549,20 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 			if (err) {
 				callback(err);
 			} else {
-				// let getEid = opts.getEid || ((id, obj, stats) => stats.end);
 				ids.forEach(id => {
 					// skip the domain if there is no data with it
-					if (Object.keys(domains[id]).length === 0) {
+					let keyCount = Object.keys(domains[id]).length;
+					if (keyCount === 0) {
 						console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						return;
+					} else if (keyCount <= joinsCount) {
+						let valid = Object.keys(domainObject.joins).some(k => {
+							return Object.keys(domains[id][k] || []).length > 0;
+						});
+						if (!valid) {
+							console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+							return;
+						}
 					}
 					// let eids = {}; // TODO: get event info
 					// let eid = getEid(id, domains[id], eids);
