@@ -1,4 +1,5 @@
 "use strict";
+const logger = require('leo-logger');
 let uuid = require("uuid");
 let base = require("leo-connector-common/checksum/lib/handler.js");
 let moment = require("moment");

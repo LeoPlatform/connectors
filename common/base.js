@@ -23,7 +23,7 @@ module.exports = class Connector {
 		if (!config) {
 			throw new Error('Missing database connection credentials');
 		} else if (typeof config.query !== "function") {
-			config = this.connect(config);
+			config = this.params.connect(config);
 		}
 
 		return config;
