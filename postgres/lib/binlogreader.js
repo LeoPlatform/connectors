@@ -14,6 +14,8 @@ let Connection = require("pg/lib/connection.js");
 let shutdown = false;
 let copyDataThrough;
 
+function toObject(acc, field) {	acc[field.n] = field.v;	return acc;}
+
 Connection.prototype.attachListeners = function(stream) {
 	var self = this;
 
@@ -54,6 +56,7 @@ module.exports = {
 			slot_name: 'leo_replication',
 			keepalive: 1000 * 50,
 			failAfter: 100,
+			mergeNewOntoOld: false,
 			recoverWal: false,
 			event: 'logical_replication'
 		}, opts || {});
@@ -114,11 +117,17 @@ module.exports = {
 
 				log.lsn = currentLsn;
 				if (log.d && log.d.reduce) {
-					log.d = log.d.reduce((acc, field) => {
-						acc[field.n] = field.v;
-						return acc;
-					}, {});
+					log.d = log.d.reduce(toObject, {});
+				} else if (log.d && log.d.o && log.d.w){
+					if (opts.mergeNewOntoOld) {
+						const mergedData = Object.assign({}, log.d.o, log.d.w);
+						log.d = mergedData.reduce(toObject, {});
+					} else {
+						log.d.o = log.d.o.reduce(toObject, {});
+						log.d.w = log.d.w.reduce(toObject, {});
+					}
 				}
+
 				let c = {
 					source: 'postgres',
 					start: log.lsn.string
@@ -280,8 +289,6 @@ module.exports = {
 		return copyDataThrough;
 	}
 };
-
-
 
 
 function walCheckpoint(replicationClient, flushLsn, writeLsn) {
