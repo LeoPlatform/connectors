@@ -119,13 +119,11 @@ module.exports = {
 				if (log.d && log.d.reduce) {
 					log.d = log.d.reduce(toObject, {});
 				} else if (log.d && log.d.o && log.d.w){
+					log.d.o = log.d.o.reduce(toObject, {});
+					log.d.w = log.d.w.reduce(toObject, {});
 					if (opts.mergeNewOntoOld) {
-						const mergedData = Object.assign({}, log.d.o, log.d.w);
-						log.d = mergedData.reduce(toObject, {});
-					} else {
-						log.d.o = log.d.o.reduce(toObject, {});
-						log.d.w = log.d.w.reduce(toObject, {});
-					}
+						log.d = Object.assign({}, log.d.o, log.d.w);
+					} 
 				}
 
 				let c = {
