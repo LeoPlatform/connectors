@@ -12,11 +12,9 @@ class connector extends parent {
 			connect: connect,
 			checksum: checksum,
 		});
+		this.streamChanges = binlogReader.stream;
 	}
 
-	static streamChanges() {
-		return binlogReader.stream;
-	}
 }
 
 module.exports = new connector;
