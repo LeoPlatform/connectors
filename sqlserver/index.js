@@ -1,9 +1,8 @@
 "use strict";
 const connect = require("./lib/connect.js");
 const checksum = require("./lib/checksum.js");
-const logger = require("leo-sdk/lib/logger")("sqlserver");
+const logger = require("leo-logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
-
 const parent = require('leo-connector-common/base');
 
 class connector extends parent {
