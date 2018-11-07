@@ -2,7 +2,6 @@
 const connect = require("./lib/connect.js");
 const checksum = require("./lib/checksum.js");
 const binlogReader = require("./lib/binlogreader");
-
 const parent = require('leo-connector-common/base');
 
 class connector extends parent {
@@ -12,6 +11,7 @@ class connector extends parent {
 			connect: connect,
 			checksum: checksum,
 		});
+
 		this.streamChanges = binlogReader.stream;
 	}
 
