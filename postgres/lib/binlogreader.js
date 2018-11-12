@@ -1,8 +1,8 @@
 const pg = require("pg");
 const async = require("async");
 
-const connect = require("./connect.js");
-const test_decoding = require("./test_decoding.js");
+const connect = require("./connect");
+const test_decoding = require("./test_decoding");
 const { through } = require("leo-streams");
 const logger = require("leo-logger")("binlogreader");
 const lsn = require('./lsn');
@@ -173,21 +173,23 @@ module.exports = {
 				if (replicationClient) {
 					try {
 						replicationClient.removeAllListeners();
-						wrapperClient.end(err => {
-							if (err) {
-								return logger.error(`(${config.database}) wrapperClient.end ERROR:`, err);
-							}
-							logger.debug("wrapperClient.end");
-							wrapperClient = null;
-							replicationClient.end(err => {
+						if (wrapperClient) {
+							wrapperClient.end(err => {
 								if (err) {
-									return logger.error(`(${config.database}) replicationClient.end ERROR:`, err);
+									return logger.error(`(${config.database}) wrapperClient.end ERROR:`, err);
 								}
-								replicationClient = null;
-								logger.debug("replicationClient.end");
-								retry.backoff(err);
+								logger.debug("wrapperClient.end");
+								wrapperClient = null;
+								replicationClient.end(err => {
+									if (err) {
+										return logger.error(`(${config.database}) replicationClient.end ERROR:`, err);
+									}
+									replicationClient = null;
+									logger.debug("replicationClient.end");
+									retry.backoff(err);
+								});
 							});
-						});
+						}
 					} catch (err) {
 						logger.error(`(${config.database}) Error Closing Database Connections`, err);
 					}
