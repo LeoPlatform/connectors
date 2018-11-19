@@ -5,7 +5,7 @@ const async = require("async");
 module.exports = function domainObjectLoader(client) {
 
 	let obj = {
-		translateIds: function(translations, opts) {
+		translateIds: function (translations, opts) {
 			opts = Object.assign({
 				count: 1000,
 				time: {
@@ -14,10 +14,12 @@ module.exports = function domainObjectLoader(client) {
 			}, opts);
 			return ls.pipeline(
 				translateIdsStartStream(translations),
+
 				ls.batch({
 					count: opts.count,
 					time: opts.time
 				}),
+
 				translateIdsLookupStream(client, translations),
 				ls.batch({
 					count: 1000,
@@ -28,7 +30,7 @@ module.exports = function domainObjectLoader(client) {
 				translateIdsCombineStream()
 			);
 		},
-		domainObjectTransform: function(domainObject) {
+		domainObjectTransform: function (domainObject) {
 			if (typeof domainObject.get === "function") {
 				domainObject = domainObject.get();
 			}
@@ -110,7 +112,7 @@ module.exports = function domainObjectLoader(client) {
 				}
 			});
 		},
-		domainObject: function(query, domainIdColumn = "_domain_id", transform) {
+		domainObject: function (query, domainIdColumn = "_domain_id", transform) {
 			if (typeof domainIdColumn === "function") {
 				transform = domainIdColumn;
 				domainIdColumn = "_domain_id";
@@ -119,7 +121,7 @@ module.exports = function domainObjectLoader(client) {
 			this.domainIdColumn = domainIdColumn;
 			this.transform = transform;
 			this.joins = {};
-			this.hasMany = function(name, query, domainIdColumn = "_domain_id", transform) {
+			this.hasMany = function (name, query, domainIdColumn = "_domain_id", transform) {
 				if (typeof query === "object") {
 					this.joins[name] = query;
 					return;
@@ -147,17 +149,34 @@ module.exports = function domainObjectLoader(client) {
 	return obj;
 };
 
+/**
+ * Translate id's from a database listener
+ * formats:
+ * mysql: payload.update.database.table.ids
+ *      payload.delete.database.table.ids
+ * other databases: payload.table.ids - converted to payload.update.__database__.table.ids
+ * @param idTranslation
+ */
 function translateIdsStartStream(idTranslation) {
 
 	return ls.through((obj, done, push) => {
 		if (!obj.payload.update) {
-			return done(null, {
-				correlation_id: {
-					source: obj.event,
-					start: obj.eid
-				}
-			});
+			// handle data from listeners other than mysql
+			if (obj.payload && !obj.payload.delete && Object.keys(obj.payload).length) {
+				obj.payload.update = {
+					// add a dummy database, which will be removed on the domain object final output
+					__database__: obj.payload
+				};
+			} else {
+				return done(null, {
+					correlation_id: {
+						source: obj.event,
+						start: obj.eid
+					}
+				});
+			}
 		}
+
 		let last = null;
 		let count = 0;
 		let updates = obj.payload.update;
@@ -215,7 +234,7 @@ function translateIdsLookupStream(client, idTranslation) {
 			};
 		} else if (typeof translation === "string" || (typeof translation === "function" && translation.length <= 1)) {
 			let queryFn = queryToFunction(translation, ["data"]);
-			handlers[v] = function(data, done) {
+			handlers[v] = function (data, done) {
 				let query = queryFn.call(this, data);
 				this.client.query(query, [data.ids], (err, rows) => {
 					done(err, rows && rows.map(r => r[0]));
@@ -274,6 +293,7 @@ function translateIdsLookupStream(client, idTranslation) {
 								ids: lookupIds,
 								done: done
 							};
+
 							handler.call(context, context, (err, ids = []) => {
 								if (err) {
 									done(err);
@@ -573,6 +593,12 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 						schema: schema,
 						domain_id: id
 					};
+
+					// remove the schema if it's a dummy we added in translate ids
+					if (event.schema === '__database__') {
+						delete event.schema;
+					}
+
 					push(event);
 				});
 				callback();

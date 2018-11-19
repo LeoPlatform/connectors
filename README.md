@@ -5,37 +5,37 @@ Quick Start Guide: https://github.com/LeoPlatform/Leo
     * [Prerequisites](#prerequisites)
     * [NPM Requirements](#npm-requirements)
     * [Available Connectors](#available-connectors)
-	* [Create Database connectors](#create-database-connectors)
-		1. [Create a secret key](#1-create-a-secret-key)
-		2. [Create a database connector](#2-create-a-database-connector)
-		3. [Deploy the connectors](#3-deploy-the-connectors)
-	* [Create a checksum runner (bot) with database connectors](#create-a-checksum-runner-bot-with-database-connectors)
-		1. [Add the required modules](#1-add-the-required-modules)
-		2. [Connect to the master and slave connectors](#2-connect-to-the-master-and-slave-connectors)
-		3. [Setup the checksum](#3-setup-the-checksum)
-		4. [Configure the checksum bot package.json](#4-configure-the-checksum-bot-packagejson)
-		5. [Edit your cloudformation.json](#5-edit-your-cloudformationjson)
-		6. [Deploy the checksum runner](#6-deploy-the-checksum-runner)
-		7. [Running the checksum](#7-running-the-checksum)
-	* [Custom Connector](#custom-connector)
-		* [Available handlers for a master connector](#available-handlers-for-a-master-connector)
-			* [Required handlers](#required-handlers)
-			* [Optional handlers](#optional-handlers)
-		* [Available handlers for a slave connector](#available-handlers-for-a-slave-connector)
-			* [Required handlers](#required-handlers-1)
-			* [Optional handlers](#optional-handlers-1)
-		* [Handlers](#handlers)
-			* [Initialize](#initialize)
-			* [Range](#range)
-			* [Batch](#batch)
-			* [Nibble](#nibble)
-			* [Individual](#individual)
-			* [Delete](#delete)
-			* [Sample](#sample)
-			* [Destroy](#destroy)
+    * [Create Database connectors](#create-database-connectors)
+        1. [Create a secret key](#1-create-a-secret-key)
+        2. [Create a database connector](#2-create-a-database-connector)
+        3. [Deploy the connectors](#3-deploy-the-connectors)
+    * [Create a checksum runner (bot) with database connectors](#create-a-checksum-runner-bot-with-database-connectors)
+        1. [Add the required modules](#1-add-the-required-modules)
+        2. [Connect to the master and slave connectors](#2-connect-to-the-master-and-slave-connectors)
+        3. [Setup the checksum](#3-setup-the-checksum)
+        4. [Configure the checksum bot package.json](#4-configure-the-checksum-bot-packagejson)
+        5. [Edit your cloudformation.json](#5-edit-your-cloudformationjson)
+        6. [Deploy the checksum runner](#6-deploy-the-checksum-runner)
+        7. [Running the checksum](#7-running-the-checksum)
+    * [Custom Connector](#custom-connector)
+        * [Available handlers for a master connector](#available-handlers-for-a-master-connector)
+            * [Required handlers](#required-handlers)
+            * [Optional handlers](#optional-handlers)
+        * [Available handlers for a slave connector](#available-handlers-for-a-slave-connector)
+            * [Required handlers](#required-handlers-1)
+            * [Optional handlers](#optional-handlers-1)
+        * [Handlers](#handlers)
+            * [Initialize](#initialize)
+            * [Range](#range)
+            * [Batch](#batch)
+            * [Nibble](#nibble)
+            * [Individual](#individual)
+            * [Delete](#delete)
+            * [Sample](#sample)
+            * [Destroy](#destroy)
  * [Creating a Domain Object transform bot](#create-a-domain-object-loader-bot)
  * [Support](#support)
-		
+        
 
 # Creating a checksum bot
 
@@ -571,51 +571,92 @@ const connector = require('leo-connector-<dbtype>');
 
 // use this handler for leo-sdk 2.x
 exports.handler = require("leo-sdk/wrappers/cron.js")(async function(event, context, callback) {
-	
-// use this handler for leo-sdk 1.x	
+    
+// use this handler for leo-sdk 1.x    
 exports.handler = async function(event, context, callback) {
-	
-	// create the helper	
+    
+    // create the helper    
     const helper = new helperFactory(event, context, leo);
 ```
     
 #### Build domain objects
 Example:
 ```javascript
-    // build your domain object query
-    // ? will be replaced with ids. Example: "1, 2, 3, 4, 5"
-    let query = `SELECT your, select, statement, fields, go, here
-        FROM yourTableName
-        WHERE id IN (?)`;
+"use strict";
 
-    helper.buildDomainObjects({
-        connection: config.db,
-        connector: connector,
-        table: 'yourTableName',
-        pk: 'id' // regular key example
-    })  
-    .mapDomainId('yourTableName', 'id')
-    .query(query)
-    .run(callback);
-```
+const leo = require("leo-sdk");
+const ls = require("leo-streams");
+const config = require("leo-config");
+const connector = require('leo-connector-mysql');
 
-Composite key example:
-```javascript
-    // build your domain object query using composite keys
-    // ? will be replaced with values. Example: "values (1,2),(1,3),(2,4),(2,2)"
-    let query = `SELECT id, your, select, statement, fields, go, here
-        FROM (?) as jt (id1, id2)
-        JOIN yourTableName AS ytn ON ytn.id1 = jt.id1 AND ytn.id2 = jt.id2`;
+exports.handler = require("leo-sdk/wrappers/cron.js")(async function (event, context, callback) {
 
-    helper.buildDomainObjects({
-        connection: config.db,
-        connector: connector,
-        table: 'yourTableName',
-        pk: ['id1', 'id2'] // composite key example
-    })  
-    .mapDomainId('yourTableName', ['LeadID1', 'LeadID2'])
-    .query(query)
-    .run(callback);
+    let source = 'system:mysql';
+    let destination = 'people';
+    // these settings are specific to snapshot. 
+    let snapshotSettings = {
+        table: 'people', // table name that has our primary keys
+        pk: 'id', // primary key of the table we're using
+        limit: 5000, // max number of id's to insert into the select query
+    };
+
+    let domainObjectBuilder = connector.domainObjectBuilder(config.db);
+    let snapshotter = connector.snapshotter(config.db);
+
+    // translate id's into id's specific to the domain we're creating.
+    // In the translation object below, we're going to get people.id from an array of people ids, as well as an array of contact ids.
+    let tableIdTranslations = {
+        people: true, // No Translation needed. Expects id's to be in format like this: {payload.[update.]people[1, 2, 3, 5, 25, 35, 49, 50, etc…]}
+        contacts: data => `SELECT people_id FROM contacts WHERE id in (?)`, // Gets the people.id from the contacts table from a format like this: {payload.[update.]contacts[1, 2, 3, 5, 25, 35, 49, 50, etc…]}
+    };
+
+    let domainObject = new domainObjectBuilder.DomainObject(
+        // for mysql, c.database contains the database name
+        c => `SELECT
+            t.id as _domain_id,
+            t.*,
+            'test' as myField
+            FROM people AS t
+            WHERE t.id IN (?)`
+    );
+    
+    // if you have a one-to-many to join:
+    domainObject.hasMany("sub_object", c => `SELECT related_table.pk as _domain_id, related_table.* from related_table where pk IN (?)`); // ? will be filled with the object primary key as laid out in the tableIdTranslation
+
+    //Advanced Settings
+    // if we're creating a snapshot
+    if (process.env.snapshot) {
+        ls.pipe(
+            // read through primary keys
+            snapshotter.read(snapshotSettings),
+
+            // transform keys into domain objects
+            dol.domainObjectTransform(domainObject),
+
+            // load into S3, toLeo, and checkpoint
+            snapshotter.write(context.botId, destination),
+
+            // end
+            err => {
+                callback(err);
+            }
+        );
+    } else {
+        // regular domain object load
+        ls.pipe(
+            leo.read(context.botId, source),
+
+            dol.translateIds(tableIdTranslations),
+            dol.domainObjectTransform(domainObject),
+
+            leo.load(context.botId, destination),
+            (err) => {
+                callback(err);
+            }
+        );
+    }
+    //End Advanced Settings
+});
 ```
 
 The query in the examples above is what builds the domain object. Here is an example of how to build a domain object and
@@ -623,25 +664,25 @@ what the various parts of the query do to build it.
 ##### Query example
 ```javascript
 let query = `SELECT a.id
-		, a.name
-		, a.foo_id
-		, '' AS prefix_Foo
-		, b.id
-		, b.name
-	FROM tableOne a
-	JOIN tableTwo b ON (b.id = a.foo_id)	
-	WHERE a.id IN (?)`;
+        , a.name
+        , a.foo_id
+        , '' AS prefix_Foo
+        , b.id
+        , b.name
+    FROM tableOne a
+    JOIN tableTwo b ON (b.id = a.foo_id)    
+    WHERE a.id IN (?)`;
 ```
 ##### Output example
 ```json
 {
-	"id": 1,
-	"name": "test",
-	"foo_id": 5,
-	"Foo": {
-		"id": 5,
-		"name": "bar"
-	}
+    "id": 1,
+    "name": "test",
+    "foo_id": 5,
+    "Foo": {
+        "id": 5,
+        "name": "bar"
+    }
 }
 ```
 
