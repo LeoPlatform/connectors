@@ -41,7 +41,19 @@ module.exports = class Snapshotter {
 			throw new Error('NO botId specified.');
 		}
 
-		return this.getProgress();
+		let stream = ls.passthrough({
+			objectMode: true,
+		});
+
+		leoaws.dynamodb.get(tableName, this.params.botId)
+		.then(result => {
+			ls.pipe(this.nibble(result), this.format(), stream);
+		})
+		.catch(err => {
+			throw new Error(err);
+		});
+
+		return stream;
 	}
 
 	/*****************************************
@@ -100,26 +112,6 @@ module.exports = class Snapshotter {
 		}).catch(err => {
 			throw new Error(err);
 		});
-	}
-
-	/**
-	 * Get current snapshot progress
-	 * @returns {*}
-	 */
-	getProgress() {
-		let stream = ls.passthrough({
-			objectMode: true,
-		});
-
-		leoaws.dynamodb.get(tableName, this.params.botId)
-		.then(result => {
-			ls.pipe(this.nibble(result), this.format(), stream);
-		})
-		.catch(err => {
-			throw new Error(err);
-		});
-
-		return stream;
 	}
 
 	/**

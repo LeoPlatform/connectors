@@ -1,8 +1,6 @@
 'use strict';
 
 const dol = require('./dol');
-const sqlLoader = require('./sql/loader');
-const sqlLoaderJoin = require('./sql/loaderJoinTable');
 const sqlNibbler = require('./sql/nibbler');
 const snapshotter = require('./sql/snapshotter');
 
@@ -11,7 +9,7 @@ module.exports = class Connector {
 		this.params = Object.assign({
 			connect: undefined,
 			checksum: undefined,
-			listener: undefined,
+			listener: undefined
 		}, params);
 	}
 
@@ -23,17 +21,6 @@ module.exports = class Connector {
 		}
 
 		return config;
-	}
-
-	load(config, sql, domain, opts, idColumns) {
-		let client = this.connect(config);
-		if (Array.isArray(idColumns)) {
-			// make sure we don't include a values keyword in the return array of ids
-			opts.values = false;
-			return sqlLoaderJoin(client, idColumns, sql, domain, opts);
-		} else {
-			return sqlLoader(client, sql, domain, opts);
-		}
 	}
 
 	nibble(config, table, id, opts) {

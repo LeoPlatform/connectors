@@ -13,8 +13,8 @@ class connector extends parent {
 		});
 	}
 
-	streamChanges(config, tables, opts = {}) {
-		let client = connect(config);
+	streamChanges(config, opts = {}) {
+		let client = this.connect(config);
 
 		let stream = new PassThrough({
 			objectMode: true
@@ -29,36 +29,37 @@ class connector extends parent {
 		};
 
 		if (opts.start === undefined) {
-			console.error(`Start is a required parameter`);
-			process.exit();
+			throw new Error(`Start is a required parameter`);
+		} else if (!opts.table && !opts.tables) {
+			throw new Error('Table is a required parameter');
 		}
 
 		let parts = opts.start.toString().split(".");
 		let version = parseInt(parts.shift());
 		let order = '';
 
-		let sqlTables = Object.keys(tables).map(t => {
+		let sqlTables = Object.keys(opts.tables).map(t => {
 			let fields;
 			let where;
 
 			// build fields for composite keys
-			if (Array.isArray(tables[t])) {
+			if (Array.isArray(opts.tables[t])) {
 				let count = 0;
 				let next = `SYS_CHANGE_VERSION = ${version}`;
 				let queryPieces = [];
 
-				tables[t].forEach(field => {
+				opts.tables[t].forEach(field => {
 					queryPieces.push(`(${next} AND ${field} > ${parts[count]})`);
 					next += ` AND ${field} = ${parts[count++]}`;
 				});
 
 				where = ' OR ' + queryPieces.join(' OR ');
-				fields = tables[t].join(', ');
-				order = order || tables[t].join(' asc,') + ' asc';
+				fields = opts.tables[t].join(', ');
+				order = order || opts.tables[t].join(' asc,') + ' asc';
 			} else {
-				where = ` OR (SYS_CHANGE_VERSION = ${version} AND ${tables[t]} > ${parts[0] || 0})`;
-				fields = tables[t];
-				order = order || tables[t] + ' asc';
+				where = ` OR (SYS_CHANGE_VERSION = ${version} AND ${opts.tables[t]} > ${parts[0] || 0})`;
+				fields = opts.tables[t];
+				order = order || opts.tables[t] + ' asc';
 			}
 
 			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
@@ -86,11 +87,11 @@ class connector extends parent {
 					let eid = `${sys_change_version}.`;
 					let payload;
 					if (Object.keys(r).length > 1) {
-						eid += tables[tableName].map(field => r[field]).join('.');
+						eid += opts.tables[tableName].map(field => r[field]).join('.');
 						payload = r;
 					} else {
-						eid += r[tables[tableName]];
-						payload = r[tables[tableName]];
+						eid += r[opts.tables[tableName]];
+						payload = r[opts.tables[tableName]];
 					}
 
 					obj.correlation_id.units++;
