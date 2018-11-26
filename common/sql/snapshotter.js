@@ -1,171 +1,267 @@
+'use strict';
+
 const leo = require("leo-sdk");
-const ls = leo.streams;
+const leoaws = require('leo-aws');
+const ls = require('leo-streams');
+const leostream = leo.streams;
+const moment = require("moment");
+const merge = require('lodash.merge');
+const logger = require('leo-logger');
 
 const nibbler = require("./nibbler.js");
-const loader = require("./loader.js");
-const loaderJoin = require("./loaderJoinTable.js");
 
-const moment = require("moment");
-
-let dynamodb = leo.aws.dynamodb;
 const tableName = leo.configuration.resources.LeoCron;
 
-module.exports = function(botId, client, table, id, domain, opts, callback) {
-	opts = Object.assign({
-		event: table,
-	}, opts || {});
-
-	let nibble = null;
-	var logTimeout = null;
-	//@todo: Update all this to use the log-update node module
-	function clearLog() {
-		process.stdout.write("\r\x1b[K");
-		if (logTimeout) clearInterval(logTimeout);
+module.exports = class Snapshotter {
+	constructor(connector) {
+		this.params = {
+			connector: connector,
+			nibble: null,
+			logTimeout: null,
+			runUntilComplete: true,
+			timestamp: moment(),
+			botId: process.__config.registry.context.botId
+		};
 	}
-	var log = function() {
-		clearLog();
-		var percent = (nibble.progress / nibble.total) * 100;
-		var fixed = percent.toFixed(2);
-		if (fixed == "100.00" && percent < 100) {
+
+	/**
+	 * Start snapshot reading
+	 * @param settings
+	 * @returns {*}
+	 */
+	read(settings) {
+		// add the settings parameters
+		this.params = merge(this.params, settings);
+
+		if (!this.params.table) {
+			throw new Error('No `table` specified.');
+		} else if (!this.params.pk) {
+			throw new Error('No `pk` specified for the specified table.');
+		} else if (!this.params.botId) {
+			throw new Error('NO botId specified.');
+		}
+
+		let stream = ls.passthrough({
+			objectMode: true,
+		});
+
+		leoaws.dynamodb.get(tableName, this.params.botId)
+		.then(result => {
+			ls.pipe(this.nibble(result), this.format(), stream);
+		})
+		.catch(err => {
+			throw new Error(err);
+		});
+
+		return stream;
+	}
+
+	/*****************************************
+	 * Start fancy console log status thingy *
+	 *****************************************/
+	//@todo: Update all this to use the log-update node module
+	clearLog() {
+		process.stdout.write("\r\x1b[K");
+		if (this.params.logTimeout) clearInterval(this.params.logTimeout);
+	}
+
+	log() {
+		this.clearLog();
+		let percent = (this.params.nibble.progress / this.params.nibble.total) * 100;
+		let fixed = percent.toFixed(2);
+		if (fixed === "100.00" && percent < 100) {
 			fixed = "99.99";
 		}
-		console.log(fixed + "% :", Object.keys(arguments).map(k => arguments[k]).join(", "));
+		logger.log(fixed + "% :", Object.keys(arguments).map(k => arguments[k]).join(", "));
 	};
 
-	function timeLog(message) {
-		clearLog();
-		var time = new Date();
+	timeLog(message) {
+		this.clearLog();
+		let time = new Date();
 
-		function writeMessage() {
-			process.stdout.write("\r\x1b[K");
-			process.stdout.write(((new Date() - time) / 1000).toFixed(1) + "s : " + message);
-		}
-		writeMessage();
-		logTimeout = setInterval(writeMessage, 200);
+		this.writeMessage(time);
+		this.params.logTimeout = setInterval(() => {
+			this.writeMessage(time);
+		}, 200);
 	}
 
-	function normalLog(message) {
-		clearLog();
-		console.log(message);
+	writeMessage(time) {
+		process.stdout.write("\r\x1b[K");
+		process.stdout.write(((new Date() - time) / 1000).toFixed(1) + "s : " + message);
 	}
 
+	normalLog(message) {
+		this.clearLog();
+		logger.log(message);
+	}
+	/***************************************
+	 * End fancy console log status thingy *
+	 ***************************************/
 
-	function saveProgress(data, timestamp) {
-		dynamodb.merge(tableName, botId, {
+	/**
+	 * Save the current progress data for the snapshot
+	 * @param data
+	 * @param timestamp
+	 */
+	saveProgress(data, timestamp) {
+		leoaws.dynamodb.merge(tableName, this.params.botId, {
 			snapshot: Object.assign({
 				last_run: moment.now(),
 				bucket_timestamp: timestamp && timestamp.valueOf()
 			}, data)
-		}, function(err, result) {
-			if (err) {
-				console.log(err);
-				callback(err);
-				process.exit();
+		}).catch(err => {
+			throw new Error(err);
+		});
+	}
+
+	/**
+	 * nibble through the database
+	 * @param result
+	 * @returns {pass}
+	 */
+	nibble(result) {
+		let self = this;
+		// reuse an existing bucket key if we’re resuming, otherwise create a new one.
+		this.params.timestamp = moment(result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_timestamp || undefined);
+
+		this.params.resume = result && result.snapshot && !result.snapshot.complete && result.snapshot;
+		let stream = nibbler(this.params.connector, this.params.table, this.params.pk, this.params);
+		stream.destroy = stream.destroy || stream.close || (() => {});
+
+		stream.on("ranged", function (n) {
+			self.params.nibble = n;
+			self.saveProgress(self.params.nibble, self.params.timestamp);
+		});
+
+		stream.on('end', () => {
+			clearTimeout(self.params.streamTimeout);
+		});
+
+		this.params.streamTimeout = setTimeout(() => {
+			stream.stop();
+		}, Math.min(2147483647, moment.duration(self.params.duration || {
+			seconds: process.__config.registry.context.getRemainingTimeInMillis() * 0.8
+		}).asMilliseconds()));
+
+		return stream;
+
+	}
+
+	/**
+	 * Format the payload, include a dummy database.
+	 * @todo support multiple databases.
+	 * @returns {*}
+	 */
+	format() {
+		return ls.through((obj, done) => {
+
+			let payload = obj.payload[this.params.table];
+
+			// turn this into a format the domainObjectTransform is expecting, complete with the dummy database name
+			obj = {
+				ids: {
+					__database__: payload
+				},
+				correlation_id: {
+					source: 'snapshot',
+					units: payload.length,
+					start: payload[0],
+					end: payload[payload.length - 1]
+				}
+			};
+
+			done(null, obj);
+		});
+	}
+
+	// write out the results
+	/**
+	 *
+	 * @param {string} botId
+	 * @param {string} destination
+	 * @returns {*}
+	 */
+	write(botId, destination) {
+		this.params.destination = destination;
+		return ls.pipeline(
+			ls.through((event, done)=>{
+				event.id = botId;
+				event.timestamp = Date.now();
+				event.event_source_timestamp = Date.now();
+				done(null, event);
+			}),
+			this.writeToS3(),
+			this.writeToLeo(),
+			this.writeCheckpoint()
+		);
+	}
+
+	/**
+	 * Write the events to a gzip file and upload to S3
+	 * @returns {*}
+	 */
+	writeToS3() {
+		let bucketKey = this.params.timestamp.format('YYYY/MM_DD_') + this.params.timestamp.valueOf();
+		return leostream.toS3GzipChunks(this.params.destination, {
+			useS3Mode: true,
+			time: {
+				minutes: 1
+			},
+			prefix: "_snapshot/" + bucketKey,
+			sectionCount: 30
+		});
+	}
+
+	/**
+	 * Write the snapshot event to leo
+	 * @returns {*}
+	 */
+	writeToLeo() {
+		return leostream.toLeo('snapshotter', {
+			snapshot: this.params.timestamp.valueOf()
+		});
+	}
+
+	/**
+	 * Send a checkpoint command to the kinesis reader to checkpoint at the end.
+	 */
+	writeCheckpoint() {
+		return leostream.cmd("checkpoint", (obj, done) => {
+			if (obj.correlations) {
+				let records = 0;
+				obj.correlations.forEach(c => {
+					this.params.nibble.start = c.snapshot.end;
+					this.params.nibble.progress += c.snapshot.records;
+					records += c.snapshot.records;
+				});
+				this.log(`Processed  ${records}  ${this.params.nibble.progress}/${this.params.nibble.total}. Remaining ${this.params.nibble.total - this.params.nibble.progress}`);
+				if (this.params.nibble.end == this.params.nibble.start) {
+					this.params.nibble.complete = true;
+					this.saveProgress(this.params.nibble);
+
+					let closeStream = ls.pipeline(leostream.toLeo("snapshotter", {
+						snapshot: this.params.timestamp.valueOf()
+					}), ls.devnull());
+
+					closeStream.write({
+						_cmd: 'registerSnapshot',
+						event: this.params.destination,
+						start: this.params.timestamp.valueOf(),
+						next: this.params.timestamp.clone().startOf('day').valueOf(),
+						id: this.params.botId
+					});
+					closeStream.on("finish", done);
+					closeStream.end();
+				} else {
+					if (this.params.runUntilComplete) {
+						leo.bot.runAgain();
+					}
+					this.saveProgress(this.params.nibble, this.params.timestamp);
+					done();
+				}
+			} else {
+				done();
 			}
 		});
 	}
-	dynamodb.get(tableName, botId, function(err, result) {
-		if (err) {
-			callback(err);
-		} else {
-			// reuse an existing bucket key if we’re resuming, otherwise create a new one.
-			let timestamp = moment(result && result.snapshot && !result.snapshot.complete && result.snapshot.bucket_timestamp || undefined),
-				bucketKey = timestamp.format('YYYY/MM_DD_') + timestamp.valueOf();
-
-			let stream = nibbler(client, table, id, {
-				limit: 5000,
-				resume: result && result.snapshot && !result.snapshot.complete && result.snapshot
-			});
-			stream.destroy = stream.destroy || stream.close || (() => {});
-
-			stream.on("ranged", function(n) {
-				nibble = n;
-				saveProgress(nibble, timestamp);
-			});
-			let transform;
-			if (Array.isArray(id)) {
-				transform = loaderJoin(client, id, null, domain, {
-					source: 'snapshot',
-					isSnapshot: true,
-					id: botId
-				});
-			} else {
-				transform = loader(client, (obj) => {
-					return [obj[table]];
-				}, domain, {
-					source: 'snapshot',
-					isSnapshot: true,
-					id: botId
-				});
-			}
-			transform.destroy = transform.destroy || transform.close || (() => {});
-
-			let timeout = setTimeout(() => {
-				stream.stop();
-			}, moment.duration({
-				seconds: 180
-			}).asMilliseconds());
-
-			ls.pipe(stream,
-				transform,
-				ls.toS3GzipChunks(opts.event, {
-					useS3Mode: true,
-					time: {
-						minutes: 1
-					},
-					prefix: "_snapshot/" + bucketKey,
-					sectionCount: 30
-				}),
-				ls.toLeo("snapshotter", {
-					snapshot: timestamp.valueOf()
-				}),
-				ls.cmd("checkpoint", (obj, done) => {
-					if (obj.correlations) {
-						let records = 0;
-						obj.correlations.forEach(c => {
-							nibble.start = c.snapshot.end;
-							nibble.progress += c.snapshot.records;
-							records += c.snapshot.records;
-						});
-						log(`Processed  ${records}  ${nibble.progress}/${nibble.total}. Remaining ${nibble.total-nibble.progress}`);
-						if (nibble.end == nibble.start) {
-							nibble.complete = true;
-							saveProgress(nibble);
-							let closeStream = ls.pipeline(ls.toLeo("snapshotter", {
-								snapshot: timestamp.valueOf()
-							}), ls.devnull());
-							closeStream.write({
-								_cmd: 'registerSnapshot',
-								event: opts.event,
-								start: timestamp.valueOf(),
-								next: timestamp.clone().startOf('day').valueOf(),
-								id: botId
-							});
-							closeStream.on("finish", done);
-							closeStream.end();
-						} else {
-							saveProgress(nibble, timestamp);
-							done();
-						}
-					} else {
-						done();
-					}
-				}),
-				ls.devnull(),
-				(err) => {
-					clearTimeout(timeout);
-					if (err) {
-						console.log(err);
-						stream.destroy();
-						transform.destroy();
-						callback(err);
-					} else {
-						if (!nibble.complete) {
-							leo.bot.runAgain();
-						}
-						callback(null);
-					}
-				});
-		}
-	});
 };

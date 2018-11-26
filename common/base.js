@@ -1,21 +1,15 @@
 'use strict';
 
 const dol = require('./dol');
-const sqlLoader = require('./sql/loader');
-const sqlLoaderJoin = require('./sql/loaderJoinTable');
 const sqlNibbler = require('./sql/nibbler');
-const leo = require("leo-sdk");
-const ls = leo.streams;
-
-// @deprecated (used by domainObjectLoader)
-const snapShotter = require('./sql/snapshotter');
+const snapshotter = require('./sql/snapshotter');
 
 module.exports = class Connector {
 	constructor(params) {
 		this.params = Object.assign({
 			connect: undefined,
 			checksum: undefined,
-			listener: undefined,
+			listener: undefined
 		}, params);
 	}
 
@@ -27,17 +21,6 @@ module.exports = class Connector {
 		}
 
 		return config;
-	}
-
-	load(config, sql, domain, opts, idColumns) {
-		let client = this.connect(config);
-		if (Array.isArray(idColumns)) {
-			// make sure we don't include a values keyword in the return array of ids
-			opts.values = false;
-			return sqlLoaderJoin(client, idColumns, sql, domain, opts);
-		} else {
-			return sqlLoader(client, sql, domain, opts);
-		}
 	}
 
 	nibble(config, table, id, opts) {
@@ -56,30 +39,21 @@ module.exports = class Connector {
 		return new dol(this.connect(config));
 	}
 
+	snapshotter(config) {
+		return new snapshotter(this.connect(config));
+	}
+
 	// @deprecated
 	dol(config) {
+		console.log('`dol` is deprecated and will be removed. Please use `domainObjectBuilder` instead.');
+
 		return this.domainObjectBuilder(config);
 	}
 
 	// @deprecated
 	DomainObjectLoader(config) {
-		 return this.domainObjectBuilder(config);
-	}
+		console.log('`DomainObjectLoader` is deprecated and will be removed. Please use `domainObjectBuilder` instead.');
 
-	// @deprecated
-	domainObjectLoader(bot_id, dbConfig, sql, domain, opts, callback) {
-		if (opts.snapshot) {
-			snapShotter(bot_id, this.connect(dbConfig), dbConfig.table, dbConfig.id, domain, {
-				event: opts.outQueue
-			}, callback);
-		} else {
-			let stream = leo.read(bot_id, opts.inQueue, {start: opts.start});
-			let stats = ls.stats(bot_id, opts.inQueue);
-
-			ls.pipe(stream, stats, this.load(dbConfig, sql, domain, opts, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
-				if (err) return callback(err);
-				return stats.checkpoint(callback);
-			});
-		}
+		return this.domainObjectBuilder(config);
 	}
 };

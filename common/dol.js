@@ -1,11 +1,12 @@
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const async = require("async");
+const logger = require('leo-logger');
 
 module.exports = function domainObjectLoader(client) {
 
 	let obj = {
-		translateIds: function(translations, opts) {
+		translateIds: function (translations, opts) {
 			opts = Object.assign({
 				count: 1000,
 				time: {
@@ -14,11 +15,14 @@ module.exports = function domainObjectLoader(client) {
 			}, opts);
 			return ls.pipeline(
 				translateIdsStartStream(translations),
+
 				ls.batch({
 					count: opts.count,
 					time: opts.time
 				}),
+
 				translateIdsLookupStream(client, translations),
+
 				ls.batch({
 					count: 1000,
 					time: {
@@ -28,7 +32,7 @@ module.exports = function domainObjectLoader(client) {
 				translateIdsCombineStream()
 			);
 		},
-		domainObjectTransform: function(domainObject) {
+		domainObjectTransform: function (domainObject) {
 			if (typeof domainObject.get === "function") {
 				domainObject = domainObject.get();
 			}
@@ -72,7 +76,7 @@ module.exports = function domainObjectLoader(client) {
 
 					buildDomainObject(client, domainObject, obj.ids, addCorrelation, (err, results = []) => {
 						if (err) {
-							console.log(JSON.stringify(obj, null, 2));
+							logger.error(JSON.stringify(obj, null, 2));
 							return done(err);
 						}
 						if (results.length) {
@@ -110,7 +114,7 @@ module.exports = function domainObjectLoader(client) {
 				}
 			});
 		},
-		domainObject: function(query, domainIdColumn = "_domain_id", transform) {
+		domainObject: function (query, domainIdColumn = "_domain_id", transform) {
 			if (typeof domainIdColumn === "function") {
 				transform = domainIdColumn;
 				domainIdColumn = "_domain_id";
@@ -119,7 +123,7 @@ module.exports = function domainObjectLoader(client) {
 			this.domainIdColumn = domainIdColumn;
 			this.transform = transform;
 			this.joins = {};
-			this.hasMany = function(name, query, domainIdColumn = "_domain_id", transform) {
+			this.hasMany = function (name, query, domainIdColumn = "_domain_id", transform) {
 				if (typeof query === "object") {
 					this.joins[name] = query;
 					return;
@@ -147,17 +151,36 @@ module.exports = function domainObjectLoader(client) {
 	return obj;
 };
 
+/**
+ * Translate id's from a database listener
+ * formats:
+ * mysql: payload.update.database.table.ids
+ *      payload.delete.database.table.ids
+ * other databases: payload.table.ids - converted to payload.update.__database__.table.ids
+ * @param idTranslation
+ */
 function translateIdsStartStream(idTranslation) {
 
 	return ls.through((obj, done, push) => {
 		if (!obj.payload.update) {
-			return done(null, {
-				correlation_id: {
-					source: obj.event,
-					start: obj.eid
-				}
-			});
+			// handle data from listeners other than mysql
+			if (obj.payload && !obj.payload.delete && Object.keys(obj.payload).length) {
+				obj.payload = {
+					update: {
+						// add a dummy database, which will be removed on the domain object final output
+						__database__: obj.payload
+					}
+				};
+			} else {
+				return done(null, {
+					correlation_id: {
+						source: obj.event,
+						start: obj.eid
+					}
+				});
+			}
 		}
+
 		let last = null;
 		let count = 0;
 		let updates = obj.payload.update;
@@ -215,7 +238,7 @@ function translateIdsLookupStream(client, idTranslation) {
 			};
 		} else if (typeof translation === "string" || (typeof translation === "function" && translation.length <= 1)) {
 			let queryFn = queryToFunction(translation, ["data"]);
-			handlers[v] = function(data, done) {
+			handlers[v] = function (data, done) {
 				let query = queryFn.call(this, data);
 				this.client.query(query, [data.ids], (err, rows) => {
 					done(err, rows && rows.map(r => r[0]));
@@ -274,6 +297,7 @@ function translateIdsLookupStream(client, idTranslation) {
 								ids: lookupIds,
 								done: done
 							};
+
 							handler.call(context, context, (err, ids = []) => {
 								if (err) {
 									done(err);
@@ -388,16 +412,22 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 	async.eachLimit(Object.entries(ids), 5, ([schema, ids], callback) => {
 		let tasks = [];
 		let domains = {};
-		console.log(`Processing ${ids.length} from ${schema}`);
+		let queryIds = [];
+		logger.log(`Processing ${ids.length} from ${schema}`);
 		ids.forEach(id => {
+
+			// if the id is an object, it's a composite key
+			if (typeof id === 'object') {
+				// change the id to be a string with keys separated by a dash
+				queryIds.push(Object.values(id));
+				id = Object.values(id).join('-');
+			} else {
+				queryIds.push(id);
+			}
+
 			domains[id] = {};
 			Object.keys(domainObject.joins).forEach(name => {
-				let t = domainObject.joins[name];
-				if (t.type === "one_to_many") {
-					domains[id][name] = [];
-				} else {
-					domains[id][name] = {};
-				}
+				domains[id][name] = [];
 			});
 		});
 
@@ -443,7 +473,7 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 
 		tasks.push(done => {
 			if (!domainObject.domainIdColumn) {
-				console.log('[FATAL ERROR]: No ID specified');
+				logger.error('[FATAL ERROR]: No ID specified');
 			}
 
 			let query = domainObject.sql.call({
@@ -451,12 +481,13 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				schema: schema,
 				client: sqlClient
 			}, {
-				ids: ids,
+				ids: queryIds,
 				database: schema,
 				schema: schema,
 				client: sqlClient
 			});
-			sqlClient.query(query, [ids], (err, results, fields) => {
+
+			sqlClient.query(query, [queryIds], (err, results, fields) => {
 				if (err) return done(err);
 
 				mapResults(results, fields, row => {
@@ -467,9 +498,9 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 					delete row._domain_id;
 
 					if (!domainId) {
-						console.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
+						logger.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
 					} else if (!domains[domainId]) {
-						console.error('ID: "' + domainObject.domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+						logger.error('ID: "' + domainObject.domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
 					} else {
 						//We need to keep the domain relationships in tact
 						domains[domainId] = Object.assign(domains[domainId], row);
@@ -489,60 +520,34 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				schema: schema,
 				client: sqlClient
 			}, {
-				ids: ids,
+				ids: queryIds,
 				database: schema,
 				schema: schema,
 				client: sqlClient
 			});
-			if (t.type === "one_to_many") {
-				tasks.push(done => {
-					sqlClient.query(query, [ids], (err, results, fields) => {
-						if (err) {
-							return done(err);
-						} else if (!results.length) {
-							return done();
+			tasks.push(done => {
+				sqlClient.query(query, [queryIds], (err, results, fields) => {
+					if (err) {
+						return done(err);
+					} else if (!results.length) {
+						return done();
+					}
+
+					mapResults(results, fields, row => {
+						let domainId = row[t.domainIdColumn];
+						delete row._domain_id;
+
+						if (t.transform) {
+							row = t.transform(row);
 						}
 
-						mapResults(results, fields, row => {
-							let domainId = row[t.domainIdColumn];
-							delete row._domain_id;
-
-							if (t.transform) {
-								row = t.transform(row);
-							}
-
-							domains[domainId][name].push(row);
-						});
-						done();
-					}, {
-						inRowMode: true
+						domains[domainId][name].push(row);
 					});
+					done();
+				}, {
+					inRowMode: true
 				});
-			} else {
-				tasks.push(done => {
-					sqlClient.query(query, [ids], (err, results, fields) => {
-						if (err) {
-							return done(err);
-						} else if (!results.length) {
-							return done();
-						}
-
-						mapResults(results, fields, row => {
-							if (row.length) {
-								let domainId = row[t.domainIdColumn];
-								delete row._domain_id;
-								if (t.transform) {
-									row = t.transform(row);
-								}
-								domains[domainId][name] = row;
-							}
-						});
-						done();
-					}, {
-						inRowMode: true
-					});
-				});
-			}
+			});
 		});
 		let limit = 5;
 		async.parallelLimit(tasks, limit, (err) => {
@@ -550,17 +555,23 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 				callback(err);
 			} else {
 				ids.forEach(id => {
+					// if the id is an object, it's a composite key
+					if (typeof id === 'object') {
+						// change the id to be a string with keys separated by a dash
+						id = Object.values(id).join('-');
+					}
+
 					// skip the domain if there is no data with it
 					let keyCount = Object.keys(domains[id]).length;
 					if (keyCount === 0) {
-						console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 						return;
 					} else if (keyCount <= joinsCount) {
 						let valid = Object.keys(domainObject.joins).some(k => {
 							return Object.keys(domains[id][k] || []).length > 0;
 						});
 						if (!valid) {
-							console.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+							logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
 							return;
 						}
 					}
@@ -573,6 +584,12 @@ function buildDomainObject(client, domainObject, ids, push, callback) {
 						schema: schema,
 						domain_id: id
 					};
+
+					// remove the schema if it's a dummy we added in translate ids
+					if (event.schema === '__database__') {
+						delete event.schema;
+					}
+
 					push(event);
 				});
 				callback();
