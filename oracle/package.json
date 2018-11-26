@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-oracle",
-	"version": "2.0.0-RC2",
+	"version": "2.0.0-RC3",
 	"description": "An Oracle database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -17,7 +17,7 @@
 	},
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
-		"leo-connector-common": "^2.0.0-RC2",
+		"leo-connector-common": "^2.0.0-RC3",
 		"leo-logger": ">=1.0.0",
 		"leo-sdk": "^2.2.0",
 		"oracledb": "^2.3.0"
