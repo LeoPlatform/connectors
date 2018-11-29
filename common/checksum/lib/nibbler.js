@@ -1,5 +1,5 @@
-var async = require("async");
-let logger = require("leo-sdk/lib/logger")("leo-nibbler");
+const async = require("async");
+const logger = require("leo-logger")("leo-nibbler");
 
 /**
  * Interface

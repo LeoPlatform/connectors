@@ -1,7 +1,7 @@
 let leo = require("leo-sdk");
 const aws = require("aws-sdk");
 const checksum = require("./lib/checksumNibbler.js");
-let dynamodb = leo.aws.dynamodb;
+const leoaws = require('leo-aws');
 let cron = leo.bot;
 
 /** These are for file connector **/
@@ -20,19 +20,11 @@ const tableName = leo.configuration.resources.LeoCron;
 let logger = require("leo-sdk/lib/logger")("leo-checksum");
 
 function saveProgress(systemId, botId, data) {
-	return new Promise((resolve, reject) => {
-		dynamodb.merge(tableName, botId, {
-			checksum: data,
-			system: {
-				id: systemId
-			}
-		}, function(err, result) {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(data);
-			}
-		});
+	return leoaws.dynamodb.merge(tableName, botId, {
+		checksum: data,
+		system: {
+			id: systemId
+		}
 	});
 }
 
@@ -84,24 +76,18 @@ module.exports = {
 		if (opts.restart) {
 			return saveProgress(systemId, botId, emptySession);
 		} else {
-			return new Promise((resolve, reject) => {
-				logger.log("Getting Session", systemId, botId);
-				dynamodb.get(tableName, botId, function(err, result) {
-					if (err) {
-						reject(err);
-					} else {
-						try {
-							let session = emptySession;
-							if (result && result.checksum && result.checksum.restart !== true && result.checksum.status !== 'complete') {
-								session = result.checksum;
-							}
-							resolve(session);
-						} catch (err) {
-							reject(err);
-						}
+
+			logger.log("Getting Session", systemId, botId);
+
+			return leoaws.dynamodb.get(tableName, botId)
+				.then(result => {
+					let session = emptySession;
+					if (result && result.checksum && result.checksum.restart !== true && result.checksum.status !== 'complete') {
+						session = result.checksum;
 					}
+
+					return session;
 				});
-			});
 		}
 	},
 	checksum: function(system, botId, master, slave, opts) {
