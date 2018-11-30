@@ -225,7 +225,7 @@ module.exports = function (connection) {
 
 		let query = `SELECT ${settings.id_column} AS id
 			FROM ${tableName}
-			WHERE id >= ${escape(data.start)} AND id <= ${escape(data.end)}
+			WHERE ${settings.id_column} >= ${escape(data.start)} AND ${settings.id_column} <= ${escape(data.end)}
 			ORDER BY id ${!data.reverse ? "ASC" : "DESC"}
 			OFFSET ${data.limit - 1} ROWS
 			FETCH NEXT 2 ROWS ONLY`;

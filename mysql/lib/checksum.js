@@ -240,7 +240,7 @@ module.exports = function(connection) {
 		let connection = getConnection(settings);
 
 		let query = `select ${settings.id_column} as id from ${tableName} force key(${settings.key_column || settings.id_column})
-			where id >= ${escape(data.start)} and id <= ${escape(data.end)}
+			where ${settings.id_column} >= ${escape(data.start)} and ${settings.id_column} <= ${escape(data.end)}
 			order by id ${!data.reverse ? "asc":"desc"}
 			limit 2
 			offset ${data.limit - 1}`;
