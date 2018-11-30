@@ -2,7 +2,7 @@
 const async = require("async");
 const createNibbler = require("./nibbler.js");
 
-let logger = require("leo-sdk/lib/logger")("leo-checksum.nibbler");
+let logger = require("leo-logger")("leo-checksum.nibbler");
 
 module.exports = function(local, remote, opts) {
 
