@@ -12,7 +12,7 @@ let csv = require('fast-csv');
 
 require('pg').types.setTypeParser(1114, (val) => {
 	val += "Z";
-	console.log(val);
+	logger.debug(val);
 	return moment(val).unix() + "  " + moment(val).utc().format();
 });
 
