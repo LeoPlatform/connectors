@@ -9,7 +9,6 @@ const async = require('async');
 var copyFrom = require('pg-copy-streams').from;
 var copyTo = require('pg-copy-streams').to;
 let csv = require('fast-csv');
-// var TIMESTAMP_OID = 1114;
 
 require('pg').types.setTypeParser(1114, (val) => {
 	val += "Z";
@@ -20,7 +19,7 @@ require('pg').types.setTypeParser(1114, (val) => {
 const ls = require("leo-sdk").streams;
 
 let queryCount = 0;
-module.exports = function (config) {
+module.exports = function(config) {
 	const pool = new Pool(Object.assign({
 		user: 'root',
 		host: 'localhost',
@@ -41,13 +40,13 @@ function create(pool, parentCache) {
 	};
 	let client = {
 		setAuditdate,
-		connect: function (opts) {
+		connect: function(opts) {
 			opts = opts || {};
 			return pool.connect().then(c => {
 				return create(c, opts.type == "isolated" ? {} : cache);
 			});
 		},
-		query: function (query, params, callback, opts = {}) {
+		query: function(query, params, callback, opts = {}) {
 			if (typeof params == "function") {
 				opts = callback;
 				callback = params;
@@ -59,26 +58,13 @@ function create(pool, parentCache) {
 			}, opts || {});
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-
-			// handle an array of ids
-			console.debug('Query input params', params);
-
-			// create a formatted query if we have an array of params with NO $ and YES %
-			if (query.indexOf('$') === -1 && query.indexOf('%') !== -1 && Array.isArray(params)) {
-				for (let key in params) {
-					if (Array.isArray(params[key])) {
-						params[key] = '(' + params[key].join('),(') + ')';
-					}
-				}
-
-				console.debug('Query formatted params', params);
-				query = format(query, params);
-				params = undefined;
-			}
-
 			log.info(`SQL query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
-			let cb = function (err, result) {
+			pool.query({
+				text: query,
+				values: params,
+				rowMode: opts.inRowMode ? 'array' : undefined
+			}, function(err, result) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
 					if (!opts.allowError) {
@@ -92,27 +78,14 @@ function create(pool, parentCache) {
 						callback(null, result.rows, result.fields);
 					}
 				}
-			};
-
-			let queryOpts = {
-				text: query,
-				values: params,
-				rowMode: opts.inRowMode ? 'array' : undefined
-			};
-
-			// when params is undefined, remove it so it doesn't think we’re using a parameratized query
-			if (!params) {
-				delete queryOpts.values;
-			}
-
-			pool.query(queryOpts, cb);
+			});
 		},
 		disconnect: pool.end.bind(pool),
 		end: pool.end.bind(pool),
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
-		describeTable: function (table, callback, tableSchema = 'public') {
+		describeTable: function(table, callback, tableSchema = 'public') {
 			const qualifiedTable = `${tableSchema}.${table}`;
 			if (cache.schema[qualifiedTable]) {
 				logger.info(`Table "${qualifiedTable}" schema from cache`, cache.timestamp);
@@ -124,7 +97,7 @@ function create(pool, parentCache) {
 				}, tableSchema);
 			}
 		},
-		describeTables: function (callback, tableSchema = 'public') {
+		describeTables: function(callback, tableSchema = 'public') {
 			if (Object.keys(cache.schema || {}).length) {
 				logger.info(`Tables schema from cache`, cache.timestamp);
 				return callback(null, cache.schema);
@@ -150,20 +123,20 @@ function create(pool, parentCache) {
 				callback(err, cache.schema);
 			});
 		},
-		getSchemaCache: function () {
+		getSchemaCache: function() {
 			return cache.schema || {};
 		},
-		setSchemaCache: function (schema) {
+		setSchemaCache: function(schema) {
 			cache.schema = schema || {};
 		},
-		clearSchemaCache: function () {
+		clearSchemaCache: function() {
 			logger.info(`Clearing Tables schema cache`);
 			cache.schema = {};
 		},
-		streamToTableFromS3: function (/*table, fields, opts*/) {
+		streamToTableFromS3: function( /*table, fields, opts*/ ) {
 			//opts = Object.assign({}, opts || {});
 		},
-		streamToTableBatch: function (table, opts) {
+		streamToTableBatch: function(table, opts) {
 			opts = Object.assign({
 				records: 10000
 			}, opts || {});
@@ -256,7 +229,7 @@ function create(pool, parentCache) {
 					`);
 				}
 				let insertQuery = format(cmd, table, columns, values, columns);
-				client.query(insertQuery, function (err) {
+				client.query(insertQuery, function(err) {
 					if (err) {
 						let tasks = [];
 						tasks.push(done => client.query("BEGIN", done));
@@ -271,7 +244,7 @@ function create(pool, parentCache) {
 							if (err) {
 								callback(err);
 							} else {
-								client.query(insertQuery, function (err) {
+								client.query(insertQuery, function(err) {
 									if (err) {
 										callback(err);
 									} else {
@@ -305,7 +278,7 @@ function create(pool, parentCache) {
 				records: opts.records
 			});
 		},
-		streamToTable: function (table /*, opts*/) {
+		streamToTable: function(table /*, opts*/ ) {
 			const ts = table.split('.');
 			let schema = 'public';
 			let shortTable = table;
@@ -332,7 +305,7 @@ function create(pool, parentCache) {
 					myClient = c;
 					logger.log(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`);
 					stream = myClient.query(copyFrom(`COPY ${table} FROM STDIN (format csv, null '\\N', encoding 'utf-8')`));
-					stream.on("error", function (err) {
+					stream.on("error", function(err) {
 						console.log(`COPY error: ${err.where}`, err);
 						process.exit();
 					});
@@ -390,7 +363,7 @@ function create(pool, parentCache) {
 				}
 			}));
 		},
-		streamFromTable: function (table, opts) {
+		streamFromTable: function(table, opts) {
 
 			function clean(v) {
 				let i = v.search(/(\r|\n)/);
@@ -436,10 +409,10 @@ function create(pool, parentCache) {
 
 				logger.log(query);
 				stream = myClient.query(copyTo(query));
-				stream.on("error", function (err) {
+				stream.on("error", function(err) {
 					console.log(err);
 				});
-				stream.on("end", function () {
+				stream.on("end", function() {
 					console.log("Copy stream ended", table);
 					myClient.release(true);
 				});
@@ -451,7 +424,7 @@ function create(pool, parentCache) {
 			});
 			return pass;
 		},
-		range: function (table, id, opts, callback) {
+		range: function(table, id, opts, callback) {
 			if (Array.isArray(id)) {
 				let r = {
 					min: {},
@@ -505,7 +478,7 @@ function create(pool, parentCache) {
 				});
 			}
 		},
-		nibble: function (table, id, start, min, max, limit, reverse, callback) {
+		nibble: function(table, id, start, min, max, limit, reverse, callback) {
 			let sql;
 			if (Array.isArray(id)) {
 				if (reverse) {
@@ -514,14 +487,14 @@ function create(pool, parentCache) {
 									OR
 								  ${id[0]} < ${start[id[0]]}
 							ORDER BY ${id[0]} desc, ${id[1]} desc
-							LIMIT 2 OFFSET ${limit - 1}`;
+							LIMIT 2 OFFSET ${limit-1}`;
 				} else {
 					sql = `select ${id[0]}, ${id[1]} from ${table}  
 							where (${id[0]} = ${start[id[0]]} and ${id[1]} >= ${start[id[1]]}) 
 									OR
 								  ${id[0]} > ${start[id[0]]}
 							ORDER BY ${id[0]} asc, ${id[1]} asc
-							LIMIT 2 OFFSET ${limit - 1}`;
+							LIMIT 2 OFFSET ${limit-1}`;
 				}
 				client.query(sql, (err, result) => {
 					let r = [];
@@ -550,17 +523,17 @@ function create(pool, parentCache) {
 					sql = `select ${id} as id from ${table}  
 							where ${id} <= ${start} and ${id} >= ${min}
 							ORDER BY ${id} desc
-							LIMIT 2 OFFSET ${limit - 1}`;
+							LIMIT 2 OFFSET ${limit-1}`;
 				} else {
 					sql = `select ${id} as id from ${table}  
 							where ${id} >= ${start} and ${id} <= ${max}
 							ORDER BY ${id} asc
-							LIMIT 2 OFFSET ${limit - 1}`;
+							LIMIT 2 OFFSET ${limit-1}`;
 				}
 				client.query(sql, callback);
 			}
 		},
-		getIds: function (table, id, start, end, reverse, callback) {
+		getIds: function(table, id, start, end, reverse, callback) {
 			if (Array.isArray(id)) {
 				let joinTable = '';
 				if (reverse) {
@@ -591,24 +564,24 @@ function create(pool, parentCache) {
 				client.query(sql, callback);
 			}
 		},
-		escapeId: function (field) {
+		escapeId: function(field) {
 			return '"' + field.replace('"', '').replace(/\.([^.]+)$/, '"."$1') + '"';
 		},
-		escape: function (value) {
+		escape: function(value) {
 			if (value.replace) {
 				return '"' + value.replace('"', '') + '"';
 			} else {
 				return value;
 			}
 		},
-		escapeValue: function (value) {
+		escapeValue: function(value) {
 			if (value.replace) {
 				return "'" + value.replace("'", "\\'").toLowerCase() + "'";
 			} else {
 				return value;
 			}
 		},
-		escapeValueNoToLower: function (value) {
+		escapeValueNoToLower: function(value) {
 			if (value.replace) {
 				return "'" + value.replace("'", "\\'") + "'";
 			} else {
@@ -618,7 +591,7 @@ function create(pool, parentCache) {
 	};
 
 	function setAuditdate() {
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'";
+		client.auditdate =  "'" + new Date().toISOString().replace(/\.\d*Z/, "Z") + "'";
 	}
 
 	return client;
