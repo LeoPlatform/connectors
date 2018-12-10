@@ -409,7 +409,6 @@ module.exports = class Dol {
 	buildDomainObject(domainObject, ids, push, callback) {
 		let opts = {};
 		let sqlClient = this.client;
-		let joinsCount = Object.keys(domainObject.joins).length;
 
 		async.eachLimit(Object.entries(ids), 5, ([schema, ids], callback) => {
 			let tasks = [];
@@ -450,29 +449,7 @@ module.exports = class Dol {
 					client: sqlClient
 				});
 
-				sqlClient.query(query, [queryIds], (err, results, fields) => {
-					if (err) return done(err);
-
-					this.mapResults(results, fields, row => {
-						let domainId = row[domainObject.domainIdColumn];
-						if (domainObject.transform) {
-							row = domainObject.transform(row);
-						}
-						delete row._domain_id;
-
-						if (!domainId) {
-							logger.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
-						} else if (!domains[domainId]) {
-							logger.error('ID: "' + domainObject.domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
-						} else {
-							//We need to keep the domain relationships in tact
-							domains[domainId] = Object.assign(domains[domainId], row);
-						}
-					});
-					done();
-				}, {
-					inRowMode: true
-				});
+				this.buildDomainQuery(domainObject, domains, query, [queryIds], done);
 			});
 
 			Object.keys(domainObject.joins).forEach(name => {
@@ -489,75 +466,11 @@ module.exports = class Dol {
 					client: sqlClient
 				});
 				tasks.push(done => {
-					sqlClient.query(query, [queryIds], (err, results, fields) => {
-						if (err) {
-							return done(err);
-						} else if (!results.length) {
-							return done();
-						}
-
-						this.mapResults(results, fields, row => {
-							let domainId = row[t.domainIdColumn];
-							delete row._domain_id;
-
-							if (t.transform) {
-								row = t.transform(row);
-							}
-
-							domains[domainId][name].push(row);
-						});
-						done();
-					}, {
-						inRowMode: true
-					});
+					this.buildJoinQuery(t, name, domains, query, [queryIds], done);
 				});
 			});
-			let limit = 5;
-			async.parallelLimit(tasks, limit, (err) => {
-				if (err) {
-					callback(err);
-				} else {
-					ids.forEach(id => {
-						// if the id is an object, it's a composite key
-						if (typeof id === 'object') {
-							// change the id to be a string with keys separated by a dash
-							id = Object.values(id).join('-');
-						}
 
-						// skip the domain if there is no data with it
-						let keyCount = Object.keys(domains[id]).length;
-						if (keyCount === 0) {
-							logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
-							return;
-						} else if (keyCount <= joinsCount) {
-							let valid = Object.keys(domainObject.joins).some(k => {
-								return Object.keys(domains[id][k] || []).length > 0;
-							});
-							if (!valid) {
-								logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
-								return;
-							}
-						}
-						// let eids = {}; // TODO: get event info
-						// let eid = getEid(id, domains[id], eids);
-						let event = {
-							event: opts.queue,
-							id: opts.id,
-							payload: domains[id],
-							schema: schema,
-							domain_id: id
-						};
-
-						// remove the schema if it's a dummy we added in translate ids
-						if (event.schema === '__database__') {
-							delete event.schema;
-						}
-
-						push(event);
-					});
-					callback();
-				}
-			});
+			this.processTasks(ids, domains, tasks, domainObject, schema, opts, push, callback);
 		}, (err) => {
 			callback(err);
 		});
@@ -600,6 +513,127 @@ module.exports = class Dol {
 				}
 			});
 			each(row);
+		});
+	}
+
+	processDomainQuery(domainObject, domains, done, err, results, fields) {
+		if (err) return done(err);
+
+		this.mapResults(results, fields, row => {
+			let domainId = row[domainObject.domainIdColumn];
+			if (domainObject.transform) {
+				row = domainObject.transform(row);
+			}
+			delete row._domain_id;
+
+			if (!domainId) {
+				logger.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
+			} else if (!domains[domainId]) {
+				logger.error('ID: "' + domainObject.domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+			} else {
+				//We need to keep the domain relationships in tact
+				domains[domainId] = Object.assign(domains[domainId], row);
+			}
+		});
+		done();
+	}
+
+	buildDomainQuery(domainObject, domains, query, queryIds, done) {
+		this.client.query(query, queryIds, (err, results, fields) => {
+			this.processDomainQuery(domainObject, domains, done, err, results, fields);
+		}, {
+			inRowMode: true
+		});
+	}
+
+	processJoinQuery(joinObject, name, domains, done, err, results, fields) {
+		if (err) {
+			return done(err);
+		} else if (!results.length) {
+			return done();
+		}
+
+		this.mapResults(results, fields, row => {
+			let domainId = row[joinObject.domainIdColumn];
+			delete row._domain_id;
+
+			if (joinObject.transform) {
+				row = joinObject.transform(row);
+			}
+
+			domains[domainId][name].push(row);
+		});
+		done();
+	}
+
+	buildJoinQuery(joinObject, name, domains, query, queryIds, done) {
+		this.client.query(query, queryIds, (err, results, fields) => {
+			this.processJoinQuery(joinObject, name, domains, done, err, results, fields);
+		}, {
+			inRowMode: true
+		});
+	}
+
+	/**
+	 * Process the tasks
+	 * @param ids
+	 * @param domains Array
+	 * @param tasks
+	 * @param domainObject
+	 * @param schema
+	 * @param opts
+	 * @param push
+	 * @param callback
+	 */
+	processTasks(ids, domains, tasks, domainObject, schema, opts, push, callback) {
+		let limit = 5;
+		let joinsCount = Object.keys(domainObject.joins).length;
+
+		async.parallelLimit(tasks, limit, (err) => {
+			if (err) {
+				callback(err);
+			} else {
+				ids.forEach(id => {
+					// if the id is an object, it's a composite key
+					if (typeof id === 'object') {
+						// change the id to be a string with keys separated by a dash
+						id = Object.values(id).join('-');
+					}
+
+					// skip the domain if there is no data with it
+					let keyCount = Object.keys(domains[id]).length;
+					if (keyCount === 0) {
+						logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+						return;
+					} else if (keyCount <= joinsCount) {
+						let valid = Object.keys(domainObject.joins).some(k => {
+							return Object.keys(domains[id][k] || []).length > 0;
+						});
+						if (!valid) {
+							logger.log('[INFO] Skipping domain id due to empty object. #: ' + id);
+							return;
+						}
+					}
+					// let eids = {}; // TODO: get event info
+					// let eid = getEid(id, domains[id], eids);
+					let event = {
+						event: opts.queue,
+						id: opts.id,
+						payload: domains[id],
+						schema: schema,
+						domain_id: id
+					};
+
+					// remove the schema if it's a dummy we added in translate ids
+					if (event.schema === '__database__') {
+						delete event.schema;
+					}
+
+					push(event);
+				});
+
+				callback();
+			}
 		});
 	}
 
