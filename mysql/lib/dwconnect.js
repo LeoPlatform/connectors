@@ -399,6 +399,8 @@ module.exports = function(config, columnConfig) {
 
 			let tasks = [];
 
+			const linkAuditdate = client.escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, '').replace(/[A-Z]/, ' '));
+
 			// Only run analyze on the table if this is the first load
 			if (tableStatus === "First Load") {
 				tasks.push(done => client.query(`analyze table ${qualifiedTable}`, done));
@@ -435,7 +437,7 @@ module.exports = function(config, columnConfig) {
 					// join ${columnConfig.stageSchema}.?? t on ${nk.map(id => `dm.${client.escapeId(id)} = t.${client.escapeId(id)}`).join(' and ')}
 					client.query(`Update ${qualifiedTable} t
                         ${joinTables.join("\n")}
-                        SET ${sets.join(', ')}
+                        SET ${sets.join(', ')}, t.${columnConfig._auditdate} = ${linkAuditdate}
                         where t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
 				} else {
