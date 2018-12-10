@@ -419,6 +419,8 @@ module.exports = function(config, columnConfig) {
 			let tasks = [];
 			let sets = [];
 
+			const linkAuditdate = client.escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, "Z"));
+
 			// Only run analyze on the table if this is the first load
 			if (tableStatus === "First Load") {
 				tasks.push(done => client.query(`analyze ${table}`, done));
@@ -453,7 +455,7 @@ module.exports = function(config, columnConfig) {
 
 				if (sets.length) {
 					client.query(`Update ${table} dm
-                        SET  ${sets.join(', ')}
+                        SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
                         FROM ${table} t
                         ${joinTables.join("\n")}
                         where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
