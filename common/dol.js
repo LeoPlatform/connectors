@@ -516,20 +516,18 @@ module.exports = class Dol {
 		});
 	}
 
-	processDomainQuery(domainObject, domains, done, err, results, fields) {
+	processDomainQuery({ transform = a => a, domainIdColumn }, domains, done, err, results, fields) {
 		if (err) return done(err);
 
 		this.mapResults(results, fields, row => {
-			let domainId = row[domainObject.domainIdColumn];
-			if (domainObject.transform) {
-				row = domainObject.transform(row);
-			}
+			let domainId = Array.isArray(domainIdColumn)? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
+			row = transform(row);
 			delete row._domain_id;
 
 			if (!domainId) {
-				logger.error('ID: "' + domainObject.domainIdColumn + '" not found in object:');
+				logger.error('ID: "' + domainIdColumn + '" not found in object:');
 			} else if (!domains[domainId]) {
-				logger.error('ID: "' + domainObject.domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
+				logger.error('ID: "' + domainIdColumn + '" with a value of: "' + domainId + '" does not match any ID in the domain object. This could be caused by using a WHERE clause on an ID that differs from the SELECT ID');
 			} else {
 				//We need to keep the domain relationships in tact
 				domains[domainId] = Object.assign(domains[domainId], row);
@@ -546,7 +544,7 @@ module.exports = class Dol {
 		});
 	}
 
-	processJoinQuery(joinObject, name, domains, done, err, results, fields) {
+	processJoinQuery({ transform = a => a, domainIdColumn }, name, domains, done, err, results, fields) {
 		if (err) {
 			return done(err);
 		} else if (!results.length) {
@@ -554,13 +552,9 @@ module.exports = class Dol {
 		}
 
 		this.mapResults(results, fields, row => {
-			let domainId = row[joinObject.domainIdColumn];
+			let domainId = Array.isArray(domainIdColumn)? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
 			delete row._domain_id;
-
-			if (joinObject.transform) {
-				row = joinObject.transform(row);
-			}
-
+			row = transform(row);
 			domains[domainId][name].push(row);
 		});
 		done();
