@@ -283,90 +283,67 @@ module.exports = function (c) {
 		},
 		nibble: function (table, id, start, min, max, limit, reverse, callback) {
 			let sql;
-			let params;
+			let params = [];
 
+			// handle composite keys
 			if (Array.isArray(id)) {
-
 				let selectPieces = [];
-				let params = [];
-				let order = [];
+				let orderByParams = [];
 
 				for (let key of id) {
 					selectPieces.push('??');
 					params.push(key);
+					// collect params for order by. Will be pushed on later.
+					orderByParams.push(key);
 				}
 
-				let select = selectPieces.join(", '-',");
-
-				// push the table on after the fields
+				// push the table on right after the fields
 				params.push(table);
 
 				let next = '';
 				let where = [];
 				let pushParams = [];
+				let orderDirection = 'ASC';
+				let nextDirection = '>=';
+				let values = min;
 
-				// build the where clause and order by
+				// set direction and which array of data we're working from based on which direction we chose
 				if (reverse) {
-					for (let key in min) {
-						where.push((next ? next + ' AND ' : '') + '?? <= ?');
-
-						// Exact same below
-						params.push(key);
-						params.push(max[key]);
-
-						if (next) {
-							// push the params prepared by the previous loop
-							params.push(...pushParams);
-						}
-
-						// prepare a string and params for the next time around
-						pushParams.push(key);
-						pushParams.push(max[key]);
-						next += (next ? ' AND ' : '') + '?? = ?';
-						// end exact same
-					}
-
-					order = selectPieces.join(' DESC,') + ' DESC';
-				} else {
-					for (let key in min) {
-						where.push((next ? next + ' AND ' : '') + '?? >= ?');
-
-						// exact same as above
-						params.push(key);
-						params.push(max[key]);
-
-						if (next) {
-							// push the params prepared by the previous loop
-							params.push(...pushParams);
-						}
-
-						// prepare a string and params for the next time around
-						pushParams.push(key);
-						pushParams.push(max[key]);
-						next += (next ? ' AND ' : '') + '?? = ?';
-						// end exact same
-					}
-
-					order = selectPieces.join(' ASC,') + ' ASC';
+					orderDirection = 'DESC';
+					nextDirection = '<=';
+					values = max;
 				}
 
-				// push on additional parameters for the order by
-				for (let key of id) {
+				// build the where clause
+				for (let key in values) {
+					where.push((next ? next + ' AND ' : '') + `?? ${nextDirection} ?`);
+
 					params.push(key);
-				}
+					params.push(values[key]);
 
+					if (next) {
+						// push the params prepared by the previous loop
+						params.push(...pushParams);
+					}
+
+					// prepare a string and params for iteration of this loop
+					pushParams.push(key);
+					pushParams.push(values[key]);
+					next += (next ? ' AND ' : '') + '?? = ?';
+				}
 				where = `(${where.join(') OR (')})`;
 
-				sql = `SELECT CONCAT(${select}) AS id
+				// build the order
+				let order = selectPieces.join(` ${orderDirection},`) + ` ${orderDirection}`;
+
+				// push on additional parameters for the order by
+				params.push(...orderByParams);
+
+				sql = `SELECT ${selectPieces.join(', ')}
 					FROM ??
 					WHERE ${where}
-					ORDER BY ${order}`;
-
-				client.query(sql, params, (err, result) => {
-					console.log(err, result);
-					process.exit();
-				});
-
+					ORDER BY ${order}
+					LIMIT ${limit - 1},2`;
 			} else {
 				if (reverse) {
 					sql = `select ?? as id from ??
@@ -381,23 +358,72 @@ module.exports = function (c) {
 							LIMIT ${limit - 1},2`;
 					params = [id, table, id, start, id, max, id];
 				}
-				client.query(sql, params, callback);
 			}
+
+			client.query(sql, params, callback);
 		},
+		// id [ 'people_id', 'vehicle_id' ]
+		// nibble {
+		// 	start: { people_id: '247887', vehicle_id: '15' },
+		// 	end: TextRow { people_id: 165690, vehicle_id: 10 },
+		// 	limit: 5000,
+		// 	next: TextRow { people_id: 165678, vehicle_id: 6 },
+		// 	max: { people_id: '247887', vehicle_id: '15' },
+		// 	min: { people_id: '1', vehicle_id: '1' },
+		// 	total: 15000,
+		// 	progress: 0,
+		// 	reverse: true,
+		// 	complete: false
+		// }
 		getIds: function (table, id, start, end, reverse, callback) {
 			let sql;
-			if (reverse) {
-				sql = `select ?? as id from ??  
+			let params = [];
+
+			if (Array.isArray(id)) {
+				let direction = (reverse) ? 'DESC' : 'ASC';
+				let startDirection = (reverse) ? '<=' : '>=';
+				let endDirection = (reverse) ? '>=' : '<=';
+				let select = [];
+				let where = [];
+				let whereParams = [];
+				let order = [];
+
+				for (let key of id) {
+					select.push('??');
+					params.push(key);
+
+					where.push(`(?? ${startDirection} ? AND ?? ${endDirection} ?)`);
+					whereParams.push(key);
+					whereParams.push(start[key]);
+					whereParams.push(key);
+					whereParams.push(end[key]);
+
+					order.push(`${key} ${direction}`);
+				}
+
+				params.push(table);
+				params.push(...whereParams);
+
+				sql = `SELECT ${select.join(',')}
+					FROM ??
+					WHERE ${where.join(' AND ')}
+					ORDER BY ${order.join(',')}`;
+			} else {
+				if (reverse) {
+					sql = `select ?? as id from ??  
                             where ?? <= ? and ?? >= ?
                             ORDER BY ?? desc
                         `;
-			} else {
-				sql = `select ?? as id from ??  
+				} else {
+					sql = `select ?? as id from ??  
                             where ?? >= ? and ?? <= ?
                             ORDER BY ?? asc
                         `;
+				}
+				params = [id, table, id, start, id, end, id];
 			}
-			client.query(sql, [id, table, id, start, id, end, id], callback);
+
+			client.query(sql, params, callback);
 		},
 		escapeId,
 		escape: function (value) {

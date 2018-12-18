@@ -1,7 +1,7 @@
 let ls = require("leo-sdk/lib/streams.js");
 const async = require('async');
 
-module.exports = function(client, table, id, opts) {
+module.exports = function (client, table, id, opts) {
 	opts = Object.assign({
 		time: 1,
 		limit: 20000,
@@ -12,12 +12,14 @@ module.exports = function(client, table, id, opts) {
 
 	var nibble = {};
 	var logTimeout = null;
+
 	//@todo: Update all this to use the log-update node module
 	function clearLog() {
 		process.stdout.write("\r\x1b[K");
 		if (logTimeout) clearInterval(logTimeout);
 	}
-	var log = function() {
+
+	var log = function () {
 		clearLog();
 		var percent = (nibble.progress / nibble.total) * 100;
 		var fixed = percent.toFixed(2);
@@ -35,6 +37,7 @@ module.exports = function(client, table, id, opts) {
 			process.stdout.write("\r\x1b[K");
 			process.stdout.write(((new Date() - time) / 1000).toFixed(1) + "s : " + message);
 		}
+
 		writeMessage();
 		logTimeout = setInterval(writeMessage, 200);
 	}
@@ -48,7 +51,7 @@ module.exports = function(client, table, id, opts) {
 		objectMode: true,
 		highWaterMark: 2
 	});
-	let getRange = function(callback) {
+	let getRange = function (callback) {
 		client.range(table, id, null, (err, result) => {
 			if (err) return callback(err);
 			//Now let's nibble our way through it.
@@ -69,7 +72,7 @@ module.exports = function(client, table, id, opts) {
 	};
 
 	if (opts.resume) {
-		getRange = function(callback) {
+		getRange = function (callback) {
 			callback(null, opts.resume);
 		};
 	}
@@ -82,26 +85,37 @@ module.exports = function(client, table, id, opts) {
 			pass.emit("ranged", Object.assign({}, nibble));
 		});
 		let keepRunning = true;
-		pass.stop = function() {
+		pass.stop = function () {
 			keepRunning = false;
 		};
 		log(`Starting.  Total: ${nibble.total}`);
-		//var hadRecentErrors = 0;
 		async.doWhilst(done => {
 				client.nibble(table, id, nibble.start, nibble.min, nibble.max, nibble.limit, opts.reverse, (err, result) => {
 					if (err) {
 						return done(err);
 					}
+
 					if (!result[0]) {
 						nibble.end = opts.reverse ? nibble.min : nibble.max;
 						nibble.next = null;
 					} else if (!result[1]) {
-						nibble.end = result[0].id;
-						nibble.next = null;
+						if (Array.isArray(id)) {
+							nibble.end = result[0];
+							nibble.next = null;
+						} else {
+							nibble.end = result[0].id;
+							nibble.next = null;
+						}
 					} else {
-						nibble.end = result[0].id;
-						nibble.next = result[1].id;
+						if (Array.isArray(id)) {
+							nibble.end = result[0];
+							nibble.next = result[1];
+						} else {
+							nibble.end = result[0].id;
+							nibble.next = result[1].id;
+						}
 					}
+
 					client.getIds(table, id, nibble.start, nibble.end, opts.reverse, (err, result) => {
 						if (err) {
 							return done(err);
@@ -119,7 +133,7 @@ module.exports = function(client, table, id, opts) {
 								done();
 							}
 						} else {
-							let ids = result.map(r => r.id);
+							let ids = (Array.isArray(id)) ? result : result.map(r => r.id);
 							if (!pass.write({
 									payload: {
 										[table]: ids
