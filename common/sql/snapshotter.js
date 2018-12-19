@@ -235,7 +235,27 @@ module.exports = class Snapshotter {
 					records += c.snapshot.records;
 				});
 				this.log(`Processed  ${records}  ${this.params.nibble.progress}/${this.params.nibble.total}. Remaining ${this.params.nibble.total - this.params.nibble.progress}`);
+
+				let complete = false;
 				if (this.params.nibble.end == this.params.nibble.start) {
+					complete = true;
+				} else if (typeof this.params.nibble.end === 'object') {
+					let end = this.params.nibble.end;
+					let start = this.params.nibble.start;
+
+					// compare each element of the object
+					for (let key in end) {
+						if (end[key] == start[key]) {
+							complete = true;
+						} else {
+							// if we hit false at any point, break so we don't keep checking
+							complete = false;
+							break;
+						}
+					}
+				}
+
+				if (complete) {
 					this.params.nibble.complete = true;
 					this.saveProgress(this.params.nibble);
 
