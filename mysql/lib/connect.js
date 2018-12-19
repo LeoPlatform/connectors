@@ -300,38 +300,22 @@ module.exports = function (c) {
 				// push the table on right after the fields
 				params.push(table);
 
-				let next = '';
 				let where = [];
-				let pushParams = [];
-				let orderDirection = 'ASC';
-				let nextDirection = '>=';
-				let values = min;
-
-				// set direction and which array of data we're working from based on which direction we chose
-				if (reverse) {
-					orderDirection = 'DESC';
-					nextDirection = '<=';
-					values = max;
-				}
+				let orderDirection = (reverse) ? 'DESC' : 'ASC';
+				let startDirection = (reverse) ? '<=' : '>=';
+				let endDirection = (reverse) ? '>=' : '<=';
+				let values = (reverse) ? min : max;
 
 				// build the where clause
 				for (let key in values) {
-					where.push((next ? next + ' AND ' : '') + `?? ${nextDirection} ?`);
+					where.push(`(?? ${startDirection} ? AND ?? ${endDirection} ?)`);
 
 					params.push(key);
+					params.push(start[key]);
+					params.push(key);
 					params.push(values[key]);
-
-					if (next) {
-						// push the params prepared by the previous loop
-						params.push(...pushParams);
-					}
-
-					// prepare a string and params for iteration of this loop
-					pushParams.push(key);
-					pushParams.push(values[key]);
-					next += (next ? ' AND ' : '') + '?? = ?';
 				}
-				where = `(${where.join(') OR (')})`;
+				where = where.join(' AND ');
 
 				// build the order
 				let order = selectPieces.join(` ${orderDirection},`) + ` ${orderDirection}`;
