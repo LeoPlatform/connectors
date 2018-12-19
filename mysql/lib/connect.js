@@ -346,19 +346,6 @@ module.exports = function (c) {
 
 			client.query(sql, params, callback);
 		},
-		// id [ 'people_id', 'vehicle_id' ]
-		// nibble {
-		// 	start: { people_id: '247887', vehicle_id: '15' },
-		// 	end: TextRow { people_id: 165690, vehicle_id: 10 },
-		// 	limit: 5000,
-		// 	next: TextRow { people_id: 165678, vehicle_id: 6 },
-		// 	max: { people_id: '247887', vehicle_id: '15' },
-		// 	min: { people_id: '1', vehicle_id: '1' },
-		// 	total: 15000,
-		// 	progress: 0,
-		// 	reverse: true,
-		// 	complete: false
-		// }
 		getIds: function (table, id, start, end, reverse, callback) {
 			let sql;
 			let params = [];
@@ -396,13 +383,11 @@ module.exports = function (c) {
 				if (reverse) {
 					sql = `select ?? as id from ??  
                             where ?? <= ? and ?? >= ?
-                            ORDER BY ?? desc
-                        `;
+                            ORDER BY ?? desc`;
 				} else {
 					sql = `select ?? as id from ??  
                             where ?? >= ? and ?? <= ?
-                            ORDER BY ?? asc
-                        `;
+                            ORDER BY ?? asc`;
 				}
 				params = [id, table, id, start, id, end, id];
 			}
