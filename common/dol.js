@@ -5,16 +5,6 @@ const ls = leo.streams;
 const async = require("async");
 const logger = require('leo-logger');
 
-function respectDomainIdOrder(domainIdColumn, id) {
-	if (typeof id === 'object') {
-		return domainIdColumn.reduce((treatedId, curId) => {
-			treatedId[curId] = id[curId];
-			return treatedId;
-		}, {});
-	}
-	return id;
-}
-
 module.exports = class Dol {
 	constructor(client) {
 		this.client = client;
@@ -209,7 +199,7 @@ module.exports = class Dol {
 
 					ids = Array.from(new Set(ids)); // Dedup the ids
 					for (let i = 0; i < ids.length; i++) {
-						const respectfulId = respectDomainIdOrder(domainIdColumn, ids[i]);
+						const respectfulId = this.respectDomainIdOrder(domainIdColumn, ids[i]);
 						if (count) push(last);
 						last = {
 							s: schema,
@@ -655,4 +645,13 @@ module.exports = class Dol {
 		}
 	}
 
+	respectDomainIdOrder(domainIdColumn, id) {
+		if (typeof id === 'object') {
+			return domainIdColumn.reduce((treatedId, curId) => {
+				treatedId[curId] = id[curId];
+				return treatedId;
+			}, {});
+		}
+		return id;
+	}
 };
