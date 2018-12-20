@@ -4,6 +4,10 @@ const logger = require('leo-logger');
 const parent = require('leo-connector-common/dol');
 const sqlstring = require('sqlstring');
 
+/**
+ * Override these methods for subtle changes for postgres.
+ * @type {module.Dol}
+ */
 module.exports = class Dol extends parent {
 	constructor(client) {
 		super(client);
@@ -30,4 +34,47 @@ module.exports = class Dol extends parent {
 			inRowMode: true
 		});
 	}
-}
+
+	handleTranslateObject(translation) {
+		// this expects that we have a translation.translation, which is a function
+		let queryFn = this.queryToFunction(translation.translation, ['data']);
+		return function (data, done) {
+			let query = queryFn.call(this, data);
+			let ids = data.ids;
+
+			// sort the ids
+			if (translation.keys) {
+				ids = data.ids.map(ids => {
+					let returnObj = [];
+
+					translation.keys.forEach(key => {
+						returnObj.push(ids[key]);
+					});
+
+					return returnObj;
+				});
+			}
+
+			query = sqlstring.format(query, [ids]);
+			this.client.query(query, (err, rows) => {
+				done(err, rows);
+			}, {
+				inRowMode: false
+			});
+		};
+	}
+
+	handleTranslateString(translation) {
+		let queryFn = this.queryToFunction(translation, ["data"]);
+		return function (data, done) {
+			let query = queryFn.call(this, data);
+
+			query = sqlstring.format(query, [data.ids]);
+			this.client.query(query, (err, rows) => {
+				done(err, rows && rows.map(r => r[0]));
+			}, {
+				inRowMode: true
+			});
+		};
+	}
+};

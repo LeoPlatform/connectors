@@ -10,11 +10,7 @@ module.exports = class Dol {
 		this.client = client;
 	}
 
-	translateIds(translations, domainIdColumn, opts) {
-		if (typeof domainIdColumn === 'object' && !Array.isArray(domainIdColumn) && !opts) {
-			opts = Object.assign({}, domainIdColumn);
-			domainIdColumn = undefined;
-		}
+	translateIds(translations, opts) {
 		opts = Object.assign({
 			count: 1000,
 			time: {
@@ -22,7 +18,7 @@ module.exports = class Dol {
 			}
 		}, opts);
 		return ls.pipeline(
-			this.translateIdsStartStream(translations, domainIdColumn),
+			this.translateIdsStartStream(translations),
 
 			ls.batch({
 				count: opts.count,
@@ -137,7 +133,7 @@ module.exports = class Dol {
 		return this;
 	}
 
-	hasMany (name, query, domainIdColumn = "_domain_id", transform) {
+	hasMany(name, query, domainIdColumn = "_domain_id", transform) {
 		if (typeof query === "object") {
 			this.joins[name] = query;
 			return;
@@ -165,7 +161,7 @@ module.exports = class Dol {
 	 * other databases: payload.table.ids - converted to payload.update.__database__.table.ids
 	 * @param idTranslation
 	 */
-	translateIdsStartStream(idTranslation, domainIdColumn) {
+	translateIdsStartStream(idTranslation) {
 
 		return ls.through((obj, done, push) => {
 			if (!obj.payload.update) {
@@ -199,12 +195,11 @@ module.exports = class Dol {
 
 					ids = Array.from(new Set(ids)); // Dedup the ids
 					for (let i = 0; i < ids.length; i++) {
-						const respectfulId = domainIdColumn ? this.respectDomainIdOrder(domainIdColumn, ids[i]) : ids[i];
 						if (count) push(last);
 						last = {
 							s: schema,
 							t,
-							id: respectfulId,
+							id: ids[i],
 							correlation_id: {
 								source: obj.event,
 								partial: obj.eid,
@@ -235,26 +230,39 @@ module.exports = class Dol {
 		});
 	}
 
+	/**
+	 * Translate id's
+	 * Examples:
+	 * var translateIds = {
+	 * 	just_id: true, // boolean. Just uses a single primary key.
+	 * 	people: ['pk1', 'pk2', etc…], // array of keys
+	 * 	vehicles: { // object
+	 * 		keys: ['pk1', 'pk2', etc…], // array of keys
+	 * 		translation: c => { // can be a string or a function. So next 2 examples below for each type.
+	 * 			// do translate stuffs
+	 * 		}
+	 * 	},
+	 * 	regular_translation: c => { // function
+	 * 		// do translation stuffs
+	 * 	},
+	 * 	string_translation: `SELECT * FROM (VALUES(?)) WHERE… etc…` // string
+	 * };
+	 * @param idTranslation
+	 */
 	translateIdsLookupStream(idTranslation) {
 		let handlers = {};
 		Object.keys(idTranslation).map(v => {
 			let translation = idTranslation[v];
 			if (translation === true) {
-				handlers[v] = (data, done) => {
-					done(null, data.ids);
-				};
+				handlers[v] = this.handleTranslateBoolean();
 			} else if (typeof translation === "string" || (typeof translation === "function" && translation.length <= 1)) {
-				let queryFn = this.queryToFunction(translation, ["data"]);
-				handlers[v] = function (data, done) {
-					let query = queryFn.call(this, data);
-					this.client.query(query, [data.ids], (err, rows) => {
-						done(err, rows && rows.map(r => r[0]));
-					}, {
-						inRowMode: true
-					});
-				};
+				handlers[v] = this.handleTranslateString(translation);
 			} else if (typeof translation === "function") {
-				handlers[v] = translation;
+				handlers[v] = this.handleTranslateFunction(translation);
+			} else if (Array.isArray(translation)) {
+				handlers[v] = this.handleTranslateArray(translation);
+			} else if (typeof translation === 'object') {
+				handlers[v] = this.handleTranslateObject(translation);
 			}
 		});
 
@@ -521,11 +529,11 @@ module.exports = class Dol {
 		});
 	}
 
-	processDomainQuery({ transform = a => a, domainIdColumn }, domains, done, err, results, fields) {
+	processDomainQuery({transform = a => a, domainIdColumn}, domains, done, err, results, fields) {
 		if (err) return done(err);
 
 		this.mapResults(results, fields, row => {
-			let domainId = Array.isArray(domainIdColumn)? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
+			let domainId = Array.isArray(domainIdColumn) ? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
 			row = transform(row);
 			delete row._domain_id;
 
@@ -549,7 +557,7 @@ module.exports = class Dol {
 		});
 	}
 
-	processJoinQuery({ transform = a => a, domainIdColumn }, name, domains, done, err, results, fields) {
+	processJoinQuery({transform = a => a, domainIdColumn}, name, domains, done, err, results, fields) {
 		if (err) {
 			return done(err);
 		} else if (!results.length) {
@@ -557,7 +565,7 @@ module.exports = class Dol {
 		}
 
 		this.mapResults(results, fields, row => {
-			let domainId = Array.isArray(domainIdColumn)? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
+			let domainId = Array.isArray(domainIdColumn) ? domainIdColumn.map(i => row[i]).join('-') : row[domainIdColumn];
 			delete row._domain_id;
 			row = transform(row);
 			domains[domainId][name].push(row);
@@ -645,13 +653,70 @@ module.exports = class Dol {
 		}
 	}
 
-	respectDomainIdOrder(domainIdColumn, id) {
-		if (typeof id === 'object') {
-			return domainIdColumn.reduce((treatedId, curId) => {
-				treatedId[curId] = id[curId];
-				return treatedId;
-			}, {});
-		}
-		return id;
+	handleTranslateBoolean() {
+		return (data, done) => {
+			done(null, data.ids);
+		};
+	}
+
+	handleTranslateArray(translation) {
+		// this should be an array of primary keys for ordering purposes
+		return (data, done) => {
+			let ids = data.ids.map(ids => {
+				let returnObj = {};
+
+				translation.forEach(key => {
+					returnObj[key] = ids[key];
+				});
+
+				return returnObj;
+			});
+
+			done(null, ids);
+		};
+	}
+
+	handleTranslateObject(translation) {
+		// this expects that we have a translation.translation, which is a function
+		let queryFn = this.queryToFunction(translation.translation, ['data']);
+		return function (data, done) {
+			let query = queryFn.call(this, data);
+			let ids = data.ids;
+
+			// sort the ids
+			if (translation.keys) {
+				ids = data.ids.map(ids => {
+					let returnObj = {};
+
+					translation.keys.forEach(key => {
+						returnObj[key] = ids[key];
+					});
+
+					return returnObj;
+				});
+			}
+
+			this.client.query(query, [ids], (err, rows) => {
+				done(err, rows && rows.map(r => r[0]));
+			}, {
+				inRowMode: true
+			});
+		};
+	}
+
+	handleTranslateFunction(translation) {
+		return translation;
+	}
+
+	handleTranslateString(translation) {
+		let queryFn = this.queryToFunction(translation, ["data"]);
+		return function (data, done) {
+			let query = queryFn.call(this, data);
+			this.client.query(query, [data.ids], (err, rows) => {
+				done(err, rows && rows.map(r => r[0]));
+			}, {
+				inRowMode: true
+			});
+		};
 	}
 };
