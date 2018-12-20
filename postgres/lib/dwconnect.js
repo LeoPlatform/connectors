@@ -369,20 +369,35 @@ module.exports = function (config, columnConfig) {
 			Object.keys(tableConfig[table].structure).map(column => {
 				let field = tableConfig[table].structure[column];
 				if (field.dimension && !isDate[field.dimension]) {
+					const theDimNks = tableNks[field.dimension]
+					const factTable = table
+					if (!field.on) {
+						const dimId = field.dim_column.replace(/_key$/, '_id')
+						field.on = {
+							[dimId]: dimId
+						}
+					}
 					if (!(unions[field.dimension])) {
 						unions[field.dimension] = [];
 					}
 					if (typeof tableNks[field.dimension] === 'undefined') {
 						throw new Error(`${field.dimension} not found in tableNks`);
 					}
-					let dimTableNk = tableNks[field.dimension][0];
-					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
+					const factNks = Object.keys(field.on)
+					unions[field.dimension].push(`
+						select ${factNks.map((fnk, i)=> `${factTable}.${fnk} as id${i}`).join(', ')} 
+						from ${factTable} 
+							left join ${field.dimension} 
+								on ${factNks.map((fnk, i)=> `${factTable}.${fnk} = ${field.dimension}.${field.on[fnk]}`).join(' AND ')} 
+						where ${factNks.map((fnk, i)=> `${field.dimension}.${field.on[fnk]} is null`).join(' AND ')} 
+							and ${factTable}.${columnConfig._auditdate} = ${dwClient.auditdate}
+					`);
 				}
 			});
 		});
 		let missingDimTasks = Object.keys(unions).map(table => {
 			let sk = tableSks[table];
-			let nk = tableNks[table][0];
+			let nks = tableNks[table];
 			return (callback) => {
 				let done = (err, data) => {
 					trx && trx.release();
@@ -398,7 +413,12 @@ module.exports = function (config, columnConfig) {
 						let rowId = results[0].maxid || 10000;
 						let _auditdate = dwClient.auditdate; //results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
 						let unionQuery = unions[table].join("\nUNION\n");
-						transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
+						const insertQuery = `
+							insert into ${table} (${sk}, ${nks.join(', ')}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) 
+							select row_number() over () + ${rowId}, ${nks.map((_, i)=> `sub.id${i}`).join(', ')}, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub 
+							where ${nks.map((_, i)=> `sub.id${i} is not null`).join(' OR ')} group by ${nks.map((_, i)=> `sub.id${i}`).join(', ')}` 
+						// console.log(insertQuery)
+						transaction.query(insertQuery, (err) => {
 							done(err);
 						});
 					});
