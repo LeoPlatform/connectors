@@ -199,7 +199,7 @@ module.exports = class Dol {
 
 					ids = Array.from(new Set(ids)); // Dedup the ids
 					for (let i = 0; i < ids.length; i++) {
-						const respectfulId = this.respectDomainIdOrder(domainIdColumn, ids[i]);
+						const respectfulId = domainIdColumn ? this.respectDomainIdOrder(domainIdColumn, ids[i]) : ids[i];
 						if (count) push(last);
 						last = {
 							s: schema,
