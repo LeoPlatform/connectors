@@ -5,12 +5,26 @@ const ls = leo.streams;
 const async = require("async");
 const logger = require('leo-logger');
 
+function respectDomainIdOrder(domainIdColumn, id) {
+	if (typeof id === 'object') {
+		return domainIdColumn.reduce((treatedId, curId) => {
+			treatedId[curId] = id[curId];
+			return treatedId;
+		}, {});
+	}
+	return id;
+}
+
 module.exports = class Dol {
 	constructor(client) {
 		this.client = client;
 	}
 
-	translateIds(translations, opts) {
+	translateIds(translations, domainIdColumn, opts) {
+		if (typeof domainIdColumn === 'object' && !Array.isArray(domainIdColumn) && !opts) {
+			opts = Object.assign({}, domainIdColumn);
+			domainIdColumn = undefined;
+		}
 		opts = Object.assign({
 			count: 1000,
 			time: {
@@ -18,7 +32,7 @@ module.exports = class Dol {
 			}
 		}, opts);
 		return ls.pipeline(
-			this.translateIdsStartStream(translations),
+			this.translateIdsStartStream(translations, domainIdColumn),
 
 			ls.batch({
 				count: opts.count,
@@ -161,7 +175,7 @@ module.exports = class Dol {
 	 * other databases: payload.table.ids - converted to payload.update.__database__.table.ids
 	 * @param idTranslation
 	 */
-	translateIdsStartStream(idTranslation) {
+	translateIdsStartStream(idTranslation, domainIdColumn) {
 
 		return ls.through((obj, done, push) => {
 			if (!obj.payload.update) {
@@ -193,13 +207,14 @@ module.exports = class Dol {
 						continue;
 					}
 
-					ids = Array.from(new Set(ids)); // Dedub the ids
+					ids = Array.from(new Set(ids)); // Dedup the ids
 					for (let i = 0; i < ids.length; i++) {
+						const respectfulId = respectDomainIdOrder(domainIdColumn, ids[i]);
 						if (count) push(last);
 						last = {
 							s: schema,
 							t,
-							id: ids[i],
+							id: respectfulId,
 							correlation_id: {
 								source: obj.event,
 								partial: obj.eid,
