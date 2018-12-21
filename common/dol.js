@@ -677,6 +677,8 @@ module.exports = class Dol {
 	}
 
 	handleTranslateObject(translation) {
+		let self = this;
+
 		// this expects that we have a translation.translation, which is a function
 		let queryFn = this.queryToFunction(translation.translation, ['data']);
 		return function (data, done) {
@@ -697,9 +699,9 @@ module.exports = class Dol {
 			}
 
 			this.client.query(query, [ids], (err, rows) => {
-				done(err, rows && rows.map(r => r[0]));
+				self.processResults(err, rows, done);
 			}, {
-				inRowMode: true
+				inRowMode: false
 			});
 		};
 	}
@@ -709,14 +711,23 @@ module.exports = class Dol {
 	}
 
 	handleTranslateString(translation) {
+		let self = this;
 		let queryFn = this.queryToFunction(translation, ["data"]);
 		return function (data, done) {
 			let query = queryFn.call(this, data);
 			this.client.query(query, [data.ids], (err, rows) => {
-				done(err, rows && rows.map(r => r[0]));
+				self.processResults(err, rows, done);
 			}, {
-				inRowMode: true
+				inRowMode: false
 			});
 		};
+	}
+
+	processResults(err, rows, done) {
+		if (rows && Object.keys(rows[0]).length > 1) {
+			return done(err, rows);
+		}
+
+		done(err, rows && rows.map(r => Object.values(r)[0]));
 	}
 };

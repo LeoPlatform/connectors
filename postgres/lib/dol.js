@@ -36,6 +36,7 @@ module.exports = class Dol extends parent {
 	}
 
 	handleTranslateObject(translation) {
+		let self = this;
 		// this expects that we have a translation.translation, which is a function
 		let queryFn = this.queryToFunction(translation.translation, ['data']);
 		return function (data, done) {
@@ -57,7 +58,7 @@ module.exports = class Dol extends parent {
 
 			query = sqlstring.format(query, [ids]);
 			this.client.query(query, (err, rows) => {
-				done(err, rows);
+				self.processResults(err, rows, done);
 			}, {
 				inRowMode: false
 			});
@@ -65,16 +66,18 @@ module.exports = class Dol extends parent {
 	}
 
 	handleTranslateString(translation) {
+		let self = this;
 		let queryFn = this.queryToFunction(translation, ["data"]);
 		return function (data, done) {
 			let query = queryFn.call(this, data);
 
 			query = sqlstring.format(query, [data.ids]);
 			this.client.query(query, (err, rows) => {
-				done(err, rows && rows.map(r => r[0]));
+				self.processResults(err, rows, done);
 			}, {
-				inRowMode: true
+				inRowMode: false
 			});
 		};
 	}
+
 };
