@@ -5,13 +5,26 @@ const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
 
+const getDeleteId = (field, id) => {
+	let deleteId;
+	if (typeof field == 'string') {
+		deleteId = field == "id" ? id : `_del_${id}`;
+	} else if (Array.isArray(field)) {
+		deleteId = '_del_' + field.reduce((delId, curId) => {
+			delId.push(id[curId]);
+			return delId;
+		}, []).join('_');
+	}
+	return deleteId;
+};
+
 module.exports = function(client, tableConfig, stream, callback) {
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
 	Object.keys(tableConfig).forEach(t => {
 		let config = tableConfig[t];
-		//console.log("config", t, JSON.stringify(config, null, 2));
+		// console.log("config", t, JSON.stringify(config, null, 2));
 		Object.keys(config.structure).forEach(f => {
 			let field = config.structure[f];
 			if (field == "sk" || field.sk) {
@@ -36,11 +49,12 @@ module.exports = function(client, tableConfig, stream, callback) {
 					this.push(Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
+							table: entity.table,
 							entity: entity.name,
 							command: "delete",
 							field: field,
 							data: {
-								id: field == "id" ? id : `_del_${id}`,
+								id: getDeleteId(field, id),
 								__leo_delete__: field,
 								__leo_delete_id__: id
 							}
@@ -111,7 +125,6 @@ module.exports = function(client, tableConfig, stream, callback) {
 					let tasks = [];
 					Object.keys(obj).forEach(t => {
 						let config = tableConfig[t];
-						let sk = null;
 						let nk = [];
 						let scds = {
 							0: [],
@@ -125,7 +138,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							let field = config.structure[f];
 
 							if (field == "sk" || field.sk) {
-								sk = f;
+								// Do nothing
 							} else if (field.nk) {
 								nk.push(f);
 							} else if (field.scd !== undefined) {
@@ -139,24 +152,24 @@ module.exports = function(client, tableConfig, stream, callback) {
 										source: f
 									};
 									let nks = tableNks[field.dimension];
-                                    if (field.on && typeof field.on == 'object' && !Array.isArray(field.on)) {
-                                        link.on = [];
-                                        link.source = [];
-                                        Object.entries(field.on).map(([key, val]) => {
-                                            link.on.push(val);
-                                            link.source.push(key);
-                                        })
-                                    } else if (nks && nks.length == 1) {
-                                        link.on = nks[0];
-                                    } else if (nks && nks.length > 1) {
-                                        link.on = nks;
-                                        link.source = field.on;
-                                    }
+									if (field.on && typeof field.on == 'object' && !Array.isArray(field.on)) {
+										link.on = [];
+										link.source = [];
+										Object.entries(field.on).map(([key, val]) => {
+											link.on.push(val);
+											link.source.push(key);
+										});
+									} else if (nks && nks.length == 1) {
+										link.on = nks[0];
+									} else if (nks && nks.length > 1) {
+										link.on = nks;
+										link.source = field.on;
+									}
 								}
 								links.push(Object.assign({
 									table: null,
-                                    join_id: f,
-                                    on: f,
+									join_id: f,
+									on: f,
 									destination: client.getDimensionColumn(f, field),
 									link_date: "_auditdate",
 									sk: tableSks[link.table]

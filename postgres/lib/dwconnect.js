@@ -18,7 +18,7 @@ module.exports = function (config, columnConfig) {
 			if (dimCol) {
 				return dimCol;
 			}
-			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/, '').replace(/^d_/, '')}`
+			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/, '').replace(/^d_/, '')}`;
 		},
 		useSurrogateDateKeys: true,
 		stageSchema: 'public'
@@ -369,13 +369,13 @@ module.exports = function (config, columnConfig) {
 			Object.keys(tableConfig[table].structure).map(column => {
 				let field = tableConfig[table].structure[column];
 				if (field.dimension && !isDate[field.dimension]) {
-					const theDimNks = tableNks[field.dimension]
-					const factTable = table
+					const theDimNks = tableNks[field.dimension];
+					const factTable = table;
 					if (!field.on) {
-						const dimId = field.dim_column.replace(/_key$/, '_id')
+						const dimId = field.dim_column.replace(/_key$/, '_id');
 						field.on = {
 							[dimId]: dimId
-						}
+						};
 					}
 					if (!(unions[field.dimension])) {
 						unions[field.dimension] = [];
@@ -383,7 +383,7 @@ module.exports = function (config, columnConfig) {
 					if (typeof tableNks[field.dimension] === 'undefined') {
 						throw new Error(`${field.dimension} not found in tableNks`);
 					}
-					const factNks = Object.keys(field.on)
+					const factNks = Object.keys(field.on);
 					unions[field.dimension].push(`
 						select ${factNks.map((fnk, i)=> `${factTable}.${fnk} as id${i}`).join(', ')} 
 						from ${factTable} 
@@ -416,7 +416,7 @@ module.exports = function (config, columnConfig) {
 						const insertQuery = `
 							insert into ${table} (${sk}, ${nks.join(', ')}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) 
 							select row_number() over () + ${rowId}, ${nks.map((_, i)=> `sub.id${i}`).join(', ')}, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub 
-							where ${nks.map((_, i)=> `sub.id${i} is not null`).join(' OR ')} group by ${nks.map((_, i)=> `sub.id${i}`).join(', ')}` 
+							where ${nks.map((_, i)=> `sub.id${i} is not null`).join(' OR ')} group by ${nks.map((_, i)=> `sub.id${i}`).join(', ')}`; 
 						// console.log(insertQuery)
 						transaction.query(insertQuery, (err) => {
 							done(err);
