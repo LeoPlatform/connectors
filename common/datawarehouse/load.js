@@ -5,17 +5,27 @@ const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
 
-const getDeleteId = (field, id) => {
-	let deleteId;
+const getDeleteIds = (field, id) => {
 	if (typeof field == 'string') {
-		deleteId = field == "id" ? id : `_del_${id}`;
-	} else if (Array.isArray(field)) {
-		deleteId = '_del_' + field.reduce((delId, curId) => {
-			delId.push(id[curId]);
-			return delId;
-		}, []).join('_');
+		let delIds = {};
+		delIds[field] = id;
+		if (field !== "id") {
+			delIds.id = `_del_${id}`;
+		}
+		return delIds;
+	} else if (typeof id === 'object') {
+		return id;
 	}
-	return deleteId;
+};
+
+const getDeleteField = (field, id) => {
+	if (typeof field === 'undefined') {
+		if (typeof id === 'object') {
+			return Object.keys(id);
+		}
+		return 'id';
+	}
+	return field;
 };
 
 module.exports = function(client, tableConfig, stream, callback) {
@@ -45,21 +55,21 @@ module.exports = function(client, tableConfig, stream, callback) {
 			let entities = data.entities || [];
 			ids.map(id => {
 				entities.map(entity => {
-					let field = entity.field || "id";
-					this.push(Object.assign({}, obj, {
+					let leoDelField = getDeleteField(entity.field, id);
+					const deleteEntity = Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
 							table: entity.table,
 							entity: entity.name,
 							command: "delete",
-							field: field,
-							data: {
-								id: getDeleteId(field, id),
-								__leo_delete__: field,
+							field: leoDelField,
+							data: Object.assign({
+								__leo_delete__: leoDelField,
 								__leo_delete_id__: id
-							}
+							}, getDeleteIds(entity.field, id))
 						}
-					}));
+					});
+					this.push(deleteEntity);
 				});
 			});
 			done();

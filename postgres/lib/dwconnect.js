@@ -369,7 +369,6 @@ module.exports = function (config, columnConfig) {
 			Object.keys(tableConfig[table].structure).map(column => {
 				let field = tableConfig[table].structure[column];
 				if (field.dimension && !isDate[field.dimension]) {
-					const theDimNks = tableNks[field.dimension];
 					const factTable = table;
 					if (!field.on) {
 						const dimId = field.dim_column.replace(/_key$/, '_id');
@@ -388,8 +387,8 @@ module.exports = function (config, columnConfig) {
 						select ${factNks.map((fnk, i)=> `${factTable}.${fnk} as id${i}`).join(', ')} 
 						from ${factTable} 
 							left join ${field.dimension} 
-								on ${factNks.map((fnk, i)=> `${factTable}.${fnk} = ${field.dimension}.${field.on[fnk]}`).join(' AND ')} 
-						where ${factNks.map((fnk, i)=> `${field.dimension}.${field.on[fnk]} is null`).join(' AND ')} 
+								on ${factNks.map((fnk)=> `${factTable}.${fnk} = ${field.dimension}.${field.on[fnk]}`).join(' AND ')} 
+						where ${factNks.map((fnk)=> `${field.dimension}.${field.on[fnk]} is null`).join(' AND ')} 
 							and ${factTable}.${columnConfig._auditdate} = ${dwClient.auditdate}
 					`);
 				}
