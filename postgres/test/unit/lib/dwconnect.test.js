@@ -1,5 +1,5 @@
 const proxyquire = require('proxyquire').noCallThru();
-// const { assert } = require('chai');
+const { expect } = require('chai');
 const es = require('event-stream');
 const stream = require('stream');
 const { streams: ls } = require("leo-sdk");
@@ -17,24 +17,28 @@ const escapeValueNoToLower = function(value) {
 		return value;
 	}
 };
-const mockDwconnect = () => {
+function mockDwconnect() {
 	return {
-		query: (sql, callback) => {
+		query: function(sql, callback) {
+			if (!this.queries){
+				this.queries = [];
+			} 
 			console.log('DWCLIENT QUERY sql: ', sql);
+			this.queries.push(sql.replace(/\s/g, ""));
 			callback(null, []);
 		},
-		connect: () => {
+		connect: function() {
 			return Promise.resolve(mockConnection);
 		},
-		streamToTable: (table) => {
+		streamToTable: function(table) {
 			console.log('DWCLIENT STREAM TO TABLE table: ', table);
 			return ls.devnull();
 		},
-		describeTable: (table, callback) => {
+		describeTable: function(table, callback) {
 			console.log('DWCLIENT DESCRIBE TABLE table: ', table);
 			callback(null, []);
 		},
-		getSchemaCache: () => {
+		getSchemaCache: function() {
 			console.log('DWCLIENT GET SCHEMA CACHE');
 			return {
 				['public.dim_foo']: [
@@ -44,16 +48,16 @@ const mockDwconnect = () => {
 			};
 		},
 		escapeValueNoToLower,
-		auditdate: escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, 'Z'))
+		auditdate: "'2019-01-07T23:01:32Z'"
 	};
-};
+}
 const dwconnect = proxyquire('../../../lib/dwconnect', {
 	'./connect.js': mockDwconnect
 });
 
 describe('Warehouse Connector', () => {
 	describe('Expiration', () => {
-		it("works", (done) => {
+		it("updates composite keys", (done) => {
 			const mockDataStream = new stream.Readable({objectMode: true}).wrap(es.readArray([
 				{
 					"__leo_delete__": [
@@ -86,7 +90,15 @@ describe('Warehouse Connector', () => {
 			const scds = { 0: [], 1: [], 2: [], 6: [] };
 			const dwclient = dwconnect({ host: 'fake' });
 			dwclient.importDimension(mockDataStream, table, sk, nk, scds, (err) => {
-				done(err);
+				if (err) return done(err);
+
+				expect(dwclient.queries).to.include(`
+				update public.dim_foo set _enddate = '2019-01-07T23:01:32Z'
+				where (foo_pk1, foo_pk2)
+				in (('100','200'),('101','201'))and _current = true
+				`.replace(/\s/g, ""));
+
+				done();
 			});
 		});
 	});
