@@ -27,21 +27,61 @@ module.exports = function (config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
-	function deletesSetup(qualifiedTable, schema, field, value, where = "") {
+	const toDeleteToken = (field) => {
+		if (Array.isArray(field)) {
+			return field.join('_');
+		}
+		return field;
+	};
+
+	const toEscapedId = (id) => {
+		if (typeof id === 'object') {
+			const escapedIds = Object.assign({},id);
+			Object.keys(id).forEach(k => {
+				escapedIds[k] = client.escapeValueNoToLower(id[k]);
+			});
+			return escapedIds;
+		} else {
+			return client.escapeValueNoToLower(id);
+		}
+	};
+
+	function deletesSetup(qualifiedTable, schema, field, value, whereCurrent = "") {
 		let colLookup = {};
 		schema.map(col => {
 			colLookup[col.column_name] = true;
 		});
 		let toDelete = {};
 		let toDeleteCount = 0;
-		if (where) {
-			where = `and ${where}`;
+		if (whereCurrent) {
+			whereCurrent = `and ${whereCurrent}`;
 		}
+		
+		const isDeletable = (field, id) => {
+			let deletable = (id !== undefined);
+			if (Array.isArray(field)) {
+				field.forEach(f => {
+					deletable = deletable && colLookup[f];
+				});
+			} else {
+				deletable = deletable && colLookup[field];
+			}
+			return deletable;
+		};
 
 		function tryFlushDelete(done, force = false) {
 			if (force || toDeleteCount >= 1000) {
 				let deleteTasks = Object.keys(toDelete).map(col => {
-					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value} where ${col} in (${toDelete[col].join(",")}) ${where}`, deleteDone);
+					const idsToDelete = toDelete[col];
+					let whereClause = `where ${col} in (${toDelete[col].join(",")}) ${whereCurrent}`;
+					if (typeof idsToDelete[0] === 'object') {
+						whereClause = `where (${Object.keys(idsToDelete[0]).join(', ')}) 
+						in ((${idsToDelete.map(idObj => Object.values(idObj).join(',')).join('),(')}))`;
+					}
+					return deleteDone => client.query(`
+						update ${qualifiedTable} set ${field} = ${value} 
+						${whereClause} ${whereCurrent}
+					`, deleteDone);
 				});
 				async.parallelLimit(deleteTasks, 1, (err) => {
 					if (!err) {
@@ -57,13 +97,13 @@ module.exports = function (config, columnConfig) {
 
 		return {
 			add: function (obj, done) {
-				let field = obj.__leo_delete__;
-				let id = obj.__leo_delete_id__;
-				if (id !== undefined && colLookup[field]) {
-					if (!(field in toDelete)) {
-						toDelete[field] = [];
+				let token = toDeleteToken(obj.__leo_delete__);
+				let id = toEscapedId(obj.__leo_delete_id__);
+				if (isDeletable(obj.__leo_delete__, obj.__leo_delete_id__)) {
+					if (!(token in toDelete)) {
+						toDelete[token] = [];
 					}
-					toDelete[field].push(client.escapeValueNoToLower(id));
+					toDelete[token].push(id);
 					toDeleteCount++;
 					tryFlushDelete(done);
 				} else {
@@ -98,22 +138,26 @@ module.exports = function (config, columnConfig) {
 		tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
 		tasks.push(done => {
-			ls.pipe(stream, ls.through((obj, done, push) => {
-				if (obj.__leo_delete__) {
-					if (obj.__leo_delete__ == "id") {
-						push(obj);
+			ls.pipe(
+				stream, 
+				ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ == "id") {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
 					}
-					deleteHandler.add(obj, done);
-				} else {
-					done(null, obj);
-				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
-				if (err) {
-					return done(err);
-				} else {
-					deleteHandler.flush(done);
-				}
-			});
+				}), 
+				client.streamToTable(qualifiedStagingTable), 
+				(err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
 		});
 
 		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
@@ -204,23 +248,28 @@ module.exports = function (config, columnConfig) {
 		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
 		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
 		//tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
+
 		tasks.push(done => {
-			ls.pipe(stream, ls.through((obj, done, push) => {
-				if (obj.__leo_delete__) {
-					if (obj.__leo_delete__ == "id") {
-						push(obj);
+			ls.pipe(
+				stream, 
+				ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ == "id") {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
 					}
-					deleteHandler.add(obj, done);
-				} else {
-					done(null, obj);
-				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
-				if (err) {
-					return done(err);
-				} else {
-					deleteHandler.flush(done);
-				}
-			});
+				}), 
+				client.streamToTable(qualifiedStagingTable), 
+				(err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
 		});
 
 		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
@@ -292,7 +341,7 @@ module.exports = function (config, columnConfig) {
 								if (err) {
 									return done(err);
 								}
-								rowId = results[0].maxid || 10000;
+								rowId = results[0] ? results[0].maxid || 10000 : 10000;
 								totalRecords = (rowId - 10000);
 								done();
 							});
