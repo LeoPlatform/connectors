@@ -2,8 +2,7 @@
 const crypto = require('crypto');
 const base = require("./handler.js");
 const moment = require("moment");
-require("moment-timezone");
-const logger = require("leo-sdk/lib/logger")("leo-checksum.basic");
+const logger = require("leo-logger")("leo-checksum.basic");
 const Stream = require('stream').Stream;
 
 function promisify(method, arity) {

@@ -1,3 +1,4 @@
+const leoaws = require('leo-aws');
 let leo = require("leo-sdk");
 let ls = leo.streams;
 let refUtil = require("leo-sdk/lib/reference.js");
@@ -42,7 +43,7 @@ module.exports = {
 			entity += "-";
 		}
 
-		return leo.aws.dynamodb.query({
+		return leoaws.dynamodb.query({
 			TableName: table,
 			KeyConditionExpression: `#partition = :partition and #id = :id`,
 			ExpressionAttributeNames: {
