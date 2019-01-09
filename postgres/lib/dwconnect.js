@@ -411,6 +411,7 @@ module.exports = function(config, columnConfig) {
 		client.describeTable(table, (err) => {
 			if (err) return callback(err);
 
+			let linkAuditDate = client.escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, "Z"));
 			let tasks = [];
 			let sets = [];
 
@@ -445,7 +446,7 @@ module.exports = function(config, columnConfig) {
 
 				if (sets.length) {
 					client.query(`Update ${table} dm
-                        SET  ${sets.join(', ')}
+                        SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditDate}
                         FROM ${table} t
                         ${joinTables.join("\n")}
                         where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
@@ -508,6 +509,7 @@ module.exports = function(config, columnConfig) {
 
 	client.createTable = function(table, definition, callback) {
 		let fields = [];
+		let defaults = [];
 		let dbType = config.type.toLowerCase();
 		let defQueries = definition.queries;
 		if (defQueries && !Array.isArray(defQueries)) {
@@ -520,6 +522,7 @@ module.exports = function(config, columnConfig) {
 			let field = definition.structure[f];
 			if (field == "sk") {
 				field = {
+					sk: true,
 					type: 'integer primary key'
 				};
 			} else if (typeof field == "string") {
@@ -542,20 +545,44 @@ module.exports = function(config, columnConfig) {
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(f, field)}_date`,
+						value: 1
+					});
 					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(f, field)}_time`,
+						value: 1
+					});
 				}
 			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f, field)}_date integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(f, field)}_date`,
+						value: 1
+					});
 				}
 			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_time") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(f, field)}_time integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(f, field)}_time`,
+						value: 1
+					});
 				}
 			} else if (field.dimension) {
 				fields.push(`${columnConfig.dimColumnTransform(f, field)} integer`);
+				defaults.push({
+					column: columnConfig.dimColumnTransform(f, field),
+					value: 1
+				});
 			}
 			fields.push(`"${f}" ${field.type}`);
+			defaults.push({
+				column: f,
+				value: field.sk ? 1 : (field.default ? client.escapeValueNoToLower(field.default) : 'null')
+			});
 		});
 
 		let sql = `create table ${table} (
@@ -580,6 +607,23 @@ module.exports = function(config, columnConfig) {
 				tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat(columnConfig._startdate).join(',')})`, done));
 				tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
 			}
+
+			// Add empty row to new dim
+			defaults = defaults.concat([{
+				column: columnConfig._auditdate,
+				value: "now()"
+			}, {
+				column: columnConfig._startdate,
+				value: client.escapeValueNoToLower("1900-01-01 00:00:00")
+			}, {
+				column: columnConfig._enddate,
+				value: client.escapeValueNoToLower("9999-01-01 00:00:00")
+			}, {
+				column: columnConfig._current,
+				value: true
+			}]);
+			tasks.push(done => client.query(`insert into ${table} (${defaults.map(f=>f.column).join(",\n")}) values (${defaults.map(f=>f.value || 'null').join(",")})`, done));
+
 		} else {
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._deleted} boolean`, done));
