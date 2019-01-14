@@ -93,7 +93,7 @@ describe('Warehouse Connector', () => {
 				if (err) return done(err);
 
 				expect(dwclient.queries).to.include(`
-				update public.dim_foo set _enddate = '2019-01-07T23:01:32Z'
+				update public.dim_foo set _enddate = '2019-01-07T23:01:32Z', _current = false
 				where (foo_pk1, foo_pk2)
 				in (('100','200'),('101','201'))and _current = true
 				`.replace(/\s/g, ""));

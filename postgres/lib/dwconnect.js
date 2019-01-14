@@ -79,7 +79,7 @@ module.exports = function (config, columnConfig) {
 						in ((${idsToDelete.map(idObj => Object.values(idObj).join(',')).join('),(')}))`;
 					}
 					return deleteDone => client.query(`
-						update ${qualifiedTable} set ${field} = ${value} 
+						update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._current} = false
 						${whereClause} ${whereCurrent}
 					`, deleteDone);
 				});
