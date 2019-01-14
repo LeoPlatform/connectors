@@ -3,7 +3,7 @@ const postgres = require("./connect.js");
 const async = require("async");
 const ls = require("leo-sdk").streams;
 
-module.exports = function (config, columnConfig) {
+module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
 	columnConfig = Object.assign({
@@ -116,7 +116,7 @@ module.exports = function (config, columnConfig) {
 		};
 	}
 
-	client.importFact = function (stream, table, ids, callback, tableDef = {}) {
+	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
 		const stagingTable = `staging_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
@@ -188,7 +188,7 @@ module.exports = function (config, columnConfig) {
 						connection.query(`Update ${qualifiedTable} prev
 								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
 								FROM ${qualifiedStagingTable} staging
-								where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
+								where ${ids.map(id=>`prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
 					});
 
@@ -224,7 +224,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.importDimension = function (stream, table, sk, nk, scds, callback, tableDef = {}) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTbl = `staging_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
@@ -302,29 +302,29 @@ module.exports = function (config, columnConfig) {
 					//	scdSQL.push(`1 as runSCD1`);
 					//} else 
 					if (scd1.length) {
-						scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s." + f + "::text,''))").join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d." + f + "::text,''))").join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
+						scdSQL.push(`CASE WHEN md5(${scd1.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd1.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
 					} else {
 						scdSQL.push(`0 as runSCD1`);
 					}
 					if (scd2.length) {
-						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => "md5(coalesce(s." + f + "::text,''))").join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d." + f + "::text,''))").join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
+						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd2.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
 					} else {
 						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
 					}
 					if (scd3.length) {
-						scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s." + f + "::text,''))").join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d." + f + "::text,''))").join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
+						scdSQL.push(`CASE WHEN md5(${scd3.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd3.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
 					} else {
 						scdSQL.push(`0 as runSCD3`);
 					}
 					if (scd6.length) {
-						scdSQL.push(`CASE WHEN md5(${scd6.map(f => "md5(coalesce(s." + f + "::text,''))").join(' || ')}) = md5(${scd6.map(f => "md5(coalesce(d." + f + "::text,''))").join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
+						scdSQL.push(`CASE WHEN md5(${scd6.map(f => "md5(coalesce(s."+f+"::text,''))" ).join(' || ')}) = md5(${scd6.map(f => "md5(coalesce(d."+f+"::text,''))" ).join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
 					} else {
 						scdSQL.push(`0 as runSCD6`);
 					}
 
 					//let's figure out which SCDs needs to happen
 					connection.query(`create table ${qualifiedStagingTable}_changes as 
-				select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
+				select ${nk.map(id=>`s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
 					FROM ${qualifiedStagingTable} s
 					LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
@@ -373,7 +373,7 @@ module.exports = function (config, columnConfig) {
 										set  ${columns.join(', ')}
 										FROM ${qualifiedStagingTable}_changes changes
 										JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-										where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
@@ -401,7 +401,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.insertMissingDimensions = function (usedTables, tableConfig, tableSks, tableNks, callback) {
+	client.insertMissingDimensions = function(usedTables, tableConfig, tableSks, tableNks, callback) {
 		let unions = {};
 		let isDate = {
 			d_datetime: true,
@@ -480,10 +480,9 @@ module.exports = function (config, columnConfig) {
 
 	};
 
-	client.linkDimensions = function (table, links, nk, callback, tableStatus) {
+	client.linkDimensions = function(table, links, nk, callback, tableStatus) {
 		client.describeTable(table, (err) => {
 			if (err) return callback(err);
-
 			let tasks = [];
 			let sets = [];
 
@@ -520,7 +519,7 @@ module.exports = function (config, columnConfig) {
                         SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
                         FROM ${table} t
                         ${joinTables.join("\n")}
-                        where ${nk.map(id => `dm.${id} = t.${id}`).join(' and ')}
+                        where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
                             AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
 				} else {
@@ -533,7 +532,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.changeTableStructure = function (structures, callback) {
+	client.changeTableStructure = function(structures, callback) {
 		let tasks = [];
 		let tableResults = {};
 
@@ -560,7 +559,9 @@ module.exports = function (config, columnConfig) {
 								missingFields[f] = structures[table].structure[f];
 							} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 								let missing_dim = columnConfig.dimColumnTransform(f, field);
-								missingFields[missing_dim] = {type: 'integer'};
+								missingFields[missing_dim] = {
+									type: 'integer'
+								};
 							}
 						});
 						if (Object.keys(missingFields).length) {
@@ -582,8 +583,9 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.createTable = function (table, definition, callback) {
+	client.createTable = function(table, definition, callback) {
 		let fields = [];
+		let defaults = [];
 		let dbType = (config.type || "").toLowerCase();
 		let defQueries = definition.queries;
 		if (defQueries && !Array.isArray(defQueries)) {
@@ -596,6 +598,7 @@ module.exports = function (config, columnConfig) {
 			let field = definition.structure[key];
 			if (field == "sk") {
 				field = {
+					sk: true,
 					type: 'integer primary key'
 				};
 			} else if (typeof field == "string") {
@@ -618,20 +621,44 @@ module.exports = function (config, columnConfig) {
 			if (field.dimension == "d_datetime" || field.dimension == "datetime" || field.dimension == "dim_datetime") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(key, field)}_date`,
+						value: 1
+					});
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(key, field)}_time`,
+						value: 1
+					});
 				}
 			} else if (field.dimension == "d_date" || field.dimension == "date" || field.dimension == "dim_date") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(key, field)}_date`,
+						value: 1
+					});
 				}
 			} else if (field.dimension == "d_time" || field.dimension == "time" || field.dimension == "dim_time") {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
+					defaults.push({
+						column: `${columnConfig.dimColumnTransform(key, field)}_time`,
+						value: 1
+					});
 				}
 			} else if (field.dimension) {
 				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				defaults.push({
+					column: columnConfig.dimColumnTransform(key, field),
+					value: 1
+				});
 			}
 			fields.push(`"${key}" ${field.type}`);
+			defaults.push({
+				column: key,
+				value: field.sk ? 1 : (field.default ? client.escapeValueNoToLower(field.default) : 'null')
+			});
 		});
 
 		let sql = `create table ${table} (
@@ -656,6 +683,23 @@ module.exports = function (config, columnConfig) {
 				tasks.push(done => client.query(`create index ${table}_bk2 on ${table} using btree(${ids.concat(columnConfig._startdate).join(',')})`, done));
 				tasks.push(done => client.query(`create index ${table}${columnConfig._auditdate} on ${table} using btree(${columnConfig._auditdate})`, done));
 			}
+
+			// Add empty row to new dim
+			defaults = defaults.concat([{
+				column: columnConfig._auditdate,
+				value: "now()"
+			}, {
+				column: columnConfig._startdate,
+				value: client.escapeValueNoToLower("1900-01-01 00:00:00")
+			}, {
+				column: columnConfig._enddate,
+				value: client.escapeValueNoToLower("9999-01-01 00:00:00")
+			}, {
+				column: columnConfig._current,
+				value: true
+			}]);
+			tasks.push(done => client.query(`insert into ${table} (${defaults.map(f=>f.column).join(",\n")}) values (${defaults.map(f=>f.value || 'null').join(",")})`, done));
+
 		} else {
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._auditdate} timestamp`, done));
 			tasks.push(done => client.query(`alter table ${table} add column ${columnConfig._deleted} boolean`, done));
@@ -671,7 +715,7 @@ module.exports = function (config, columnConfig) {
 		});
 		async.series(tasks, callback);
 	};
-	client.updateTable = function (table, definition, callback) {
+	client.updateTable = function(table, definition, callback) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
@@ -724,12 +768,12 @@ module.exports = function (config, columnConfig) {
 		queries.map(q => {
 			sqls.push(q);
 		});
-		async.eachSeries(sqls, function (sql, done) {
+		async.eachSeries(sqls, function(sql, done) {
 			client.query(sql, err => done(err));
 		}, callback);
 	};
 
-	client.findAuditDate = function (table, callback) {
+	client.findAuditDate = function(table, callback) {
 		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ${client.escapeId(table)}`, (err, auditdate) => {
 			if (err) {
 				callback(err);
@@ -746,7 +790,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.exportChanges = function (table, fields, remoteAuditdate, opts, callback) {
+	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
 		let auditdateCompare = remoteAuditdate.auditdate != null ? `${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
 		client.query(`select count(*) as count FROM ${client.escapeId(table)} WHERE ${auditdateCompare}`, (err, result) => {
 			let where = "";
@@ -807,7 +851,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.importChanges = function (file, table, fields, opts, callback) {
+	client.importChanges = function(file, table, fields, opts, callback) {
 		if (typeof opts === "function") {
 			callback = opts;
 			opts = {};
@@ -848,7 +892,7 @@ module.exports = function (config, columnConfig) {
 					manifest = "MANIFEST";
 				}
 				client.query(`copy ${qualifiedStagingTable} (${f})
-          from '${file}' ${manifest} ${opts.role ? `credentials 'aws_iam_role=${opts.role}'` : ""}
+          from '${file}' ${manifest} ${opts.role?`credentials 'aws_iam_role=${opts.role}'`: ""}
 		  NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`, done);
 			} else {
 				done("Postgres importChanges Not Implemented Yet");
@@ -868,16 +912,16 @@ module.exports = function (config, columnConfig) {
 				}
 			});
 		}
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`insert into ${tableName} select * from ${qualifiedStagingTable}`, done);
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`select count(*) from ${qualifiedStagingTable}`, (err, result) => {
 				loadCount = result && parseInt(result[0].count);
 				done(err);
 			});
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
 		async.series(tasks, (err) => {
