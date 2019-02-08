@@ -67,7 +67,7 @@ describe('checksum', function() {
 			id: 10000000
 		}], {
 			individual: [() => {
-				return Promise.reject("body too large");
+				return Promise.reject('{ "errorMessage" : "body size is too long"}');
 			}]
 		}));
 
