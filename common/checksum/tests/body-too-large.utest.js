@@ -76,6 +76,8 @@ describe('checksum', function() {
 		assert.equal(results.totals.correct, 2, "Correct count doesn't match");
 		assert.equal(results.totals.incorrect, 1, "Incorrect count doesn't match");
 		assert.equal(results.totals.missing, 0, "Missing count doesn't match");
+		assert.equal(results.totals.extra, 100, "Extra count doesn't match");
+
 	});
 });
 
