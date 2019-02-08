@@ -119,9 +119,33 @@ module.exports = function(connection, fieldsTable) {
 			let tableName = getTable(event);
 			let connection = getConnection(settings);
 
+			let deletedColumn = settings.deleted_column || "_deleted";
+			let deletedValue = settings.deleted_value || (deletedColumn.match(/end/) ? 'current_timestamp::timestamp' : true);
+			let auditdateColumn = settings.auditdate_column || "_auditdate";
+			let auditdate = settings.delete_set_auditdate ? `, ${auditdateColumn} = current_timestamp::timestamp` : "";
+			let fullDeletes = settings.full_deletes === true;
+
 			getFields(connection, event).then((table) => {
-				let delQuery = `delete from ${tableName}
-                where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`;
+				let whereSql = where({
+					start: data.start,
+					end: data.end
+				}, settings);
+
+				let delQuery = (fullDeletes ? `delete from ${tableName}` : `update ${tableName} set ${deletedColumn} = ${deletedValue} ${auditdate}`) + ` where ${settings.id_column} ${whereSql}`;
+
+				let valid = false;
+				if (data.ids) {
+					delQuery += ` AND ${settings.id_column} in (${data.ids.map(f=>escape(f))}) `;
+					valid = true;
+				}
+				if (data.not_ids && data.start && data.end) {
+					delQuery += ` AND ${settings.id_column} not in (${data.not_ids.map(f=>escape(f))})`;
+					valid = true;
+				}
+				if (!valid) {
+					callback("ids or (not_ids, start, end) are required");
+					return;
+				}
 
 				logger.log("Delete Query", delQuery);
 				connection.query(delQuery, (err) => {
@@ -176,39 +200,39 @@ module.exports = function(connection, fieldsTable) {
 			let tableName = getTable(event);
 			let connection = getConnection(settings);
 
-		let wheres = [];
+			let wheres = [];
 			let whereStatement = "";
 			if (data.min) {
-			wheres.push(`${settings.id_column} >= ${escape(data.min)}`);
+				wheres.push(`${settings.id_column} >= ${escape(data.min)}`);
 			}
 			if (data.max) {
-			wheres.push(`${settings.id_column} <= ${escape(data.max)}`);
+				wheres.push(`${settings.id_column} <= ${escape(data.max)}`);
 			}
-		if (wheres.length) {
-			whereStatement = ` where ${wheres.join(" and ")} `;
+			if (wheres.length) {
+				whereStatement = ` where ${wheres.join(" and ")} `;
 			}
 
-		getFields(connection, event).then((table) => {
-			let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total `;
-			if (!table.sql) {
-				query += `FROM ${tableName}${whereStatement}`;
-			} else {
-				query += `FROM (${table.sql.replace('__IDCOLUMNLIMIT__', ' IS NOT NULL AND ' + where(data, settings))}) i ${whereStatement}`;
-			}
-			logger.log(`Range Query: ${query}`);
-			connection.query(query, (err, result, fields) => {
-				if (err) {
-					logger.log("Range Error", err);
-					callback(err);
+			getFields(connection, event).then((table) => {
+				let query = `SELECT MIN(${settings.id_column}) AS min, MAX(${settings.id_column}) AS max, COUNT(${settings.id_column}) AS total `;
+				if (!table.sql) {
+					query += `FROM ${tableName}${whereStatement}`;
 				} else {
-					callback(null, {
-						min: correctValue(result[0].min, fields[0]),
-						max: correctValue(result[0].max, fields[1]),
-						total: correctValue(result[0].total, fields[2])
-					});
+					query += `FROM (${table.sql.replace('__IDCOLUMNLIMIT__', ' IS NOT NULL AND ' + where(data, settings))}) i ${whereStatement}`;
 				}
-			});
-		}).catch(callback);
+				logger.log(`Range Query: ${query}`);
+				connection.query(query, (err, result, fields) => {
+					if (err) {
+						logger.log("Range Error", err);
+						callback(err);
+					} else {
+						callback(null, {
+							min: correctValue(result[0].min, fields[0]),
+							max: correctValue(result[0].max, fields[1]),
+							total: correctValue(result[0].total, fields[2])
+						});
+					}
+				});
+			}).catch(callback);
 		}
 
 		function nibble(event, callback) {
@@ -287,7 +311,7 @@ module.exports = function(connection, fieldsTable) {
 				FROM ${tableName}
 				where ${event.settings.id_column} __IDCOLUMNLIMIT__`;
 			}
-
+			
 			connection.query(event.settings.sql.replace('__IDCOLUMNLIMIT__', ` between '1' and '0' LIMIT 0 `), (err, rows, fields) => {
 				if (err) {
 					reject(err);

@@ -3,6 +3,7 @@ const async = require("async");
 const createNibbler = require("./nibbler.js");
 
 let logger = require("leo-logger")("leo-checksum.nibbler");
+const BODY_TOO_LARGE_ERROR = '{ "errorMessage" : "body size is too long"}';
 
 module.exports = function(local, remote, opts) {
 
@@ -107,7 +108,9 @@ module.exports = function(local, remote, opts) {
 				connector.getIndividualChecksums({
 					start,
 					end
-				}).then(result => done(null, result), callback);
+				}).then(result => done(null, result), (err) => done(null, {
+					error: err
+				}));
 			}, (err, indivData) => {
 				if (err) {
 					callback(err);
@@ -115,6 +118,10 @@ module.exports = function(local, remote, opts) {
 				}
 				let localData = indivData[0];
 				let remoteData = indivData[1];
+				if (localData.error || remoteData.error) {
+					callback(localData.error || remoteData.error);
+					return;
+				}
 				let results = {
 					missing: [],
 					extra: [],
@@ -224,6 +231,22 @@ module.exports = function(local, remote, opts) {
 
 		};
 
+		local._getIndividualChecksums = local.getIndividualChecksums;
+		local.getIndividualChecksums = function(...args) {
+			if (local.getIndividualChecksums.cache) {
+				logger.log("*** Getting individual data from cache ***");
+				return Promise.resolve(local.getIndividualChecksums.cache);
+			}
+			return local._getIndividualChecksums.apply(this, args).then(data => {
+				local.getIndividualChecksums.cache = data;
+				logger.log("*** cache set ***");
+				return data;
+			}).catch(err => {
+				delete local.getIndividualChecksums.cache;
+				return err;
+			});
+		};
+
 		let until = opts.until;
 		let stopReason = null;
 		let nibblerOpts = {
@@ -245,12 +268,37 @@ module.exports = function(local, remote, opts) {
 				if (err && !result) {
 					return done(err);
 				}
+				let onErrorErr = err;
 				if (nibble.limit <= 20000 || result.qty < 20000 || opts.skipBatch) { //It is small enough, we need to do individual checks
 					compareIndividual(nibble.start, nibble.end, (err, dataResult) => {
 						if (err) {
-							done(err);
+							if (err == BODY_TOO_LARGE_ERROR && result.shouldCleanup !== false) {
+								result.shouldCleanup = false;
+								let keepIds = local.getIndividualChecksums.cache.checksums.map(o => o.id);
+								let remoteQty = result[remote.name].qty || 0;
+								let localQty = result[local.name].qty || 0;
+								logger.error(`${local.name} Quantity(${localQty}) to ${remote.name} Quantity(${remoteQty}) is too high.  Cleaning up ${remote.name} system.`);
+								result.extraCount = remoteQty - localQty;
+								// Clean up
+								remote.delete({
+									start: nibble.start,
+									end: nibble.end,
+									not_ids: keepIds
+								}).then(() => {
+									nibblerOpts.onError(onErrorErr, result, nibble, done);
+								}).catch((e) => {
+									logger.error(`${remote.name} delete err`, e);
+									done(err);
+								});
+							} else {
+								done(err);
+							}
 							return;
 						}
+
+						// request was successful so clear out any cache data
+						delete local.getIndividualChecksums.cache;
+
 						//Submit them to be resent
 						if (result.qty === undefined) {
 							result.qty = dataResult.qty;
@@ -264,7 +312,7 @@ module.exports = function(local, remote, opts) {
 								correct: dataResult.correct,
 								incorrect: dataResult.incorrect.length,
 								missing: dataResult.missing.length,
-								extra: dataResult.extra.length
+								extra: dataResult.extra.length + (result.extraCount || 0)
 							});
 							if (opts.stats) {
 								let d = done;
@@ -276,13 +324,13 @@ module.exports = function(local, remote, opts) {
 							if (opts.sample && dataResult.missing.length) {
 								nibbler.normalLog("Missing: " + dataResult.missing.slice(0, 10).join());
 							}
-							if (dataResult.missing.length) {
+							if (opts.onSample && dataResult.missing.length) {
 								opts.onSample('missing', dataResult.missing);
 							}
 							if (opts.sample && dataResult.extra.length) {
 								nibbler.normalLog("Extra: " + dataResult.extra.slice(0, 10).join());
 							}
-							if (dataResult.extra.length) {
+							if (opts.onSample && dataResult.extra.length) {
 								opts.onSample('extra', dataResult.extra);
 							}
 							if (opts.shouldDelete && dataResult.extra.length) {
