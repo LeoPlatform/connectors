@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-common",
-	"version": "2.0.0-RC6",
+	"version": "2.0.0",
 	"description": "Common package for all Leo Platform database connectors",
 	"main": "index.js",
 	"directories": {},
@@ -24,10 +24,10 @@
 	},
 	"dependencies": {
 		"async": "^2.6.1",
-		"leo-aws": "^1.4.0",
-		"leo-logger": ">=1.0.0",
-		"leo-sdk": "^2.2.0",
-		"moment": "^2.22.2",
+		"leo-aws": "^1.4.2",
+		"leo-logger": "^1.0.1",
+		"leo-sdk": "^2.2.4",
+		"moment": "^2.24.0",
 		"sqlstring": "^2.3.1"
 	}
 }
