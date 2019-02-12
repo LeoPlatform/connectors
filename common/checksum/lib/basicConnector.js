@@ -2,8 +2,7 @@
 const crypto = require('crypto');
 const base = require("./handler.js");
 const moment = require("moment");
-require("moment-timezone");
-const logger = require("leo-sdk/lib/logger")("leo-checksum.basic");
+const logger = require("leo-logger")("leo-checksum.basic");
 const Stream = require('stream').Stream;
 
 function promisify(method, arity) {
@@ -324,7 +323,8 @@ module.exports = function(opts) {
 		logger.log("Calling Delete", event);
 		promisify(handler, 1).call({
 			settings: event.settings,
-			session: event.session
+			session: event.session,
+			...event.data
 		}, event.data.ids).then(() => callback()).catch(callback);
 	}
 };

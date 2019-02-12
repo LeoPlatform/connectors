@@ -120,10 +120,31 @@ module.exports = function(connection, fieldsTable) {
 
 		let deletedColumn = settings.deleted_column || "_deleted";
 		let deletedValue = settings.deleted_value || (deletedColumn.match(/end/) ? 'current_timestamp::timestamp' : true);
+		let auditdateColumn = settings.auditdate_column || "_auditdate";
+		let auditdate = settings.delete_set_auditdate ? `, ${auditdateColumn} = current_timestamp::timestamp` : "";
+		let fullDeletes = settings.full_deletes === true;
 
 		getFields(connection, event).then((table) => {
-			let delQuery = `update ${tableName} set ${deletedColumn} = ${deletedValue}
-                where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`;
+			let whereSql = where({
+				start: data.start,
+				end: data.end
+			}, settings);
+
+			let delQuery = (fullDeletes ? `delete from ${tableName}` : `update ${tableName} set ${deletedColumn} = ${deletedValue} ${auditdate}`) + ` where ${settings.id_column} ${whereSql}`;
+
+			let valid = false;
+			if (data.ids) {
+				delQuery += ` AND ${settings.id_column} in (${data.ids.map(f=>escape(f))}) `;
+				valid = true;
+			}
+			if (data.not_ids && data.start && data.end) {
+				delQuery += ` AND ${settings.id_column} not in (${data.not_ids.map(f=>escape(f))})`;
+				valid = true;
+			}
+			if (!valid) {
+				callback("ids or (not_ids, start, end) are required");
+				return;
+			}
 
 			logger.log("Delete Query", delQuery);
 			connection.query(delQuery, (err) => {
@@ -222,7 +243,7 @@ module.exports = function(connection, fieldsTable) {
 		let connection = getConnection(settings);
 
 		let query = `select ${settings.id_column} as id from ${tableName}
-			where id >= ${escape(data.start)} and id <= ${escape(data.end)}
+			where ${settings.id_column} >= ${escape(data.start)} and ${settings.id_column} <= ${escape(data.end)}
 			order by id ${!data.reverse ? "asc":"desc"}
 			limit 2
 			offset ${data.limit - 1}`;

@@ -5,7 +5,7 @@ const logger = require("leo-logger")("leo.connector.sql.mysql");
 let ls = require("leo-sdk").streams;
 let connections = {};
 
-module.exports = function(c) {
+module.exports = function (c) {
 	let config = Object.assign({
 		host: "localhost",
 		user: c.username || 'root', // use username if it is passed through (secrets manager)
@@ -22,9 +22,11 @@ module.exports = function(c) {
 	delete config.engine;
 	delete config.table;
 	delete config.id;
+	delete config.version;
+	delete config.type;
 
 	let connectionHash = JSON.stringify(config);
-	let m;
+	let pool;
 
 	if (!(connectionHash in connections)) {
 		console.log("CREATING NEW MYSQL CONNECTION");
@@ -32,11 +34,28 @@ module.exports = function(c) {
 	} else {
 		console.log("REUSING CONNECTION");
 	}
-	m = connections[connectionHash];
+	pool = connections[connectionHash];
+
+	let cache = {
+		schema: {},
+		timestamp: null
+	};
 
 	let queryCount = 0;
 	let client = {
-		query: function(query, params, callback, opts = {}) {
+		setAuditdate,
+		connect: function (opts) {
+			opts = opts || {};
+			return new Promise((resolve, reject) => {
+				pool.getConnection((error, connection) => {
+					if (error) {
+						reject(error);
+					}
+					resolve(connection);
+				});
+			});
+		},
+		query: function (query, params, callback, opts = {}) {
 			if (typeof params == "function") {
 				opts = callback;
 				callback = params;
@@ -49,13 +68,13 @@ module.exports = function(c) {
 
 			let queryId = ++queryCount;
 			let log = logger.sub("query");
-			log.info(`SQL query #${queryId} is `, query.slice(0, 300), params && params.length ? params : "");
+			log.info(`SQL query #${queryId} is `, query, params && params.length ? params : "");
 			log.time(`Ran Query #${queryId}`);
 
-			m.query({
+			pool.query({
 				sql: query,
 				rowsAsArray: opts.inRowMode
-			}, params, function(err, result, dbfields) {
+			}, params, function (err, result, dbfields) {
 				log.timeEnd(`Ran Query #${queryId}`);
 				let fields;
 				if (err) {
@@ -70,7 +89,7 @@ module.exports = function(c) {
 							schema: ''
 						};
 
-						Object.keys(data).filter(f => !f.match(/^\_/)).filter(f => data[f]).map(k => {
+						Object.keys(data).filter(f => !f.match(/^_/)).filter(f => data[f]).map(k => {
 							startingObj[k] = data[k];
 						});
 
@@ -81,24 +100,67 @@ module.exports = function(c) {
 				callback(err, result, fields);
 			});
 		},
-		end: function(callback) {
+		end: function (callback) {
 			connections[connectionHash] = undefined;
-			return m.end(callback);
+			return pool.end(callback);
 		},
-		disconnect: function(callback) {
+		disconnect: function (callback) {
 			return this.end(callback);
 		},
-		describeTable: function(table, callback) {
-			client.query(`SELECT column_name, data_type, is_nullable, character_maximum_length 
-				FROM information_schema.columns
-				WHERE table_name = ? order by ordinal_position asc`, [table], (err, result) => {
-				callback(err, result);
+		release: function (destroy) {
+			pool.release && pool.release(destroy);
+		},
+		describeTable: function (table, callback, tableSchema = config.database) {
+			const qualifiedTable = `${tableSchema}.${table}`;
+			if (cache.schema[qualifiedTable]) {
+				callback(null, cache.schema[qualifiedTable] || []);
+			} else {
+				this.clearSchemaCache();
+				this.describeTables((err, schema) => {
+					callback(err, schema && schema[qualifiedTable] || []);
+				}, tableSchema);
+			}
+		},
+		describeTables: function (callback, tableSchema = config.database) {
+			if (Object.keys(cache.schema || {}).length) {
+				logger.info(`Tables schema from cache`, cache.timestamp);
+				return callback(null, cache.schema);
+			}
+			client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
+				let schema = {};
+				result && result.map(tableInfo => {
+					const tableName = `${tableSchema}.${tableInfo.table_name}`;
+					if (!schema[tableName]) {
+						schema[tableName] = [];
+					}
+					schema[tableName].push(tableInfo);
+				});
+				Object.keys(schema).map((key) => {
+					let parts = key.match(/^datawarehouse\.(.*)$/);
+					if (parts) {
+						schema[parts[1]] = schema[key];
+					}
+				});
+				cache.schema = schema;
+				cache.timestamp = Date.now();
+				logger.info("Caching Schema Table", cache.timestamp);
+				callback(err, cache.schema);
 			});
 		},
-		streamToTableFromS3: function(table, opts) {
+		getSchemaCache: function () {
+			return cache.schema || {};
+		},
+		setSchemaCache: function (schema) {
+			cache.schema = schema || {};
+		},
+		clearSchemaCache: function () {
+			logger.info(`Clearing Tables schema cache`);
+			cache.schema = {};
+		},
+		streamToTableFromS3: function (table, opts) {
 
 		},
-		streamToTableBatch: function(table, opts) {
+		streamToTableBatch: function (table, opts) {
 			opts = Object.assign({
 				records: 10000,
 				useReplaceInto: false
@@ -109,7 +171,7 @@ module.exports = function(c) {
 			let total = 0;
 			client.query(`SELECT column_name 
 					FROM information_schema.columns 
-					WHERE table_name = ? order by ordinal_position asc`, [table], (err, results) => {
+					WHERE table_schema = '${config.database}' and table_name = ${escapeValue(table)} order by ordinal_position asc`, (err, results) => {
 				columns = results.map(r => r.column_name);
 				ready = true;
 				if (pending) {
@@ -142,7 +204,7 @@ module.exports = function(c) {
 				if (opts.useReplaceInto) {
 					cmd = "REPLACE INTO ";
 				}
-				client.query(`${cmd} ?? (??) VALUES ?`, [table, columns, values], function(err) {
+				client.query(`${cmd} ${config.database}.${escapeId(table)} (??) VALUES ?`, [columns, values], function (err) {
 					if (err) {
 						callback(err);
 					} else {
@@ -155,57 +217,216 @@ module.exports = function(c) {
 				records: opts.records
 			});
 		},
-		streamToTable: function(table, opts) {
+		streamToTable: function (table, opts) {
 			opts = Object.assign({
 				records: 10000
 			});
 			return this.streamToTableBatch(table, opts);
 		},
-		range: function(table, id, opts, callback) {
-			client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, [id, id, id, table], (err, result) => {
-				if (err) return callback(err);
-				callback(null, {
-					min: result[0].min,
-					max: result[0].max,
-					total: result[0].total
+		range: function (table, id, opts, callback) {
+			// handle composite keys
+			if (Array.isArray(id)) {
+				let fieldPlaceHolders = [];
+				let params = [];
+				let SPLIT_KEY = '::';
+
+				// set min and placeholders
+				for (let key of id) {
+					params.push(key);
+					fieldPlaceHolders.push('??');
+				}
+
+				// set max. placeholders are done.
+				let key;
+				for (key of id) {
+					params.push(key);
+				}
+
+				// just push the last key on again for the count
+				params.push(key);
+
+				let min_key = 'CONCAT(MIN(' + fieldPlaceHolders.join(`), '${SPLIT_KEY}', MIN(`) + '))';
+				let max_key = 'CONCAT(MAX(' + fieldPlaceHolders.join(`), '${SPLIT_KEY}', MAX(`) + '))';
+
+				// add the table at the end
+				params.push(table);
+
+				client.query(`SELECT ${min_key} AS min, ${max_key} AS max, COUNT(??) AS total FROM ??`, params, (err, result) => {
+					if (err) return callback(err);
+
+					let results = {
+						min: {},
+						max: {},
+						total: result[0].total,
+					};
+					let min = result[0].min.split(SPLIT_KEY);
+					let max = result[0].max.split(SPLIT_KEY);
+
+					for (let i in id) {
+						results.min[id[i]] = min[i];
+						results.max[id[i]] = max[i];
+					}
+
+					callback(null, results);
 				});
-			});
+			} else { // do things normally
+				let params = [id, id, id, table];
+				client.query(`select min(??) as min, max(??) as max, count(??) as total from ??`, params, (err, result) => {
+					if (err) return callback(err);
+					callback(null, {
+						min: result[0].min,
+						max: result[0].max,
+						total: result[0].total
+					});
+				});
+			}
 		},
-		nibble: function(table, id, start, min, max, limit, reverse, callback) {
+		nibble: function (table, id, start, min, max, limit, reverse, callback) {
 			let sql;
-			let params;
-			if (reverse) {
-				sql = `select ?? as id from ??
+			let params = [];
+
+			// handle composite keys
+			if (Array.isArray(id)) {
+				let selectPieces = [];
+				let orderByParams = [];
+
+				for (let key of id) {
+					selectPieces.push('??');
+					params.push(key);
+					// collect params for order by. Will be pushed on later.
+					orderByParams.push(key);
+				}
+
+				// push the table on right after the fields
+				params.push(table);
+
+				let where = [];
+				let orderDirection = (reverse) ? 'DESC' : 'ASC';
+				let startDirection = (reverse) ? '<=' : '>=';
+				let endDirection = (reverse) ? '>=' : '<=';
+				let values = (reverse) ? min : max;
+
+				// build the where clause
+				for (let key in values) {
+					where.push(`(?? ${startDirection} ? AND ?? ${endDirection} ?)`);
+
+					params.push(key);
+					params.push(start[key]);
+					params.push(key);
+					params.push(values[key]);
+				}
+				where = where.join(' AND ');
+
+				// build the order
+				let order = selectPieces.join(` ${orderDirection},`) + ` ${orderDirection}`;
+
+				// push on additional parameters for the order by
+				params.push(...orderByParams);
+
+				sql = `SELECT ${selectPieces.join(', ')}
+					FROM ??
+					WHERE ${where}
+					ORDER BY ${order}
+					LIMIT ${limit - 1},2`;
+			} else {
+				if (reverse) {
+					sql = `select ?? as id from ??
 							where ?? <= ? and ?? >= ?
 							ORDER BY ?? desc
-							LIMIT ${limit-1},2`;
-				params = [id, table, id, start, id, min, id];
-			} else {
-				sql = `select ?? as id from ??
+							LIMIT ${limit - 1},2`;
+					params = [id, table, id, start, id, min, id];
+				} else {
+					sql = `select ?? as id from ??
 							where ?? >= ? and ?? <= ?
 							ORDER BY ?? asc
-							LIMIT ${limit-1},2`;
-				params = [id, table, id, start, id, max, id];
+							LIMIT ${limit - 1},2`;
+					params = [id, table, id, start, id, max, id];
+				}
 			}
 
 			client.query(sql, params, callback);
 		},
-		getIds: function(table, id, start, end, reverse, callback) {
+		getIds: function (table, id, start, end, reverse, callback) {
 			let sql;
-			if (reverse) {
-				sql = `select ?? as id from ??  
-                            where ?? <= ? and ?? >= ?
-                            ORDER BY ?? desc
-                        `;
+			let params = [];
+
+			if (Array.isArray(id)) {
+				let direction = (reverse) ? 'DESC' : 'ASC';
+				let startDirection = (reverse) ? '<=' : '>=';
+				let endDirection = (reverse) ? '>=' : '<=';
+				let select = [];
+				let where = [];
+				let whereParams = [];
+				let order = [];
+
+				for (let key of id) {
+					select.push('??');
+					params.push(key);
+
+					where.push(`(?? ${startDirection} ? AND ?? ${endDirection} ?)`);
+					whereParams.push(key);
+					whereParams.push(start[key]);
+					whereParams.push(key);
+					whereParams.push(end[key]);
+
+					order.push(`${key} ${direction}`);
+				}
+
+				params.push(table);
+				params.push(...whereParams);
+
+				sql = `SELECT ${select.join(',')}
+					FROM ??
+					WHERE ${where.join(' AND ')}
+					ORDER BY ${order.join(',')}`;
 			} else {
-				sql = `select ?? as id from ??  
+				if (reverse) {
+					sql = `select ?? as id from ??  
+                            where ?? <= ? and ?? >= ?
+                            ORDER BY ?? desc`;
+				} else {
+					sql = `select ?? as id from ??  
                             where ?? >= ? and ?? <= ?
-                            ORDER BY ?? asc
-                        `;
+                            ORDER BY ?? asc`;
+				}
+				params = [id, table, id, start, id, end, id];
 			}
-			client.query(sql, [id, table, id, start, id, end, id], callback);
+
+			client.query(sql, params, callback);
+		},
+		escapeId,
+		escape: function (value) {
+			if (value.replace) {
+				return '`' + value.replace('`', '') + '`';
+			} else {
+				return value;
+			}
+		},
+		escapeValue,
+		escapeValueNoToLower: function (value) {
+			if (value.replace) {
+				return "'" + value.replace("'", "\\'") + "'";
+			} else {
+				return value;
+			}
 		}
 	};
+
+	function escapeId(field) {
+		return '`' + field.replace('`', '').replace(/\.([^.]+)$/, '`.`$1') + '`';
+	}
+
+	function escapeValue(value) {
+		if (value.replace) {
+			return "'" + value.replace("'", "\\'").toLowerCase() + "'";
+		} else {
+			return value;
+		}
+	}
+
+	function setAuditdate() {
+		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '').replace(/[A-Z]/, ' ') + "'";
+	}
 
 	return client;
 };
