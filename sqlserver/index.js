@@ -90,8 +90,8 @@ class connector extends parent {
 						eid += opts.tables[tableName].map(field => r[field]).join('.');
 						payload = r;
 					} else {
-						eid += r[opts.tables[tableName]];
-						payload = r[opts.tables[tableName]];
+						eid += r[Object.keys(r)[0]];
+						payload = r[Object.keys(r)[0]];
 					}
 
 					obj.correlation_id.units++;
