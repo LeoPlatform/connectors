@@ -374,12 +374,12 @@ module.exports = function(config, columnConfig) {
 										FROM ${qualifiedStagingTable}_changes changes
 										JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
 										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
-											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
+											and (changes.runSCD1=1 OR changes.runSCD6=1 OR (changes.runSCD2=1 and prev.${columnConfig._current}))
 										`, done);
 						});
 
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
