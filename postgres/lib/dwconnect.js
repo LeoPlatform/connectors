@@ -366,7 +366,7 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
 							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
+							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then (now() - '1 usec'::interval) else prev."${columnConfig._enddate}" END`);
 							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 							connection.query(`update ${qualifiedTable} as prev
