@@ -452,7 +452,7 @@ module.exports = function(config, columnConfig) {
                         FROM ${table} t
                         ${joinTables.join("\n")}
                         where ${nk.map(id=>`dm.${id} = t.${id}`).join(' and ')}
-                            AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
+                            AND dm.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
 				} else {
 					done();
