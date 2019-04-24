@@ -1,11 +1,24 @@
 "use strict";
 
+const logger = require('leo-logger');
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
+const validate = require('leo-sdk/utils/validation');
+let errorStream;
 
-module.exports = function(client, tableConfig, stream, callback) {
+module.exports = function(ID, client, tableConfig, stream, callback) {
+
+	// adding backwards compatibility for ID
+	if (!callback) {
+		callback = stream;
+		stream = tableConfig;
+		tableConfig = client;
+		client = ID;
+		ID = 'system:dw-ingest';
+	}
+
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
@@ -54,8 +67,110 @@ module.exports = function(client, tableConfig, stream, callback) {
 		}
 	});
 
+	let validateData = ls.through(function(obj, done) {
+		let eventObj = obj.payload.data;
+		let invalid = false;
+
+		if (obj.payload.type === 'delete') {
+			if (eventObj.in && Array.isArray(eventObj.in) && eventObj.in.length) {
+				invalid = eventObj.in.some(id => {
+					if (typeof id !== 'number' && typeof id !== 'string') {
+						// invalid event
+						return true;
+					}
+				});
+			} else {
+				invalid = handleFailedValidation(ID, obj, 'No events id’s in delete.');
+			}
+		} else {
+			let tableName = obj.payload.table || obj.payload.entity;
+			let table;
+
+			// find the table name
+			// first check the config object key
+			if (tableConfig[tableName]) {
+				table = tableConfig[t];
+			} else {
+				// then check the config label
+				Object.keys(tableConfig).some(entity => {
+					if (tableConfig[entity].label === tableName) {
+						if ((tableConfig[entity].isDimension && obj.payload.type === 'dimension') || (obj.payload.type === 'fact' && !tableConfig[entity].isDimension)) {
+							table = tableConfig[entity];
+							return true;
+						}
+					}
+				});
+			}
+
+			// note: this returns TRUE when something is invalid.
+			invalid = Object.keys(eventObj).some(field => {
+				// if we cannot find a matching table, it’s an invalid record.
+				if (!table) {
+					return handleFailedValidation(ID, obj, `No table found for ${tableName}`);
+				}
+
+				let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
+				let value = eventObj[field];
+
+				switch (type[1]) {
+					case 'varchar':
+						if (!validate.isValidString(value, type[3] && type[3] || 255)) {
+							return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
+						}
+
+						// check for enum and validate if exists
+						if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values)) {
+							return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
+						}
+					break;
+
+					case 'timestamp':
+						if (!validate.isValidTimestamp(value)) {
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+						}
+					break;
+
+					case 'datetime':
+						if (!validate.isValidDatetime(value)) {
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+						}
+					break;
+
+					case 'integer':
+						if (!validate.isValidInteger(value)) {
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+						}
+					break;
+
+					case 'bigint':
+						if (!validate.isValidBigint(value)) {
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+						}
+					break;
+
+					case 'float':
+						if (!validate.isValidFloat(value)) {
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+						}
+					break;
+
+					case undefined:
+						return handleFailedValidation(ID, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
+					break;
+				}
+			});
+		}
+
+		if (invalid) {
+			logger.error('Record has error');
+			done();
+		} else {
+			done(null, obj);
+		}
+	});
+
 	let usedTables = {};
-	ls.pipe(stream, checkforDelete, combine(tableNks), ls.write((obj, done) => {
+	ls.pipe(stream, validateData, checkforDelete, combine(tableNks), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
@@ -81,6 +196,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							scds[field.scd].push(f);
 						}
 					});
+
 					if (tableConfig[t].isDimension) {
 						client.importDimension(obj[t].stream, t, sk, nk, scds, (err, tableInfo) => {
 							if (!err && tableInfo && tableInfo.count === 0) {
@@ -175,7 +291,41 @@ module.exports = function(client, tableConfig, stream, callback) {
 			}
 		});
 	}), err => {
-		console.log("IN HERE!!!!!!!");
-		callback(err, "ALL DONE");
+		// close the error stream if open
+		if (errorStream) {
+			errorStream.end(streamError => {
+				if (streamError) {
+					logger.error('Closing error stream with error', streamError);
+				} else {
+					logger.log('Closing error stream');
+				}
+			});
+		}
+
+		callback(err, "ALL DONE Ingesting");
 	});
 };
+
+/**
+ * Pass the failed object onto a failed queue.
+ * @param ID {string}
+ * @param eventObj {Object}
+ * @param error {string}
+ */
+function handleFailedValidation(ID, eventObj, error)
+{
+	console.log('Adding failed event', eventObj);
+	// sent the event to an error queue
+	// dw.load - error
+	if (!eventObj.correlation_id) {
+		eventObj.correlation_id = {};
+	}
+	eventObj.correlation_id.error = error;
+
+	if (!errorStream) {
+		errorStream = leo.load(ID, 'dw.load - error');
+	}
+	errorStream.write(eventObj);
+
+	return true;
+}
