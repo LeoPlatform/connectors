@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"description": "A Postgres database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -20,12 +20,11 @@
 	"dependencies": {
 		"fast-csv": "^2.4.1",
 		"leo-connector-common": "^2.0.0",
-		"leo-sdk": "^2.2.4",
+		"leo-sdk": "^2.2.8",
 		"leo-streams": "^1.1.1",
 		"pg": "^7.8.0",
 		"pg-copy-streams": "^1.2.0",
-		"pg-format": "^1.0.4",
-		"pg-native": "^3.0.0"
+		"pg-format": "^1.0.4"
 	},
 	"devDependencies": {
 		"chai": "^4.2.0",
