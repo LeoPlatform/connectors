@@ -24,7 +24,6 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 	let tableNks = {};
 	Object.keys(tableConfig).forEach(t => {
 		let config = tableConfig[t];
-		//console.log("config", t, JSON.stringify(config, null, 2));
 		Object.keys(config.structure).forEach(f => {
 			let field = config.structure[f];
 			if (field == "sk" || field.sk) {
@@ -236,7 +235,6 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 							6: []
 						};
 						let links = [];
-						//if (!config || !config.structure) console.log(t);
 						config && config.structure && Object.keys(config.structure).forEach(f => {
 							let field = config.structure[f];
 
@@ -314,13 +312,10 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
  */
 function handleFailedValidation(ID, eventObj, error)
 {
-	console.log('Adding failed event', eventObj);
+	logger.debug('Adding failed event', eventObj);
 	// sent the event to an error queue
 	// dw.load - error
-	if (!eventObj.correlation_id) {
-		eventObj.correlation_id = {};
-	}
-	eventObj.correlation_id.error = error;
+	eventObj.error = error;
 
 	if (!errorStream) {
 		errorStream = leo.load(ID, 'dw.load - error');
