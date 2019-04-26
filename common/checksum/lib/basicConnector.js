@@ -323,7 +323,8 @@ module.exports = function(opts) {
 		logger.log("Calling Delete", event);
 		promisify(handler, 1).call({
 			settings: event.settings,
-			session: event.session
+			session: event.session,
+			...event.data
 		}, event.data.ids).then(() => callback()).catch(callback);
 	}
 };

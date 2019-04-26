@@ -724,7 +724,7 @@ module.exports = class Dol {
 	}
 
 	processResults(err, rows, done) {
-		if (rows && Object.keys(rows[0]).length > 1) {
+		if (rows && rows.length >= 1 && Object.keys(rows[0]).length > 1) {
 			return done(err, rows);
 		}
 

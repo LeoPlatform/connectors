@@ -42,18 +42,4 @@ module.exports = class Connector {
 	snapshotter(config) {
 		return new snapshotter(this.connect(config));
 	}
-
-	// @deprecated
-	dol(config) {
-		console.log('`dol` is deprecated and will be removed. Please use `domainObjectBuilder` instead.');
-
-		return this.domainObjectBuilder(config);
-	}
-
-	// @deprecated
-	DomainObjectLoader(config) {
-		console.log('`DomainObjectLoader` is deprecated and will be removed. Please use `domainObjectBuilder` instead.');
-
-		return this.domainObjectBuilder(config);
-	}
 };

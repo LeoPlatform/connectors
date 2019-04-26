@@ -19,5 +19,5 @@ console.log(process.env.dbsecret);
 module.exports = function() {
 	return new Promise((resolve) => {
 		setTimeout(resolve, 200);
-	})
-}
+	});
+};

@@ -276,7 +276,7 @@ module.exports = {
 									if (err) {
 										reject(err);
 									} else {
-										resolve();
+										resolve(session);
 									}
 								});
 							}, err => {

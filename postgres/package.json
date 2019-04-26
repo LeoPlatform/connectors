@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "2.0.0-RC8",
+	"version": "2.0.1",
 	"description": "A Postgres database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -9,7 +9,9 @@
 	"main": "index.js",
 	"scripts": {
 		"test": "mocha test/unit/**/*.test.js",
-		"test:int": "mocha test/integration/**/*.test.js"
+		"test:int": "npm run test:docker && sleep 5 && mocha test/integration/**/*.test.js",
+		"test:docker": "docker container inspect --format='{{.Config.Hostname}}' leo-connector-postgres-integration-testor || docker run --name leo-connector-postgres-integration-testor -e POSTGRES_PASSWORD=mytestpassword -p 5432:5432 -d postgres:10",
+		"test:docker:clean": "docker container inspect --format='{{.Config.Hostname}}' leo-connector-postgres-integration-testor; if [ $? -eq 0 ]; then docker stop leo-connector-postgres-integration-testor && docker rm leo-connector-postgres-integration-testor; fi"
 	},
 	"author": "",
 	"license": "ISC",
@@ -19,21 +21,19 @@
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
 		"fast-csv": "^2.4.1",
-		"leo-connector-common": "rc",
-		"leo-sdk": "^2.2.0",
+		"leo-connector-common": "^2.0.0",
+		"leo-sdk": "^2.2.8",
 		"leo-streams": "^1.1.1",
-		"pg": "^7.7.1",
+		"pg": "^7.8.0",
 		"pg-copy-streams": "^1.2.0",
-		"pg-format": "^1.0.4",
-		"pg-native": "^3.0.0"
+		"pg-format": "^1.0.4"
 	},
 	"devDependencies": {
-		"chai": "^4.1.2",
-		"eslint": "^4.19.1",
-		"event-stream": "^4.0.1",
-		"mocha": "^5.0.5",
-		"proxyquire": "^2.1.0",
-		"sinon": "^4.4.8"
+		"chai": "^4.2.0",
+		"eslint": "^5.13.0",
+		"mocha": "^5.2.0",
+		"sinon": "^7.2.3",
+		"stream-array": "^1.1.2"
 	},
 	"config": {
 		"leo": {
