@@ -116,7 +116,7 @@ module.exports = function(config, columnConfig) {
 		};
 	}
 
-	client.importFact = function(stream, table, ids, callback, tableDef = {}) {
+	client.importFact = function(stream, table, ids, callback) {
 		const stagingTable = `staging_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
@@ -224,7 +224,7 @@ module.exports = function(config, columnConfig) {
 		});
 	};
 
-	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback) {
 		const stagingTbl = `staging_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
@@ -333,28 +333,15 @@ module.exports = function(config, columnConfig) {
 							process.exit();
 						}
 						let tasks = [];
-						let rowId = null;
-						let totalRecords = 0;
+						let totalRecords = 0; // TODO: This is not used to count records as it should
 						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
-						tasks.push(done => {
-							connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
-								if (err) {
-									return done(err);
-								}
-								rowId = results[0] ? results[0].maxid || 10000 : 10000;
-								totalRecords = (rowId - 10000);
-								done();
-							});
-						});
 
-
-						//The following code relies on the fact that now() will return the same time during all transaction events
 						tasks.push(done => connection.query(`Begin Transaction`, done));
 
 						tasks.push(done => {
 							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 							connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+								SELECT nextval('${table}_skey_seq'), ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else ${dwClient.auditdate} END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 								FROM ${qualifiedStagingTable}_changes changes  
 								JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
 								LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
@@ -366,7 +353,7 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
 							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then (now() - '1 usec'::interval) else prev."${columnConfig._enddate}" END`);
+							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then (${dwClient.auditdate}::timestamp - '1 usec'::interval) else prev."${columnConfig._enddate}" END`);
 							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 							connection.query(`update ${qualifiedTable} as prev
@@ -378,9 +365,7 @@ module.exports = function(config, columnConfig) {
 											and (changes.runSCD1=1 OR changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
 						});
-
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
@@ -455,21 +440,15 @@ module.exports = function(config, columnConfig) {
 				let trx;
 				client.connect().then(transaction => {
 					trx = transaction;
-					transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
-						if (err) {
-							return done(err);
-						}
-						let rowId = results[0].maxid || 10000;
-						let _auditdate = dwClient.auditdate; //results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
-						let unionQuery = unions[table].join("\nUNION\n");
-						const insertQuery = `
+					let _auditdate = dwClient.auditdate; //results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
+					let unionQuery = unions[table].join("\nUNION\n");
+					const insertQuery = `
 							insert into ${table} (${sk}, ${nks.join(', ')}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) 
-							select row_number() over () + ${rowId}, ${nks.map((_, i)=> `sub.id${i}`).join(', ')}, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub 
+							select nextval('${table}_skey_seq'), ${nks.map((_, i)=> `sub.id${i}`).join(', ')}, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub 
 							where ${nks.map((_, i)=> `sub.id${i} is not null`).join(' OR ')} group by ${nks.map((_, i)=> `sub.id${i}`).join(', ')}`; 
 						// console.log(insertQuery)
-						transaction.query(insertQuery, (err) => {
-							done(err);
-						});
+					transaction.query(insertQuery, (err) => {
+						done(err);
 					});
 				}).catch(done);
 			};
@@ -539,6 +518,21 @@ module.exports = function(config, columnConfig) {
 
 		Object.keys(structures).forEach(table => {
 			tableResults[table] = "Unmodified";
+			const isDimension = structures[table].isDimension;
+			const sks = Object.keys(structures[table].structure).filter(f => structures[table].structure[f] === 'sk');
+			const hasSk = sks.length > 0;
+			if (isDimension && hasSk) {
+				const sk = sks[0];
+				tasks.push(done => {
+					client.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
+						if (err) {
+							return done(err);
+						}
+						const rowId = results[0] ? results[0].maxid || 10000 : 10000;
+						client.query(`create sequence if not exists ${table}_skey_seq start ${rowId + 1};`, done);
+					});
+				});
+			}
 			tasks.push(done => {
 				client.describeTable(table, (err, fields) => {
 					if (err) return done(err);
