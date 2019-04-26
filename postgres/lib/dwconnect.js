@@ -353,14 +353,14 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							//RUN SCD1 / SCD6 columns  (where we update the old records)
 							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${dwClient.auditdate}::timestamp else prev."${columnConfig._enddate}" END`);
+							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then (${dwClient.auditdate}::timestamp - '1 usec'::interval) else prev."${columnConfig._enddate}" END`);
 							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 							connection.query(`update ${qualifiedTable} as prev
 										set  ${columns.join(', ')}
 										FROM ${qualifiedStagingTable}_changes changes
 										JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+										where ${nk.map(id=>`prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} < ${dwClient.auditdate} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 											and prev.${columnConfig._current}
 											and (changes.runSCD1=1 OR changes.runSCD6=1 OR changes.runSCD2=1)
 										`, done);
