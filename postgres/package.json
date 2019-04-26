@@ -9,7 +9,9 @@
 	"main": "index.js",
 	"scripts": {
 		"test": "mocha test/unit/**/*.test.js",
-		"test:int": "mocha test/integration/**/*.test.js"
+		"test:int": "npm run test:docker && sleep 5 && mocha test/integration/**/*.test.js",
+		"test:docker": "docker container inspect --format='{{.Config.Hostname}}' leo-connector-postgres-integration-testor || docker run --name leo-connector-postgres-integration-testor -e POSTGRES_PASSWORD=mytestpassword -p 5432:5432 -d postgres:10",
+		"test:docker:clean": "docker container inspect --format='{{.Config.Hostname}}' leo-connector-postgres-integration-testor; if [ $? -eq 0 ]; then docker stop leo-connector-postgres-integration-testor && docker rm leo-connector-postgres-integration-testor; fi"
 	},
 	"author": "",
 	"license": "ISC",
