@@ -24,7 +24,8 @@
 		"leo-streams": "^1.1.1",
 		"pg": "^7.8.0",
 		"pg-copy-streams": "^1.2.0",
-		"pg-format": "^1.0.4"
+		"pg-format": "^1.0.4",
+		"pg-native": "^3.0.0"
 	},
 	"devDependencies": {
 		"chai": "^4.2.0",
