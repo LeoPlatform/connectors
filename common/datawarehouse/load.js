@@ -5,7 +5,7 @@ const leo = require("leo-sdk");
 const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
-const validate = require('leo-sdk/utils/validation');
+const validate = require('./../utils/validation');
 let errorStream;
 
 module.exports = function(ID, client, tableConfig, stream, callback) {
