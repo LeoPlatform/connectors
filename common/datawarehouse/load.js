@@ -26,7 +26,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 		let config = tableConfig[t];
 		Object.keys(config.structure).forEach(f => {
 			let field = config.structure[f];
-			if (field == "sk" || field.sk) {
+			if (field === "sk" || field.sk) {
 				tableSks[t] = f;
 			} else if (field.nk) {
 				if (!(t in tableNks)) {
@@ -38,7 +38,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 	});
 
 	let checkforDelete = ls.through(function(obj, done) {
-		if (obj.payload.type == "delete") {
+		if (obj.payload.type === "delete") {
 			let data = obj.payload.data || {};
 			let ids = data.in || [];
 			let entities = data.entities || [];
@@ -52,7 +52,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 							command: "delete",
 							field: field,
 							data: {
-								id: field == "id" ? id : `_del_${id}`,
+								id: field === 'id' ? id : `_del_${id}`,
 								__leo_delete__: field,
 								__leo_delete_id__: id
 							}
@@ -187,7 +187,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 
-						if (field == "sk" || field.sk) {
+						if (field === "sk" || field.sk) {
 							sk = f;
 						} else if (field.nk) {
 							nk.push(f);
@@ -238,7 +238,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 						config && config.structure && Object.keys(config.structure).forEach(f => {
 							let field = config.structure[f];
 
-							if (field == "sk" || field.sk) {
+							if (field === "sk" || field.sk) {
 								sk = f;
 							} else if (field.nk) {
 								nk.push(f);
@@ -247,20 +247,20 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 							}
 							if (field.dimension) {
 								let link = {};
-								if (typeof field.dimension == "string") {
+								if (typeof field.dimension === 'string') {
 									link = {
 										table: field.dimension,
 										source: f
 									};
 									let nks = tableNks[field.dimension];
-                                    if (field.on && typeof field.on == 'object' && !Array.isArray(field.on)) {
+                                    if (field.on && typeof field.on === 'object' && !Array.isArray(field.on)) {
                                         link.on = [];
                                         link.source = [];
                                         Object.entries(field.on).map(([key, val]) => {
                                             link.on.push(val);
                                             link.source.push(key);
                                         })
-                                    } else if (nks && nks.length == 1) {
+                                    } else if (nks && nks.length === 1) {
                                         link.on = nks[0];
                                     } else if (nks && nks.length > 1) {
                                         link.on = nks;
@@ -314,11 +314,10 @@ function handleFailedValidation(ID, eventObj, error)
 {
 	logger.debug('Adding failed event', eventObj);
 	// sent the event to an error queue
-	// dw.load - error
 	eventObj.error = error;
 
 	if (!errorStream) {
-		errorStream = leo.load(ID, 'dw.load - error');
+		errorStream = leo.load(ID, `${ID}_error`);
 	}
 	errorStream.write(eventObj);
 
