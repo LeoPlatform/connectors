@@ -8,10 +8,13 @@ module.exports = {
 	 * Validate that the value is a valid string
 	 * @param value
 	 * @param maxLength {int}
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidString: function (value, maxLength) {
-		if (typeof value !== 'string') {
+	isValidString: function (value, maxLength, fieldDefault) {
+		if (value === fieldDefault) {
+			return true;
+		} else if (typeof value !== 'string') {
 			return false;
 		} else if (value.length > maxLength) {
 			return false;
@@ -24,38 +27,44 @@ module.exports = {
 	 * Validate that the value is a valid enum. The value must be in the values array
 	 * @param value
 	 * @param values {array}
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidEnum: function (value, values) {
-		return values.indexOf(value) !== -1;
+	isValidEnum: function (value, values, fieldDefault) {
+		return value === fieldDefault || values.indexOf(value) !== -1;
 	},
 
 	/**
 	 * Validate that the value is a valid timestamp
 	 * @param value
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidTimestamp: function (value) {
-		return moment(value).format() !== 'Invalid date';
+	isValidTimestamp: function (value, fieldDefault) {
+		return value === fieldDefault || moment(value).isValid();
 	},
 
 	/**
 	 * Validate that the value is a valid datetime
 	 * @param value
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidDatetime: function (value) {
+	isValidDatetime: function (value, fieldDefault) {
 		// check if it's a valid string. Most datetimes would use 35 chars max if the month is a full name. Give a little extra buffer.
-		return this.isValidString(value, 40) && moment(value).format() !== 'Invalid date';
+		return value === fieldDefault || this.isValidString(value, 40) && moment(value).isValid();
 	},
 
 	/**
 	 * Validate that that value is a valid integer
 	 * @param value
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidInteger: function (value) {
-		if (typeof value !== 'number') {
+	isValidInteger: function (value, fieldDefault) {
+		if (value === fieldDefault) {
+			return true;
+		} else if (typeof value !== 'number') {
 			return false;
 		} else if (value > 2147483647) { // above this, we're going into bigint territory
 			return false;
@@ -70,10 +79,13 @@ module.exports = {
 	 * Validate that the passed in value is a valid bigint
 	 * @param value
 	 * @param maxSize {default: 9223372036854775807, which is the max bigint size for databases}
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidBigint: function (value, maxSize = '9223372036854775807') {
-		if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
+	isValidBigint: function (value, maxSize = '9223372036854775807', fieldDefault) {
+		if (value === fieldDefault) {
+			return true;
+		} else if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
 			logger.error('Invalid bigint', value);
 			return false;
 		} else if (value.length === maxSize.length) {
@@ -103,9 +115,10 @@ module.exports = {
 	/**
 	 * Validate that the value is a valid float
 	 * @param value
+	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidFloat: function (value) {
-		return parseFloat(value) == value;
+	isValidFloat: function (value, fieldDefault) {
+		return parseFloat(value) == value || value === fieldDefault;
 	},
 };

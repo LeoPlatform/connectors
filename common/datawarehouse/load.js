@@ -109,46 +109,47 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 				}
 
 				let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
+				let fieldDefault = table.structure[field] && table.structure[field].default || null;
 				let value = eventObj[field];
 
 				switch (type[1]) {
 					case 'varchar':
-						if (!validate.isValidString(value, type[3] && type[3] || 255)) {
+						if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
 						}
 
 						// check for enum and validate if exists
-						if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values)) {
+						if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
 						}
 					break;
 
 					case 'timestamp':
-						if (!validate.isValidTimestamp(value)) {
+						if (!validate.isValidTimestamp(value, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
 						}
 					break;
 
 					case 'datetime':
-						if (!validate.isValidDatetime(value)) {
+						if (!validate.isValidDatetime(value, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
 						}
 					break;
 
 					case 'integer':
-						if (!validate.isValidInteger(value)) {
+						if (!validate.isValidInteger(value, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
 						}
 					break;
 
 					case 'bigint':
-						if (!validate.isValidBigint(value)) {
+						if (!validate.isValidBigint(value, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
 						}
 					break;
 
 					case 'float':
-						if (!validate.isValidFloat(value)) {
+						if (!validate.isValidFloat(value, fieldDefault)) {
 							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
 						}
 					break;
