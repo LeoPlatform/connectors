@@ -112,51 +112,53 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 				let fieldDefault = table.structure[field] && table.structure[field].default || null;
 				let value = eventObj[field];
 
-				switch (type[1]) {
-					case 'varchar':
-						if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
-						}
+				if (value !== null) {
+					switch (type[1]) {
+						case 'varchar':
+							if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
+							}
 
-						// check for enum and validate if exists
-						if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
-						}
-					break;
+							// check for enum and validate if exists
+							if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
+							}
+						break;
 
-					case 'timestamp':
-						if (!validate.isValidTimestamp(value, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
-						}
-					break;
+						case 'timestamp':
+							if (!validate.isValidTimestamp(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
 
-					case 'datetime':
-						if (!validate.isValidDatetime(value, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
-						}
-					break;
+						case 'datetime':
+							if (!validate.isValidDatetime(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
 
-					case 'integer':
-						if (!validate.isValidInteger(value, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
-						}
-					break;
+						case 'integer':
+							if (!validate.isValidInteger(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
 
-					case 'bigint':
-						if (!validate.isValidBigint(value, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
-						}
-					break;
+						case 'bigint':
+							if (!validate.isValidBigint(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
 
-					case 'float':
-						if (!validate.isValidFloat(value, fieldDefault)) {
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
-						}
-					break;
+						case 'float':
+							if (!validate.isValidFloat(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
 
-					case undefined:
-						return handleFailedValidation(ID, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
-					break;
+						case undefined:
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
+						break;
+					}
 				}
 			});
 		}
