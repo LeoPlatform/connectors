@@ -82,7 +82,10 @@ module.exports = {
 	 * @param fieldDefault
 	 * @returns {boolean}
 	 */
-	isValidBigint: function (value, maxSize = '9223372036854775807', fieldDefault) {
+	isValidBigint: function (value, fieldDefault) {
+		// max size of a bigint
+		const maxSize = '9223372036854775807';
+
 		if (value === fieldDefault) {
 			return true;
 		} else if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
