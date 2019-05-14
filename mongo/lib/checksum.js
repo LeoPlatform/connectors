@@ -1,509 +1,342 @@
 "use strict";
-var aws = require("aws-sdk");
-const crypto = require('crypto');
-var base = require("leo-connector-common/checksum/lib/handler.js");
-var moment = require("moment");
-require("moment-timezone");
-var uuid = require("uuid");
+const basicConnector = require("leo-connector-common/checksum/lib/basicConnector");
+const logger = require("leo-logger")("leo-mongo-connector.checksum");
+const { MongoClient, ObjectID } = require("mongodb");
+const ls = require("leo-sdk").streams;
 
-var mongodb = require("mongodb");
-var MongoClient = mongodb.MongoClient;
-var ObjectID = mongodb.ObjectID;
-var Timestamp = mongodb.Timestamp;
+module.exports = () => {
+    let cacheDB;
 
-module.exports = function() {
-	return base({
-		batch: wrap(batch),
-		individual: wrap(individual),
-		sample: wrap(sample),
-		nibble: wrap(nibble),
-		range: wrap(range),
-		initialize: wrap(initialize),
-		destroy: wrap(destroy),
-	});
+    const getId = (settings, obj, type) => {
+        if (Array.isArray(obj)) {
+            let i = 0;
+            if (type == "max") {
+                i = obj.length - 1;
+            }
+            obj = obj[i];
+        }
+        return obj[settings.id_column];
+    };
 
-	function wrap(method) {
-		return function(event, callback) {
-			method(event, (err, data) => {
-				if (cacheDB) {
-					console.log("Closing Database")
-					cacheDB.close();
-					cacheDB = null;
-				}
-				callback(err, data);
-			});
-		}
-	};
+    const getQueryIdFunction = (settings) => {
+        if (settings.extractId) {
+            return eval(`(${settings.extractId})`);
+        } else if (settings.id_column == "_id") {
+            return (v) => new ObjectID(v);
+        } else {
+            return (v) => v;
+        }
+    };
 
-	function batch(event, callback) {
-		console.log("Calling Batch", event);
+    const getWhereObject = (settings) => {
+        if (settings.where) {
+            return {
+                "$where": settings.where
+            };
+        }
+    };
 
-		var startTime = moment.now();
-		var data = event.data;
-		var settings = event.settings;
-		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
-		};
-		getCollection(settings).then(collection => {
+    const buildExtractFunction = (settings) => {
+        let mapper = (typeof settings.fields == "string") ? settings.fields : settings.map;
+        if (mapper) {
+            return eval(`(${mapper})`);
+        }
+        return settings.fields.map(f => obj[f]);
+    };
 
-			var extract = (obj) => {
-				return settings.fields.map(f => obj[f]);
-			};
+    const getObjects = function (start, end, label, callback) {
 
-			if (typeof settings.fields == "string") {
-				extract = eval(`(${settings.fields})`);
-			}
-			var result = {
-				qty: 0,
-				ids: data.ids,
-				start: data.start,
-				end: data.end,
-				hash: [0, 0, 0, 0]
-			};
+        logger.info("Calling", label, start, end);
+        let settings = this.settings;
+        let id = getQueryIdFunction(settings);
+        getCollection(settings).then(collection => {
 
-			var where = {};
-			if (data.start || data.end) {
-				where[settings.id_column] = {};
+            let extract = buildExtractFunction(settings);
+            let whereObject = getWhereObject(settings);
+            let where = Object.assign({}, whereObject, {
+                [settings.id_column]: {
+                    $gte: id(start),
+                    $lte: id(end)
+                }
+            });
+            let method = settings.method || "find";
+            let projection = settings.projectionFields || {};
+            let sortObject = {};
+            sortObject[settings.id_column] = 1;
 
-				if (data.start) {
-					where[settings.id_column].$gte = id(data.start);
-				}
-				if (data.end) {
-					where[settings.id_column].$lte = id(data.end);
-				}
-			}
-			var cursor = collection.find(where, settings.projectionFields || {}, {
-				'sort': [
-					[settings.id_column, 1]
-				]
-			}).stream();
+            let cursor = ls.pipe(
+                collection[method](where, projection).sort(sortObject).stream(), 
+                ls.through(function (obj, done) {
+                    this.invalid = () => { };
+                    let result = extract.call(this, obj);
+                    done(null, result != undefined ? result : undefined);
+                })
+            );
+            callback(null, cursor);
 
-			cursor.on("end", () => {
-				result.duration = moment.now() - startTime;
-				callback(null, result);
-			}).on("error", (err) => {
-				console.log("Batch On Error", err)
-				callback(err);
-			}).on("data", (obj) => {
-				var allFields = "";
-				extract(obj).forEach(value => {
-					if (value instanceof Date) {
-						allFields += crypto.createHash('md5').update(Math.round(value.getTime() / 1000).toString()).digest('hex');
-					} else if (value !== null && value !== undefined && value.toString) {
-						allFields += crypto.createHash('md5').update(value.toString()).digest('hex');
-					} else {
-						allFields += " ";
-					}
-				});
+        }).catch(callback);
+    };
 
-				var hash = crypto.createHash('md5').update(allFields).digest();
+    let self = basicConnector({
+        wrap: (handler, base) => {
+            return function (event, callback) {
+                base(event, handler, (err, data) => {
+                    if (cacheDB) {
+                        logger.info("Closing Database");
+                        cacheDB.close();
+                        cacheDB = null;
+                    }
+                    callback(err, data);
+                });
+            };
+        },
+        batch: function (start, end, callback) {
+            getObjects.call(this, start, end, "Batch", callback);
+        },
+        individual: function (start, end, callback) {
+            getObjects.call(this, start, end, "Individual", callback);
+        },
+        sample: async function (ids, callback) {
+            logger.info("Calling Sample", ids);
 
-				result.hash[0] += hash.readUInt32BE(0);
-				result.hash[1] += hash.readUInt32BE(4);
-				result.hash[2] += hash.readUInt32BE(8);
-				result.hash[3] += hash.readUInt32BE(12);
-				result.qty += 1;
-			});
-		}).catch(callback);
-	}
+            let cursor;
+            let settings = this.settings;
+            let getid = getId.bind(null, settings);
 
-	function individual(event, callback) {
-		console.log("Calling Individual", event);
-		var startTime = moment.now();
-		var data = event.data;
-		var settings = event.settings;
-		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
-		};
-		getCollection(settings).then(collection => {
+            try {
+                let idFn = getQueryIdFunction(settings);
+                let collection = await getCollection(settings);
+                let extract = buildExtractFunction(settings);
 
-			var extract = (obj) => {
-				return settings.fields.map(f => obj[f]);
-			};
+                let whereObject = getWhereObject(settings);
+                let where = Object.assign({}, whereObject, {
+                    [settings.id_column]: {
+                        $in: ids.map(idFn)
+                    }
+                });
 
-			if (typeof settings.fields == "string") {
-				extract = eval(`(${settings.fields})`);
-			}
+                let method = settings.method || "find";
+                let projection = settings.projectionFields || {};
+                let sortObject = {};
+                sortObject[settings.id_column] = 1;
 
-			var where = {
-				[settings.id_column]: {
-					$gte: id(data.start),
-					$lte: id(data.end)
-				}
-			};
-			var results = {
-				ids: data.ids,
-				start: data.start,
-				end: data.end,
-				qty: 0,
-				checksums: []
-			};
+                cursor = ls.pipe(
+                    collection[method](where, projection).sort(sortObject).stream(),
+                    ls.through(function (obj, done) {
+                        this.invalid = () => { };
+                        let result = extract.call(this, obj);
+                        done(null, result != undefined ? result : undefined);
+                    }), ls.through((o, done) => {
+                        if (ids.indexOf(getid(o)) > -1) {
+                            done(null, o);
+                        } else {
+                            done();
+                        }
+                    })
+                );
+                
+            } catch (err) {
+                logger.error(err);
+                callback(err);
+            }
 
-			var idFn = typeof settings.idFunction === "string" ? eval(`(${settings.idFunction})`) : (obj) => obj[settings.id_column];
+            callback(null, cursor);     //do callback outside of try..catch
+        },
+        nibble: async function (start, end, limit, reverse, callback) {
 
-			var cursor = collection.find(where, settings.projectionFields || {}, {
-				'sort': [
-					[settings.id_column, 1]
-				]
-			}).stream();
+            logger.info("Calling Nibble", start, end, limit, reverse);
+            let r0;
+            let r1;
+            let settings = this.settings;
+            let getid = getId.bind(null, settings);
 
-			cursor.on("end", () => {
-				results.duration = moment.now() - startTime;
-				callback(null, results);
-			}).on("error", (err) => {
-				console.log("Individual On Error", err)
-				callback(err);
-			}).on("data", (obj) => {
-				var allFields = "";
+            try {
+                let id = getQueryIdFunction(settings);
+                let extract = buildExtractFunction(settings);
+                let collection = await getCollection(settings);
+                let whereObject = getWhereObject(settings);
+                let where = Object.assign({}, whereObject, {
+                    [settings.id_column]: {
+                        $gte: id(start),
+                        $lte: id(end)
+                    }
+                });
 
-				extract(obj).forEach(value => {
-					if (value instanceof Date) {
-						allFields += crypto.createHash('md5').update(Math.round(value.getTime() / 1000).toString()).digest('hex');
-					} else if (value !== null && value !== undefined && value.toString) {
-						allFields += crypto.createHash('md5').update(value.toString()).digest('hex');
-					} else {
-						allFields += " ";
-					}
-				});
-				var hash = crypto.createHash('md5').update(allFields).digest('hex');
-				results.checksums.push({
-					id: idFn(obj), //[settings.id_column],
-					_id: settings._id_column ? obj[settings._id_column] : undefined,
-					hash: hash
-				});
-				results.qty += 1;
-			});
+                let method = settings.method || "find";
+                let projection = settings.projectionFields || {};
+                let sortObject = {};
+                sortObject[settings.id_column] = !reverse ? 1 : -1;
 
-		}).catch(callback);
-	}
+                let rows = await collection[method](where, projection).sort(sortObject).limit(2).skip(limit-1).toArray();
 
-	function sample(event, callback) {
-		console.log("Calling Sample", event);
-		var data = event.data;
-		var settings = event.settings;
-		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
-		};
-		getCollection(settings).then(collection => {
+                let r = rows[1] && extract.call({
+                    push: (obj) => {
+                        if (!reverse) {
+                            r1 = (r1 && (getid(r1) < getid(obj))) ? r1 : obj;
+                        } else {
+                            r1 = (r1 && (getid(r1) > getid(obj))) ? r1 : obj;
+                        }
+                    },
+                    invalid: (obj) => {
+                        if (!reverse) {
+                            r1 = (r1 && (getid(r1) < getid(obj))) ? r1 : obj;
+                        } else {
+                            r1 = (r1 && (getid(r1) > getid(obj))) ? r1 : obj;
+                        }
+                    }
+                }, rows[1]);
+                r1 = r1 || r || rows[1];
 
-			var extract = (obj) => {
-				return settings.fields.map(f => obj[f]);
-			};
-			if (typeof settings.fields == "string") {
-				extract = eval(`(${settings.fields})`);
-			}
+                r = rows[0] && extract.call({
+                    push: (obj) => {
+                        if (!reverse) {
+                            r0 = (r0 && (getid(r0) > getid(obj))) ? r0 : obj;
+                        } else {
+                            r0 = (r0 && (getid(r0) < getid(obj))) ? r0 : obj;
+                        }
+                    },
+                    invalid: (obj) => {
+                        if (!reverse) {
+                            r0 = (r0 && (getid(r0) > getid(obj))) ? r0 : obj;
+                        } else {
+                            r0 = (r0 && (getid(r0) < getid(obj))) ? r0 : obj;
+                        }
+                    }
+                }, rows[0]);
+                r0 = r0 || r || rows[0];
 
-			var results = {
-				qty: 0,
-				ids: [],
-				start: data.start,
-				end: data.end,
-				checksums: []
-			};
+            } catch (err) {
+                logger.error(err);
+                callback(err);
+            }
 
-			var where = {};
+            callback(null, {    //do callback outside of try..catch
+                next: r1 ? getid(r1) : null,
+                current: r0 ? getid(r0) : null
+            }); 
+        },
+        range: async function (start, end, callback) {
 
-			if (data.ids) {
-				if (settings.id_column == "_id") {
-					where = {
-						[settings.id_column]: {
-							$in: data.ids.map(f => new ObjectID(f))
-						}
-					};
-				} else {
-					where = {
-						[settings.id_column]: {
-							$in: data.ids
-						}
-					};
-				}
-			} else {
-				where = {
-					[settings.id_column]: {
-						$gte: data.start,
-						$lte: data.end
-					}
-				};
-			}
-			var idFn = settings.idFunction === "string" ? eval(`(${settings.idFunction})`) : (obj) => obj[settings.id_column];
-			var cursor = collection.find(where, settings.projectionFields || {}, {
-				'sort': [
-					[settings.id_column, 1]
-				]
-			}).stream();
+            logger.info("Calling Range", start, end);
+            let s;
+            let e;
+            let totalResult;
+            let settings = this.settings;
+            let getid = getId.bind(null, settings);
 
-			cursor.on("end", function() {
-				callback(null, results);
-			}).on("err", function(err) {
-				console.log("error");
-				throw err;
-			}).on("data", function(obj) {
-				var out = [];
-				extract(obj, "sample").forEach(value => {
-					if (value instanceof Date) {
-						out.push(Math.round(value.getTime() / 1000) + "  " + moment(value).utc().format());
-					} else if (value && typeof value == "object" && value.toHexString) {
-						out.push(value.toString());
-					} else {
-						out.push(value);
-					}
-				});
+            try {
+                let id = getQueryIdFunction(settings);
+                let extract = buildExtractFunction(settings);
+                let collection = await getCollection(settings);
+                let whereObject = getWhereObject(settings);
+                let min = Object.assign({}, whereObject);
+                let max = Object.assign({}, whereObject);
+                let total = Object.assign({}, whereObject);
 
-				results.ids.push(idFn(obj));
-				results.checksums.push(out);
-				results.qty += 1;
-			});
+                if (start || end) {
+                    total[settings.id_column] = {};
+                }
+                if (start) {
+                    min[settings.id_column] = {
+                        $gte: id(start)
+                    };
+                    total[settings.id_column].$gte = id(start);
+                }
+                if (end) {
+                    max[settings.id_column] = {
+                        $lte: id(end)
+                    };
+                    total[settings.id_column].$lte = id(end);
+                }
+                let method = settings.method || "find";
+                let projection = settings.projectionFields || {};
 
-		}).catch(callback);
-	}
+                let startSortObject = {};
+                startSortObject[settings.id_column] = 1;
+                let startResult = await collection[method](min, projection).sort(startSortObject).limit(1).toArray();
+                let endSortObject = {};
+                endSortObject[settings.id_column] = -1;
+                let endResult = await collection[method](max, projection).sort(endSortObject).limit(1).toArray();
+                totalResult = await collection[method](total).count();
 
-	function range(event, callback) {
-		console.log("Calling Range", event);
+                let r = extract.call({
+                    push: (obj) => {
+                        s = (s && (getid(s) < getid(obj))) ? s : obj;
+                    },
+                    invalid: (obj) => {
+                        s = (s && (getid(s) < getid(obj))) ? s : obj;
+                    }
+                }, startResult[0]);
+                s = s || r || startResult[0];
 
-		//var [data, settings, collection] = [event.data, event.settings, getCollection(settings)]
-		var data = event.data;
-		var settings = event.settings;
-		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
-		};
-		getCollection(settings).then(collection => {
-			var max = {};
-			var min = {};
-			var total = {};
+                r = extract.call({
+                    push: (obj) => {
+                        e = (e && (getid(e) > getid(obj))) ? e : obj;
+                    },
+                    invalid: (obj) => {
+                        e = (e && (getid(e) > getid(obj))) ? e : obj;
+                    }
+                }, endResult[0]);
+                e = e || r || endResult[0];
+                
+            } catch (err) {
+                logger.error(err);
+                callback(err);
+            }
 
-			if (data.start || data.end) {
-				total[settings.id_column] = {};
-			}
-			if (data.start) {
-				min[settings.id_column] = {
-					$gte: id(data.start)
-				};
-				total[settings.id_column].$gte = id(data.start);
-			}
-			if (data.end) {
-				max[settings.id_column] = {
-					$lte: id(data.end)
-				};
-				total[settings.id_column].$lte = id(data.end);
-			}
-			collection.findOne(min, {
-				[settings.id_column]: 1
-			}, {
-				'sort': [
-					[settings.id_column, 1]
-				],
-				"limit": 1
-			}, (err, start) => {
-				if (err) {
-					return callback(err);
-				}
-				collection.findOne(max, {
-					[settings.id_column]: 1
-				}, {
-					'sort': [
-						[settings.id_column, -1]
-					],
-					"limit": 1
-				}, (err, end) => {
-					if (err) {
-						return callback(err);
-					}
-					collection.count(total, (err, total) => {
-						if (err) {
-							return callback(err);
-						}
-						callback(null, {
-							min: start[settings.id_column] || 0,
-							max: end[settings.id_column],
-							total: total
-						});
-					});
-				});
-			});
-		}).catch(callback);
-	}
+            callback(null, {       //do callback outside of try..catch
+                min: getid(s) || 0,
+                max: getid(e),
+                total: totalResult
+            });
+        },
+        initialize: (data) => {
+            logger.info("Calling Initialize", data);
+            return Promise.resolve({});
+        },
+        destroy: function (data, callback) {
+            logger.info("Calling Destroy", data);
+            callback();
+        },
+        delete: async function (ids, callback) {
+            
+            logger.info("Calling Delete", ids);
+            let settings = this.settings;
 
-	function nibble(event, callback) {
-		console.log("Calling Nibble", event);
+            try {
+                let idFn = getQueryIdFunction(settings);
+                let collection = await getCollection(settings);
+                let whereObject = getWhereObject(settings);
+                let where = Object.assign({}, whereObject, {
+                    [settings.id_column]: {
+                        $in: ids.map(idFn)
+                    }
+                });
+                let obj = await collection.deleteMany(where);
+                logger.info(`Deleted ${obj.result.n} Objects`);
 
-		var data = event.data;
-		var settings = event.settings;
-		var id = (value) => {
-			return (settings.id_column == "_id" && value != null && value != undefined) ? new ObjectID(value) : value
-		};
+            } catch (err) {
+                logger.error(err);
+                callback(err);
+            }
+            callback();
+        }
+    });
 
-		getCollection(settings).then(collection => {
-			var where = {
-				[settings.id_column]: {
-					$gte: id(data.start),
-					$lte: id(data.end)
-				}
-			};
-			collection.find(where, {
-				[settings.id_column]: 1
-			}, {
-				sort: [
-					[settings.id_column, !data.reverse ? 1 : -1]
-				],
-				limit: 2,
-				skip: data.limit - 1
-			}).toArray((err, rows) => {
-				if (err) {
-					return callback(err);
-				}
-				data.current = rows[0] ? rows[0][settings.id_column] : null;
-				data.next = rows[1] ? rows[1][settings.id_column] : null;
-				callback(null, data)
-			});
-		}).catch(callback);
-	}
+    async function getCollection(settings) {
+        let opts = Object.assign({}, settings);
+        logger.info("Connection Info", opts.database, opts.collection);
 
-	function initialize(event, callback) {
-		console.log("Calling Initialize", event)
-		callback(null, {});
-	}
+        try {
+            let mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: 1 });
+            cacheDB = mongoClient;
+            let db = mongoClient.db();
+            return db.collection(opts.collection);
+        } catch (err) {
+            logger.error(err);
+            return err;
+        }
+    }
 
-	function destroy(event, callback) {
-		console.log("Calling Destroy", event);
-		callback()
-	}
-
-	var cacheDB;
-
-	function getCollection(settings) {
-		var opts = Object.assign({}, settings);
-		console.log("Connection Info", opts.database, opts.collection)
-		return new Promise((resolve, reject) => {
-			MongoClient.connect(opts.database, (err, db) => {
-				if (err) {
-					reject(err);
-				} else {
-					cacheDB = db;
-					resolve(db.collection(opts.collection));
-				}
-			})
-		});
-	}
-
-	function escape(value) {
-		if (typeof value == "string") {
-			return "'" + value + "'";
-		}
-		return value;
-	}
-
-	function getFields(connection, event) {
-		console.log(event);
-		var settings = event.settings;
-		var tableName = getTable(event);
-		return new Promise((resolve, reject) => {
-			var typesQuery = `SELECT column_name as field, DATA_TYPE as type, CHARACTER_MAXIMUM_LENGTH length FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '${tableName}';`
-			connection.query(typesQuery, (err, types) => {
-				if (err) {
-					console.log("Batch Get Types Error", err);
-					reject(err);
-				} else {
-					var fields = [];
-					var table = types.reduce((obj, row) => {
-						obj[row.field] = row;
-						return obj;
-					}, {});
-					var fieldCalcs = settings.fields.map(field => {
-						var def = table[field];
-						if (!def) {
-							return "' '";
-						}
-						fields.push(def.field);
-						switch (def.type.toLowerCase()) {
-							case "date":
-							case "datetime":
-							case "timestamp":
-								return `coalesce(md5(floor(UNIX_TIMESTAMP(${def.field}))))`;
-							default:
-								return `coalesce(md5(${def.field}), " ")`;
-								break;
-						}
-					});
-					resolve({
-						fieldCalcs: fieldCalcs,
-						fields: fields
-					});
-				}
-			});
-		});
-	}
-
-	function where(data, settings) {
-		var where = "";
-		if (data.ids) {
-			where = `where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`
-		} else if (data.start || data.end) {
-			var parts = [];
-			if (data.start) {
-				parts.push(`${settings.id_column} >= ${escape(data.start)}`);
-			}
-			if (data.end) {
-				parts.push(`${settings.id_column} <= ${escape(data.end)}`);
-			}
-			where = "where " + parts.join(" and ");
-		}
-
-		if (settings.where) {
-			if (where.trim() != '') {
-				where += " and ";
-			} else {
-				where = "where ";
-			}
-			where += buildWhere(settings.where);
-		}
-		return where;
-	}
-
-	function buildWhere(where, combine) {
-		combine = combine || "and"
-		if (where) {
-			var w = [];
-			if (typeof where == "object" && where.length) {
-				where.forEach(function(e) {
-					if (typeof e != "object") {
-						w.push(e);
-					} else if ("_" in e) {
-						w.push(e._);
-					} else if ("or" in e) {
-						w.push(buildWhere(e.or, "or"));
-					} else if ("and" in e) {
-						w.push(buildWhere(e.and));
-					} else {
-						w.push(`${e.field} ${e.op || "="} ${escape(e.value)}`);
-					}
-				});
-			} else if (typeof where == "object") {
-				for (var k in where) {
-					var entry = where[k];
-					var val = "";
-					var op = "="
-
-					if (typeof(entry) != "object") {
-						val = entry;
-					} else if ("or" in entry) {
-						w.push(buildWhere(entry.or, "or"));
-					} else if ("and" in entry) {
-						w.push(buildWhere(entry.and));
-					} else {
-						k = entry.field || k;
-						val = entry.value;
-						op = entry.op || op;
-					}
-
-					w.push(`${k} ${op} ${escape(val)}`);
-				}
-			} else {
-				w.push(where);
-			}
-
-			var joined = w.join(` ${combine} `);
-			return `(${joined})`;
-		}
-		return ""
-	}
-}
+    return self;
+};
