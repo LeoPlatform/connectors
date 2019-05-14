@@ -1,20 +1,32 @@
 "use strict";
 
+const logger = require('leo-logger');
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const combine = require("./combine.js");
 const async = require("async");
+const validate = require('./../utils/validation');
+let errorStream;
 
-module.exports = function(client, tableConfig, stream, callback) {
+module.exports = function(ID, client, tableConfig, stream, callback) {
+
+	// adding backwards compatibility for ID
+	if (!callback) {
+		callback = stream;
+		stream = tableConfig;
+		tableConfig = client;
+		client = ID;
+		ID = 'system:dw-ingest';
+	}
+
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
 	Object.keys(tableConfig).forEach(t => {
 		let config = tableConfig[t];
-		//console.log("config", t, JSON.stringify(config, null, 2));
 		Object.keys(config.structure).forEach(f => {
 			let field = config.structure[f];
-			if (field == "sk" || field.sk) {
+			if (field === "sk" || field.sk) {
 				tableSks[t] = f;
 			} else if (field.nk) {
 				if (!(t in tableNks)) {
@@ -26,7 +38,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 	});
 
 	let checkforDelete = ls.through(function(obj, done) {
-		if (obj.payload.type == "delete") {
+		if (obj.payload.type === "delete") {
 			let data = obj.payload.data || {};
 			let ids = data.in || [];
 			let entities = data.entities || [];
@@ -40,7 +52,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							command: "delete",
 							field: field,
 							data: {
-								id: field == "id" ? id : `_del_${id}`,
+								id: field === 'id' ? id : `_del_${id}`,
 								__leo_delete__: field,
 								__leo_delete_id__: id
 							}
@@ -54,8 +66,113 @@ module.exports = function(client, tableConfig, stream, callback) {
 		}
 	});
 
+	let validateData = ls.through(function(obj, done) {
+		let eventObj = obj.payload.data;
+		let invalid = false;
+
+		if (obj.payload.type === 'delete') {
+			if (eventObj.in && Array.isArray(eventObj.in) && eventObj.in.length) {
+				invalid = eventObj.in.some(id => {
+					if (typeof id !== 'number' && typeof id !== 'string') {
+						// invalid event
+						return true;
+					}
+				});
+			} else {
+				invalid = handleFailedValidation(ID, obj, 'No events id’s in delete.');
+			}
+		} else {
+			let tableName = obj.payload.table || obj.payload.entity;
+			let table;
+
+			// find the table name
+			// first check the config object key
+			if (tableConfig[tableName]) {
+				table = tableConfig[t];
+			} else {
+				// then check the config label
+				Object.keys(tableConfig).some(entity => {
+					if (tableConfig[entity].label === tableName) {
+						if ((tableConfig[entity].isDimension && obj.payload.type === 'dimension') || (obj.payload.type === 'fact' && !tableConfig[entity].isDimension)) {
+							table = tableConfig[entity];
+							return true;
+						}
+					}
+				});
+			}
+
+			// note: this returns TRUE when something is invalid.
+			invalid = Object.keys(eventObj).some(field => {
+				// if we cannot find a matching table, it’s an invalid record.
+				if (!table) {
+					return handleFailedValidation(ID, obj, `No table found for ${tableName}`);
+				}
+
+				let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
+				let fieldDefault = table.structure[field] && table.structure[field].default || null;
+				let value = eventObj[field];
+
+				if (value !== null) {
+					switch (type[1]) {
+						case 'varchar':
+							if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
+							}
+
+							// check for enum and validate if exists
+							if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
+							}
+						break;
+
+						case 'timestamp':
+							if (!validate.isValidTimestamp(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
+
+						case 'datetime':
+							if (!validate.isValidDatetime(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
+
+						case 'integer':
+							if (!validate.isValidInteger(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
+
+						case 'bigint':
+							if (!validate.isValidBigint(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
+
+						case 'float':
+							if (!validate.isValidFloat(value, fieldDefault)) {
+								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+							}
+						break;
+
+						case undefined:
+							return handleFailedValidation(ID, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
+						break;
+					}
+				}
+			});
+		}
+
+		if (invalid) {
+			logger.error('Record has error');
+			done();
+		} else {
+			done(null, obj);
+		}
+	});
+
 	let usedTables = {};
-	ls.pipe(stream, checkforDelete, combine(tableNks), ls.write((obj, done) => {
+	ls.pipe(stream, validateData, checkforDelete, combine(tableNks), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
@@ -73,7 +190,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 
-						if (field == "sk" || field.sk) {
+						if (field === "sk" || field.sk) {
 							sk = f;
 						} else if (field.nk) {
 							nk.push(f);
@@ -81,6 +198,7 @@ module.exports = function(client, tableConfig, stream, callback) {
 							scds[field.scd].push(f);
 						}
 					});
+
 					if (tableConfig[t].isDimension) {
 						client.importDimension(obj[t].stream, t, sk, nk, scds, (err, tableInfo) => {
 							if (!err && tableInfo && tableInfo.count === 0) {
@@ -120,11 +238,10 @@ module.exports = function(client, tableConfig, stream, callback) {
 							6: []
 						};
 						let links = [];
-						//if (!config || !config.structure) console.log(t);
 						config && config.structure && Object.keys(config.structure).forEach(f => {
 							let field = config.structure[f];
 
-							if (field == "sk" || field.sk) {
+							if (field === "sk" || field.sk) {
 								sk = f;
 							} else if (field.nk) {
 								nk.push(f);
@@ -133,20 +250,20 @@ module.exports = function(client, tableConfig, stream, callback) {
 							}
 							if (field.dimension) {
 								let link = {};
-								if (typeof field.dimension == "string") {
+								if (typeof field.dimension === 'string') {
 									link = {
 										table: field.dimension,
 										source: f
 									};
 									let nks = tableNks[field.dimension];
-                                    if (field.on && typeof field.on == 'object' && !Array.isArray(field.on)) {
+                                    if (field.on && typeof field.on === 'object' && !Array.isArray(field.on)) {
                                         link.on = [];
                                         link.source = [];
                                         Object.entries(field.on).map(([key, val]) => {
                                             link.on.push(val);
                                             link.source.push(key);
                                         })
-                                    } else if (nks && nks.length == 1) {
+                                    } else if (nks && nks.length === 1) {
                                         link.on = nks[0];
                                     } else if (nks && nks.length > 1) {
                                         link.on = nks;
@@ -175,7 +292,37 @@ module.exports = function(client, tableConfig, stream, callback) {
 			}
 		});
 	}), err => {
-		console.log("IN HERE!!!!!!!");
-		callback(err, "ALL DONE");
+		// close the error stream if open
+		if (errorStream) {
+			errorStream.end(streamError => {
+				if (streamError) {
+					logger.error('Closing error stream with error', streamError);
+				} else {
+					logger.log('Closing error stream');
+				}
+			});
+		}
+
+		callback(err, "ALL DONE Ingesting");
 	});
 };
+
+/**
+ * Pass the failed object onto a failed queue.
+ * @param ID {string}
+ * @param eventObj {Object}
+ * @param error {string}
+ */
+function handleFailedValidation(ID, eventObj, error)
+{
+	logger.debug('Adding failed event', eventObj);
+	// sent the event to an error queue
+	eventObj.error = error;
+
+	if (!errorStream) {
+		errorStream = leo.load(ID, `${ID}_error`);
+	}
+	errorStream.write(eventObj);
+
+	return true;
+}
