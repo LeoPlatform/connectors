@@ -1,17 +1,14 @@
 "use strict";
-var aws = require("aws-sdk");
 const crypto = require('crypto');
 var base = require("leo-connector-common/checksum/lib/handler.js");
 var moment = require("moment");
 require("moment-timezone");
-var uuid = require("uuid");
 
 var mongodb = require("mongodb");
 var MongoClient = mongodb.MongoClient;
 var ObjectID = mongodb.ObjectID;
-var Timestamp = mongodb.Timestamp;
 
-module.exports = function() {
+module.exports = function () {
 	return base({
 		batch: wrap(batch),
 		individual: wrap(individual),
@@ -23,10 +20,10 @@ module.exports = function() {
 	});
 
 	function wrap(method) {
-		return function(event, callback) {
+		return function (event, callback) {
 			method(event, (err, data) => {
 				if (cacheDB) {
-					console.log("Closing Database")
+					console.log("Closing Database");
 					cacheDB.close();
 					cacheDB = null;
 				}
@@ -42,7 +39,7 @@ module.exports = function() {
 		var data = event.data;
 		var settings = event.settings;
 		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
+			return settings.id_column === "_id" ? new ObjectID(value) : value
 		};
 		getCollection(settings).then(collection => {
 
@@ -50,7 +47,7 @@ module.exports = function() {
 				return settings.fields.map(f => obj[f]);
 			};
 
-			if (typeof settings.fields == "string") {
+			if (typeof settings.fields === "string") {
 				extract = eval(`(${settings.fields})`);
 			}
 			var result = {
@@ -113,7 +110,7 @@ module.exports = function() {
 		var data = event.data;
 		var settings = event.settings;
 		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
+			return settings.id_column === "_id" ? new ObjectID(value) : value
 		};
 		getCollection(settings).then(collection => {
 
@@ -121,7 +118,7 @@ module.exports = function() {
 				return settings.fields.map(f => obj[f]);
 			};
 
-			if (typeof settings.fields == "string") {
+			if (typeof settings.fields === "string") {
 				extract = eval(`(${settings.fields})`);
 			}
 
@@ -181,15 +178,13 @@ module.exports = function() {
 		console.log("Calling Sample", event);
 		var data = event.data;
 		var settings = event.settings;
-		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
-		};
+
 		getCollection(settings).then(collection => {
 
 			var extract = (obj) => {
 				return settings.fields.map(f => obj[f]);
 			};
-			if (typeof settings.fields == "string") {
+			if (typeof settings.fields === "string") {
 				extract = eval(`(${settings.fields})`);
 			}
 
@@ -204,7 +199,7 @@ module.exports = function() {
 			var where = {};
 
 			if (data.ids) {
-				if (settings.id_column == "_id") {
+				if (settings.id_column === "_id") {
 					where = {
 						[settings.id_column]: {
 							$in: data.ids.map(f => new ObjectID(f))
@@ -232,17 +227,17 @@ module.exports = function() {
 				]
 			}).stream();
 
-			cursor.on("end", function() {
+			cursor.on("end", function () {
 				callback(null, results);
-			}).on("err", function(err) {
+			}).on("err", function (err) {
 				console.log("error");
 				throw err;
-			}).on("data", function(obj) {
+			}).on("data", function (obj) {
 				var out = [];
 				extract(obj, "sample").forEach(value => {
 					if (value instanceof Date) {
 						out.push(Math.round(value.getTime() / 1000) + "  " + moment(value).utc().format());
-					} else if (value && typeof value == "object" && value.toHexString) {
+					} else if (value && typeof value === "object" && value.toHexString) {
 						out.push(value.toString());
 					} else {
 						out.push(value);
@@ -264,7 +259,7 @@ module.exports = function() {
 		var data = event.data;
 		var settings = event.settings;
 		var id = (value) => {
-			return settings.id_column == "_id" ? new ObjectID(value) : value
+			return settings.id_column === "_id" ? new ObjectID(value) : value
 		};
 		getCollection(settings).then(collection => {
 			var max = {};
@@ -329,7 +324,7 @@ module.exports = function() {
 		var data = event.data;
 		var settings = event.settings;
 		var id = (value) => {
-			return (settings.id_column == "_id" && value != null && value != undefined) ? new ObjectID(value) : value
+			return (settings.id_column === "_id" && value != null && value != undefined) ? new ObjectID(value) : value;
 		};
 
 		getCollection(settings).then(collection => {
@@ -386,7 +381,7 @@ module.exports = function() {
 	}
 
 	function escape(value) {
-		if (typeof value == "string") {
+		if (typeof value === "string") {
 			return "'" + value + "'";
 		}
 		return value;
@@ -436,7 +431,7 @@ module.exports = function() {
 	function where(data, settings) {
 		var where = "";
 		if (data.ids) {
-			where = `where ${settings.id_column} in (${data.ids.map(f=>escape(f))})`
+			where = `where ${settings.id_column} in (${data.ids.map(f => escape(f))})`
 		} else if (data.start || data.end) {
 			var parts = [];
 			if (data.start) {
@@ -460,11 +455,11 @@ module.exports = function() {
 	}
 
 	function buildWhere(where, combine) {
-		combine = combine || "and"
+		combine = combine || "and";
 		if (where) {
 			var w = [];
 			if (typeof where == "object" && where.length) {
-				where.forEach(function(e) {
+				where.forEach(function (e) {
 					if (typeof e != "object") {
 						w.push(e);
 					} else if ("_" in e) {
@@ -483,7 +478,7 @@ module.exports = function() {
 					var val = "";
 					var op = "="
 
-					if (typeof(entry) != "object") {
+					if (typeof(entry) !== "object") {
 						val = entry;
 					} else if ("or" in entry) {
 						w.push(buildWhere(entry.or, "or"));
@@ -506,4 +501,4 @@ module.exports = function() {
 		}
 		return ""
 	}
-}
+};
