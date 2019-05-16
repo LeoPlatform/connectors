@@ -8,14 +8,15 @@ const async = require("async");
 const validate = require('./../utils/validation');
 let errorStream;
 
-module.exports = function(ID, client, tableConfig, stream, callback) {
+module.exports = function(ID, source, client, tableConfig, stream, callback) {
 
-	// adding backwards compatibility for ID
+	// adding backwards compatibility for ID and source
 	if (!callback) {
-		callback = stream;
-		stream = tableConfig;
-		tableConfig = client;
+		callback = tableConfig;
+		stream = client;
+		tableConfig = source;
 		client = ID;
+		source = 'queue:dw.load';
 		ID = 'system:dw-ingest';
 	}
 
@@ -79,7 +80,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 					}
 				});
 			} else {
-				invalid = handleFailedValidation(ID, obj, 'No events id’s in delete.');
+				invalid = handleFailedValidation(ID, source, obj, 'No events id’s in delete.');
 			}
 		} else {
 			let tableName = obj.payload.table || obj.payload.entity;
@@ -105,7 +106,7 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 			invalid = Object.keys(eventObj).some(field => {
 				// if we cannot find a matching table, it’s an invalid record.
 				if (!table) {
-					return handleFailedValidation(ID, obj, `No table found for ${tableName}`);
+					return handleFailedValidation(ID, source, obj, `No table found for ${tableName}`);
 				}
 
 				let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
@@ -116,47 +117,47 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 					switch (type[1]) {
 						case 'varchar':
 							if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid String on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid String on field ${field}`);
 							}
 
 							// check for enum and validate if exists
 							if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid enum on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid enum on field ${field}`);
 							}
 						break;
 
 						case 'timestamp':
 							if (!validate.isValidTimestamp(value, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
 							}
 						break;
 
 						case 'datetime':
 							if (!validate.isValidDatetime(value, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
 							}
 						break;
 
 						case 'integer':
 							if (!validate.isValidInteger(value, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
 							}
 						break;
 
 						case 'bigint':
 							if (!validate.isValidBigint(value, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
 							}
 						break;
 
 						case 'float':
 							if (!validate.isValidFloat(value, fieldDefault)) {
-								return handleFailedValidation(ID, obj, `Invalid ${type[1]} on field ${field}`);
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
 							}
 						break;
 
 						case undefined:
-							return handleFailedValidation(ID, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
+							return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
 						break;
 					}
 				}
@@ -310,17 +311,18 @@ module.exports = function(ID, client, tableConfig, stream, callback) {
 /**
  * Pass the failed object onto a failed queue.
  * @param ID {string}
+ * @param source {string}
  * @param eventObj {Object}
  * @param error {string}
  */
-function handleFailedValidation(ID, eventObj, error)
+function handleFailedValidation(ID, source, eventObj, error)
 {
 	logger.debug('Adding failed event', eventObj);
 	// sent the event to an error queue
 	eventObj.error = error;
 
 	if (!errorStream) {
-		errorStream = leo.load(ID, `${ID}_error`);
+		errorStream = leo.load(ID, `${source}_error`);
 	}
 	errorStream.write(eventObj);
 
