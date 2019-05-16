@@ -82,6 +82,8 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 			} else {
 				invalid = handleFailedValidation(ID, source, obj, 'No events id’s in delete.');
 			}
+		} else if (!obj || !obj.payload || !obj.payload.table && !obj.payload.entity) {
+			invalid = handleFailedValidation(ID, source, obj, 'Invalid payload.');
 		} else {
 			let tableName = obj.payload.table || obj.payload.entity;
 			let table;
