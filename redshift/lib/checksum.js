@@ -157,7 +157,6 @@ module.exports = function (connection, fieldsTable) {
                 callback("ids or (not_ids, start, end) are required");
                 return;
             }
-
             logger.log("Delete Query", delQuery);
             connection.query(delQuery, (err) => {
                 if (err) {
@@ -448,7 +447,6 @@ module.exports = function (connection, fieldsTable) {
             } else {
                 w.push(where);
             }
-
             var joined = w.join(` ${combine} `);
             return `(${joined})`;
         }
@@ -465,7 +463,6 @@ module.exports = function (connection, fieldsTable) {
         if (metadata.dataTypeID == 20) {
             return parseInt(value);
         }
-
         return value;
     }
 };

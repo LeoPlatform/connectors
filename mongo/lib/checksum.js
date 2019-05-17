@@ -5,8 +5,7 @@ const { MongoClient, ObjectID } = require("mongodb");
 const ls = require("leo-sdk").streams;
 
 module.exports = () => {
-    let cacheDB;
-
+    let cachedMongoClient;
     const getId = (settings, obj, type) => {
         if (Array.isArray(obj)) {
             let i = 0;
@@ -17,7 +16,6 @@ module.exports = () => {
         }
         return obj[settings.id_column];
     };
-
     const getQueryIdFunction = (settings) => {
         if (settings.extractId) {
             return eval(`(${settings.extractId})`);
@@ -27,7 +25,6 @@ module.exports = () => {
             return (v) => v;
         }
     };
-
     const getWhereObject = (settings) => {
         if (settings.where) {
             return {
@@ -35,7 +32,6 @@ module.exports = () => {
             };
         }
     };
-
     const buildExtractFunction = (settings) => {
         let mapper = (typeof settings.fields == "string") ? settings.fields : settings.map;
         if (mapper) {
@@ -43,14 +39,13 @@ module.exports = () => {
         }
         return settings.fields.map(f => obj[f]);
     };
-
-    const getObjects = function (start, end, label, callback) {
-
+    const getObjects = async function (start, end, label, callback) {
         logger.info("Calling", label, start, end);
         let settings = this.settings;
         let id = getQueryIdFunction(settings);
-        getCollection(settings).then(collection => {
-
+        let cursor;
+        try {
+            let collection = await getCollection(settings);
             let extract = buildExtractFunction(settings);
             let whereObject = getWhereObject(settings);
             let where = Object.assign({}, whereObject, {
@@ -63,8 +58,7 @@ module.exports = () => {
             let projection = settings.projectionFields || {};
             let sortObject = {};
             sortObject[settings.id_column] = 1;
-
-            let cursor = ls.pipe(
+            cursor = ls.pipe(
                 collection[method](where, projection).sort(sortObject).stream(), 
                 ls.through(function (obj, done) {
                     this.invalid = () => { };
@@ -72,19 +66,20 @@ module.exports = () => {
                     done(null, result != undefined ? result : undefined);
                 })
             );
-            callback(null, cursor);
-
-        }).catch(callback);
+        } catch (err) {
+            logger.error(err);
+            callback(err);
+        }
+        callback(null, cursor);     //do callback outside of try..catch
     };
-
     let self = basicConnector({
         wrap: (handler, base) => {
             return function (event, callback) {
                 base(event, handler, (err, data) => {
-                    if (cacheDB) {
+                    if (cachedMongoClient) {
                         logger.info("Closing Database");
-                        cacheDB.close();
-                        cacheDB = null;
+                        cachedMongoClient.close();
+                        cachedMongoClient = null;
                     }
                     callback(err, data);
                 });
@@ -98,28 +93,23 @@ module.exports = () => {
         },
         sample: async function (ids, callback) {
             logger.info("Calling Sample", ids);
-
             let cursor;
             let settings = this.settings;
             let getid = getId.bind(null, settings);
-
             try {
                 let idFn = getQueryIdFunction(settings);
                 let collection = await getCollection(settings);
                 let extract = buildExtractFunction(settings);
-
                 let whereObject = getWhereObject(settings);
                 let where = Object.assign({}, whereObject, {
                     [settings.id_column]: {
                         $in: ids.map(idFn)
                     }
                 });
-
                 let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
                 let sortObject = {};
                 sortObject[settings.id_column] = 1;
-
                 cursor = ls.pipe(
                     collection[method](where, projection).sort(sortObject).stream(),
                     ls.through(function (obj, done) {
@@ -134,22 +124,18 @@ module.exports = () => {
                         }
                     })
                 );
-                
             } catch (err) {
                 logger.error(err);
                 callback(err);
             }
-
             callback(null, cursor);     //do callback outside of try..catch
         },
         nibble: async function (start, end, limit, reverse, callback) {
-
             logger.info("Calling Nibble", start, end, limit, reverse);
             let r0;
             let r1;
             let settings = this.settings;
             let getid = getId.bind(null, settings);
-
             try {
                 let id = getQueryIdFunction(settings);
                 let extract = buildExtractFunction(settings);
@@ -161,14 +147,11 @@ module.exports = () => {
                         $lte: id(end)
                     }
                 });
-
                 let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
                 let sortObject = {};
                 sortObject[settings.id_column] = !reverse ? 1 : -1;
-
                 let rows = await collection[method](where, projection).sort(sortObject).limit(2).skip(limit-1).toArray();
-
                 let r = rows[1] && extract.call({
                     push: (obj) => {
                         if (!reverse) {
@@ -186,7 +169,6 @@ module.exports = () => {
                     }
                 }, rows[1]);
                 r1 = r1 || r || rows[1];
-
                 r = rows[0] && extract.call({
                     push: (obj) => {
                         if (!reverse) {
@@ -204,26 +186,22 @@ module.exports = () => {
                     }
                 }, rows[0]);
                 r0 = r0 || r || rows[0];
-
             } catch (err) {
                 logger.error(err);
                 callback(err);
             }
-
             callback(null, {    //do callback outside of try..catch
                 next: r1 ? getid(r1) : null,
                 current: r0 ? getid(r0) : null
             }); 
         },
         range: async function (start, end, callback) {
-
             logger.info("Calling Range", start, end);
             let s;
             let e;
             let totalResult;
             let settings = this.settings;
             let getid = getId.bind(null, settings);
-
             try {
                 let id = getQueryIdFunction(settings);
                 let extract = buildExtractFunction(settings);
@@ -232,7 +210,6 @@ module.exports = () => {
                 let min = Object.assign({}, whereObject);
                 let max = Object.assign({}, whereObject);
                 let total = Object.assign({}, whereObject);
-
                 if (start || end) {
                     total[settings.id_column] = {};
                 }
@@ -250,7 +227,6 @@ module.exports = () => {
                 }
                 let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
-
                 let startSortObject = {};
                 startSortObject[settings.id_column] = 1;
                 let startResult = await collection[method](min, projection).sort(startSortObject).limit(1).toArray();
@@ -258,7 +234,6 @@ module.exports = () => {
                 endSortObject[settings.id_column] = -1;
                 let endResult = await collection[method](max, projection).sort(endSortObject).limit(1).toArray();
                 totalResult = await collection[method](total).count();
-
                 let r = extract.call({
                     push: (obj) => {
                         s = (s && (getid(s) < getid(obj))) ? s : obj;
@@ -268,7 +243,6 @@ module.exports = () => {
                     }
                 }, startResult[0]);
                 s = s || r || startResult[0];
-
                 r = extract.call({
                     push: (obj) => {
                         e = (e && (getid(e) > getid(obj))) ? e : obj;
@@ -278,12 +252,10 @@ module.exports = () => {
                     }
                 }, endResult[0]);
                 e = e || r || endResult[0];
-                
             } catch (err) {
                 logger.error(err);
                 callback(err);
             }
-
             callback(null, {       //do callback outside of try..catch
                 min: getid(s) || 0,
                 max: getid(e),
@@ -299,10 +271,8 @@ module.exports = () => {
             callback();
         },
         delete: async function (ids, callback) {
-            
             logger.info("Calling Delete", ids);
             let settings = this.settings;
-
             try {
                 let idFn = getQueryIdFunction(settings);
                 let collection = await getCollection(settings);
@@ -314,7 +284,6 @@ module.exports = () => {
                 });
                 let obj = await collection.deleteMany(where);
                 logger.info(`Deleted ${obj.result.n} Objects`);
-
             } catch (err) {
                 logger.error(err);
                 callback(err);
@@ -322,14 +291,12 @@ module.exports = () => {
             callback();
         }
     });
-
     async function getCollection(settings) {
         let opts = Object.assign({}, settings);
         logger.info("Connection Info", opts.database, opts.collection);
-
         try {
             let mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: 1 });
-            cacheDB = mongoClient;
+            cachedMongoClient = mongoClient;
             let db = mongoClient.db();
             return db.collection(opts.collection);
         } catch (err) {
@@ -337,6 +304,5 @@ module.exports = () => {
             return err;
         }
     }
-
     return self;
 };
