@@ -1,7 +1,5 @@
 "use strict";
-const mongodb = require('mongodb');
-const Timestamp = mongodb.Timestamp;
-
+const { MongoClient, Timestamp } = require('mongodb');
 const moment = require('moment');
 const ls = require('leo-streams');
 const PassThrough = require('stream').PassThrough;
@@ -52,13 +50,13 @@ module.exports = {
 			clearTimeout(delayedTimeout);
 			clearTimeout(sendTimeout);
 			Promise.all([
-				mongodb.MongoClient.connect(`mongodb://${settings.server}/local?readPreference=secondary&slaveOk=true'`),
-				mongodb.MongoClient.connect(`mongodb://${settings.server}/${settings.db}?readPreference=secondary&slaveOk=true'`)
-			]).then(dbs => {
+				MongoClient.connect(`mongodb://${settings.server}/local?readPreference=secondary&slaveOk=true'`),
+				MongoClient.connect(`mongodb://${settings.server}/${settings.db}?readPreference=secondary&slaveOk=true'`)
+			]).then(mongoClientArray => {
 				attempts = 0;
-				pass.dbs = dbs;
-				let localdb = dbs[0];
-				let db = pass.database = dbs[1];
+				pass.mongoClientArray = mongoClientArray;
+				let localdb = mongoClientArray[0].db();
+				let db = pass.database = mongoClientArray[1].db();
 				let collection = pass.collection = db.collection(settings.collection);
 
 				let checkpoint = getCheckpoint(settings);
@@ -228,9 +226,9 @@ module.exports = {
 			clearTimeout(delayedTimeout);
 			clearTimeout(sendTimeout);
 			pass.oplogstream && pass.oplogstream.close();
-			pass.dbs && pass.dbs.map(db => db.close());
+			pass.mongoClientArray && pass.mongoClientArray.map(mongoClient => mongoClient.close());
 			pass.oplogstream = undefined;
-			pass.dbs = undefined;
+			pass.mongoClientArray = undefined;
 			pass.database = undefined;
 			if (settings.__code.destroy) {
 				settings.__code.destroy();
