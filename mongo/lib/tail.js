@@ -54,12 +54,9 @@ module.exports = {
 				MongoClient.connect(`mongodb://${settings.server}/${settings.db}?readPreference=secondary&slaveOk=true'`)
 			]).then(mongoClientArray => {
 				attempts = 0;
+				pass.mongoClientArray = mongoClientArray;
 				let localdb = mongoClientArray[0].db();
 				let db = pass.database = mongoClientArray[1].db();
-				pass.dbs = [
-					localdb,
-					db
-				];
 				let collection = pass.collection = db.collection(settings.collection);
 
 				let checkpoint = getCheckpoint(settings);
@@ -229,9 +226,9 @@ module.exports = {
 			clearTimeout(delayedTimeout);
 			clearTimeout(sendTimeout);
 			pass.oplogstream && pass.oplogstream.close();
-			pass.dbs && pass.dbs.map(db => db.close());
+			pass.mongoClientArray && pass.mongoClientArray.map(mongoClient => mongoClient.close());
 			pass.oplogstream = undefined;
-			pass.dbs = undefined;
+			pass.mongoClientArray = undefined;
 			pass.database = undefined;
 			if (settings.__code.destroy) {
 				settings.__code.destroy();
