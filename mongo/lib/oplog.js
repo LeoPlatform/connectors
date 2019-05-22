@@ -8,7 +8,7 @@ const ls = require('leo-streams');
 exports.handler = function (settings, context, callback) {
 	console.log(settings.source, settings.botId, settings.destination);
 	var stream = leo.load(settings.botId, settings.destination, settings.loadOpts);
-	settings.__tail = connector(settings);
+	settings.__tail = connector.stream(settings);
 	ls.pipe(settings.__tail, ls.through((obj, done) => {
 		if (!stream.write(obj)) {
 			stream.once("drain", () => {
