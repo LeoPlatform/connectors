@@ -9,6 +9,7 @@
 	"author": "",
 	"license": "MIT",
 	"dependencies": {
+		"aws-sdk": "^2.301.0",
 		"crypto": "^1.0.1",
 		"leo-aws": "^1.4.2",
 		"leo-connector-common": "^2.1.0",
