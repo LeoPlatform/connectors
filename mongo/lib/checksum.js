@@ -303,7 +303,7 @@ module.exports = () => {
         let opts = Object.assign({}, settings);
         logger.info("Connection Info", opts.database, opts.collection);
         try {
-            let mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: 1 });
+            let mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: true });
             cachedMongoClient = mongoClient;
             let db = mongoClient.db();
             return db.collection(opts.collection);
