@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-mongo",
-	"version": "1.2.3",
+	"version": "1.2.4",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -12,7 +12,7 @@
 		"aws-sdk": "^2.301.0",
 		"crypto": "^1.0.1",
 		"leo-aws": "^1.4.2",
-		"leo-connector-common": "^2.1.0",
+		"leo-connector-common": "^2.1.2",
 		"leo-logger": "^1.0.1",
 		"leo-sdk": "^3.0.1",
 		"leo-streams": "^1.1.1",
