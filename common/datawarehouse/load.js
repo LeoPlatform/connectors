@@ -3,6 +3,7 @@
 const logger = require('leo-logger');
 const leo = require("leo-sdk");
 const ls = leo.streams;
+const streams = require('leo-streams');
 const combine = require("./combine.js");
 const async = require("async");
 const validate = require('./../utils/validation');
@@ -319,14 +320,28 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
  */
 function handleFailedValidation(ID, source, eventObj, error)
 {
-	logger.debug('Adding failed event', eventObj);
-	// sent the event to an error queue
-	eventObj.error = error;
-
 	if (!errorStream) {
-		errorStream = leo.load(ID, `${source}_error`);
-	}
-	errorStream.write(eventObj);
+		errorStream = streams.passthrough({
+			objectMode: true
+		});
 
-	return true;
+		streams.pipe(
+			errorStream,
+
+			ls.process(ID, obj => {
+				return obj;
+			}),
+
+			leo.load(ID, `${source}_error`),
+
+			(err) => {
+				err && logger.err('GOT ERROR', err);
+			}
+		);
+	}
+
+	logger.debug('Adding failed event', eventObj);
+	// write the error to the payload so it gets passed on
+	eventObj.payload.error = error;
+	errorStream.write(eventObj);
 }
