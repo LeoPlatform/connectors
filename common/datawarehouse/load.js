@@ -1,11 +1,11 @@
-"use strict";
+'use strict';
 
 const logger = require('leo-logger');
-const leo = require("leo-sdk");
+const leo = require('leo-sdk');
 const ls = leo.streams;
 const streams = require('leo-streams');
-const combine = require("./combine.js");
-const async = require("async");
+const combine = require('./combine.js');
+const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
 
@@ -28,7 +28,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 		let config = tableConfig[t];
 		Object.keys(config.structure).forEach(f => {
 			let field = config.structure[f];
-			if (field === "sk" || field.sk) {
+			if (field === 'sk' || field.sk) {
 				tableSks[t] = f;
 			} else if (field.nk) {
 				if (!(t in tableNks)) {
@@ -40,18 +40,18 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 	});
 
 	let checkforDelete = ls.through(function (obj, done) {
-		if (obj.payload.type === "delete") {
+		if (obj.payload.type === 'delete') {
 			let data = obj.payload.data || {};
 			let ids = data.in || [];
 			let entities = data.entities || [];
 			ids.map(id => {
 				entities.map(entity => {
-					let field = entity.field || "id";
+					let field = entity.field || 'id';
 					this.push(Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
 							entity: entity.name,
-							command: "delete",
+							command: 'delete',
 							field: field,
 							data: {
 								id: field === 'id' ? id : `_del_${id}`,
@@ -193,7 +193,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 					Object.keys(config.structure).forEach(f => {
 						let field = config.structure[f];
 
-						if (field === "sk" || field.sk) {
+						if (field === 'sk' || field.sk) {
 							sk = f;
 						} else if (field.nk) {
 							nk.push(f);
@@ -205,14 +205,14 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 					if (tableConfig[t].isDimension) {
 						client.importDimension(obj[t].stream, t, sk, nk, scds, (err, tableInfo) => {
 							if (!err && tableInfo && tableInfo.count === 0) {
-								tableStatuses[t] = "First Load";
+								tableStatuses[t] = 'First Load';
 							}
 							done(err);
 						}, tableConfig[t]);
 					} else {
 						client.importFact(obj[t].stream, t, nk, (err, tableInfo) => {
 							if (!err && tableInfo && tableInfo.count === 0) {
-								tableStatuses[t] = "First Load";
+								tableStatuses[t] = 'First Load';
 							}
 							done(err);
 						}, tableConfig[t]);
@@ -244,7 +244,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 						config && config.structure && Object.keys(config.structure).forEach(f => {
 							let field = config.structure[f];
 
-							if (field === "sk" || field.sk) {
+							if (field === 'sk' || field.sk) {
 								sk = f;
 							} else if (field.nk) {
 								nk.push(f);
@@ -265,7 +265,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 										Object.entries(field.on).map(([key, val]) => {
 											link.on.push(val);
 											link.source.push(key);
-										})
+										});
 									} else if (nks && nks.length === 1) {
 										link.on = nks[0];
 									} else if (nks && nks.length > 1) {
@@ -278,17 +278,17 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 									join_id: f,
 									on: f,
 									destination: client.getDimensionColumn(f, field),
-									link_date: "_auditdate",
+									link_date: '_auditdate',
 									sk: tableSks[link.table]
 								}, link));
 							}
 						});
 						if (links.length) {
-							tasks.push(done => client.linkDimensions(t, links, nk, done, tableStatuses[t] || "Unmodified"));
+							tasks.push(done => client.linkDimensions(t, links, nk, done, tableStatuses[t] || 'Unmodified'));
 						}
 					});
 					async.parallelLimit(tasks, 10, (err) => {
-						console.log("HERE------------------------------", err);
+						console.log('HERE------------------------------', err);
 						done(err);
 					});
 				});
@@ -306,7 +306,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 			});
 		}
 
-		callback(err, "ALL DONE Ingesting");
+		callback(err, 'ALL DONE Ingesting');
 	});
 };
 
@@ -317,7 +317,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
  * @param eventObj {Object}
  * @param error {string}
  */
-function handleFailedValidation(ID, source, eventObj, error) {
+function handleFailedValidation (ID, source, eventObj, error) {
 	if (!errorStream) {
 		errorStream = streams.passthrough({
 			objectMode: true
