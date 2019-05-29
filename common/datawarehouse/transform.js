@@ -52,8 +52,9 @@ module.exports = {
 				}
 			} else {
 				let columnName = key.toLowerCase().replace(/[^a-z0-9]/g, '_');
-				if (typeof value == "string" && value.length > 100) {
-					outObj[columnName] = value.slice(0, 100);
+				const maxStringLength = 4000;
+				if (typeof value == "string" && value.length > maxStringLength) {
+					outObj[columnName] = value.slice(0, maxStringLength);
 				} else {
 					outObj[columnName] = value;
 				}
