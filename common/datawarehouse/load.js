@@ -296,7 +296,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 		});
 	}), err => {
 		// close the error stream if open
-		if (errorStream) {
+		if (errorStream && errorStream.Writable) {
 			errorStream.end(streamError => {
 				if (streamError) {
 					logger.error('Closing error stream with error', streamError);
@@ -318,7 +318,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
  * @param error {string}
  */
 function handleFailedValidation (ID, source, eventObj, error) {
-	if (!errorStream) {
+	if (!errorStream || !errorStream.Writable) {
 		errorStream = streams.passthrough({
 			objectMode: true
 		});
