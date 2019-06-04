@@ -52,8 +52,8 @@
 		"brace-style": ["error", "1tbs", { "allowSingleLine": true }],
 		"camelcase": ["error", { "properties": "never" }],
 		"comma-dangle": ["error", {
-			"arrays": "never",
-			"objects": "never",
+			"arrays": "always-multiline",
+			"objects": "always-multiline",
 			"imports": "never",
 			"exports": "never",
 			"functions": "never"
@@ -66,6 +66,8 @@
 		"eol-last": "error",
 		"eqeqeq": ["error", "always", { "null": "ignore" }],
 		"func-call-spacing": ["error", "never"],
+		"func-style": "off",
+//		"func-style": ["error", "declaration", { "allowArrowFunctions": true }],
 		"generator-star-spacing": ["error", { "before": true, "after": true }],
 		"handle-callback-err": ["error", "^(err|error)$" ],
 		"key-spacing": ["error", { "beforeColon": false, "afterColon": true }],
@@ -120,7 +122,7 @@
 		"no-multiple-empty-lines": ["error", { "max": 1, "maxEOF": 0 }],
 		"no-negated-in-lhs": "error",
 		"no-new": "error",
-		"no-new-func": "error",
+//		"no-new-func": "error",
 		"no-new-object": "error",
 		"no-new-require": "error",
 		"no-new-symbol": "error",
