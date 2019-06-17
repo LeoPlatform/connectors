@@ -333,7 +333,7 @@ function handleFailedValidation (ID, source, eventObj, error) {
 			leo.load(ID, `${source}_error`),
 
 			(err) => {
-				err && logger.err('GOT ERROR', err);
+				err && logger.error('GOT ERROR', err);
 			}
 		);
 	}
