@@ -410,8 +410,7 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.linkDimensions = function (table, links, nk, callback, tableStatus) {
-		client.describeTable(table, (err) => {
-			if (err) return callback(err);
+		client.describeTable(table).then(() => {
 			let tasks = [];
 			let sets = [];
 
@@ -458,6 +457,8 @@ module.exports = function (config, columnConfig) {
 			async.series(tasks, err => {
 				callback(err);
 			});
+		}).catch(err => {
+			callback(err);
 		});
 	};
 
