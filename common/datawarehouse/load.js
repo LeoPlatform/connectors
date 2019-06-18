@@ -83,7 +83,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 			} else {
 				invalid = handleFailedValidation(ID, source, obj, 'No events id’s in delete.');
 			}
-		} else if (!obj || !obj.payload || !obj.payload.table && !obj.payload.entity) {
+		} else if (!obj || !obj.payload || (!obj.payload.table && !obj.payload.entity)) {
 			invalid = handleFailedValidation(ID, source, obj, 'Invalid payload.');
 		} else {
 			let tableName = obj.payload.table || obj.payload.entity;
@@ -105,65 +105,76 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 				});
 			}
 
-			// note: this returns TRUE when something is invalid.
-			invalid = Object.keys(eventObj).some(field => {
-				// if we cannot find a matching table, it’s an invalid record.
-				if (!table) {
-					return handleFailedValidation(ID, source, obj, `No table found for ${tableName}`);
+			// find the nk and make sure it’s filled
+			invalid = Object.keys(table.structure).some(field => {
+				if (table.structure[field].nk && !eventObj[field]) {
+					return handleFailedValidation(ID, source, obj, `No value found for NK ${field}`);
 				}
 
-				let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
-				let fieldDefault = table.structure[field] && table.structure[field].default || null;
-				let value = eventObj[field];
-
-				if (value !== null) {
-					switch (type[1]) {
-						case 'varchar':
-							if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid String on field ${field}`);
-							}
-
-							// check for enum and validate if exists
-							if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid enum on field ${field}`);
-							}
-							break;
-
-						case 'timestamp':
-							if (!validate.isValidTimestamp(value, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
-							}
-							break;
-
-						case 'datetime':
-							if (!validate.isValidDatetime(value, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
-							}
-							break;
-
-						case 'integer':
-							if (!validate.isValidInteger(value, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
-							}
-							break;
-
-						case 'bigint':
-							if (!validate.isValidBigint(value, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
-							}
-							break;
-
-						case 'float':
-							if (!validate.isValidFloat(value, fieldDefault)) {
-								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
-							}
-							break;
-
-						case undefined:
-							return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
-					}
-				}
+				return false;
 			});
+
+			if (!invalid) {
+				// note: this returns TRUE when something is invalid.
+				invalid = Object.keys(eventObj).some(field => {
+					// if we cannot find a matching table, it’s an invalid record.
+					if (!table) {
+						return handleFailedValidation(ID, source, obj, `No table found for ${tableName}`);
+					}
+
+					let type = table.structure[field] && table.structure[field].type.match(/(\w+)(\((\d+)\))?/) || [undefined, undefined];
+					let fieldDefault = table.structure[field] && table.structure[field].default || null;
+					let value = eventObj[field];
+
+					if (value !== null) {
+						switch (type[1]) {
+							case 'varchar':
+								if (!validate.isValidString(value, type[3] && type[3] || 255, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid String on field ${field}`);
+								}
+
+								// check for enum and validate if exists
+								if (table.structure[field].sort && table.structure[field].sort.values && !validate.isValidEnum(value, table.structure[field].sort.values, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid enum on field ${field}`);
+								}
+								break;
+
+							case 'timestamp':
+								if (!validate.isValidTimestamp(value, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
+								}
+								break;
+
+							case 'datetime':
+								if (!validate.isValidDatetime(value, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
+								}
+								break;
+
+							case 'integer':
+								if (!validate.isValidInteger(value, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
+								}
+								break;
+
+							case 'bigint':
+								if (!validate.isValidBigint(value, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
+								}
+								break;
+
+							case 'float':
+								if (!validate.isValidFloat(value, fieldDefault)) {
+									return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} on field ${field}`);
+								}
+								break;
+
+							case undefined:
+								return handleFailedValidation(ID, source, obj, `Invalid ${type[1]} in the table config for table: ${table.identifier} field ${field}`);
+						}
+					}
+				});
+			}
 		}
 
 		if (invalid) {
