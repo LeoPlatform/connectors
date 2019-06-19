@@ -463,10 +463,10 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.changeTableStructure = async function (structures) {
-		return new Promise((resolve, reject) => {
-			let tasks = [];
-			let tableResults = {};
+		let tasks = [];
+		let tableResults = {};
 
+		return new Promise(resolve => {
 			client.describeTables().then(results => {
 				Object.keys(structures).forEach(table => {
 					tableResults[table] = 'Unmodified';
@@ -477,8 +477,6 @@ module.exports = function (config, columnConfig) {
 								client.createTable(table, structures[table]).then(() => {
 									// Success creating table. Move to the next one.
 									done();
-								}).catch(err => {
-									reject(err);
 								});
 							} else {
 								let fieldLookup = fields.reduce((acc, field) => {
@@ -505,33 +503,27 @@ module.exports = function (config, columnConfig) {
 									client.updateTable(table, missingFields).then(() => {
 										// success updating table. Move to the next one.
 										done();
-									}).catch(err => {
-										reject(err);
 									});
 								} else {
 									done();
 								}
 							}
-						}).catch(err => {
-							reject(err);
 						});
 					});
 				});
 
 				async.parallelLimit(tasks, 20, (err) => {
 					if (err) {
-						reject(err);
+						throw err;
 					}
 
 					resolve(tableResults);
 				});
-			}).catch(err => {
-				reject(err);
 			});
 		});
 	};
 
-	client.createTable = function (table, definition, callback) {
+	client.createTable = async function (table, definition) {
 		let fields = [];
 		let defaults = [];
 		let dbType = (config.type || '').toLowerCase();
@@ -659,9 +651,17 @@ module.exports = function (config, columnConfig) {
 		queries.map(q => {
 			tasks.push(done => client.query(q, err => done(err)));
 		});
-		async.series(tasks, callback);
+		return new Promise(resolve => {
+			async.series(tasks, err => {
+				if (err) {
+					throw err;
+				}
+
+				resolve();
+			});
+		});
 	};
-	client.updateTable = function (table, definition, callback) {
+	client.updateTable = async function (table, definition) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
@@ -714,9 +714,18 @@ module.exports = function (config, columnConfig) {
 		queries.map(q => {
 			sqls.push(q);
 		});
-		async.eachSeries(sqls, function (sql, done) {
-			client.query(sql, err => done(err));
-		}, callback);
+
+		return new Promise(resolve => {
+			async.eachSeries(sqls, function (sql, done) {
+				client.query(sql, err => done(err));
+			}, err => {
+				if (err) {
+					throw err;
+				}
+
+				resolve();
+			});
+		});
 	};
 
 	client.findAuditDate = function (table, callback) {
