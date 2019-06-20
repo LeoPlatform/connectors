@@ -7,6 +7,7 @@ const logger = require('leo-logger');
 module.exports = function (config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
+	let tempTables = [];
 	columnConfig = Object.assign({
 		_auditdate: '_auditdate',
 		_current: '_current',
@@ -22,6 +23,7 @@ module.exports = function (config, columnConfig) {
 			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/, '').replace(/^d_/, '')}`;
 		},
 		stageSchema: 'public',
+		stageTablePrefix: 'staging',
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
@@ -77,8 +79,34 @@ module.exports = function (config, columnConfig) {
 		};
 	}
 
+	/**
+	 * Drop temp tables when we’re finished with them
+	 */
+	client.dropTempTables = async () => {
+		if (tempTables.length) {
+			let tasks = [];
+
+			tempTables.forEach(table => {
+				tasks.push(done => client.query(`drop table ${table}`, done));
+			});
+
+			return new Promise(resolve => {
+				async.series(tasks, err => {
+					if (err) {
+						throw err;
+					} else {
+						tempTables = [];
+						return resolve('Cleaned up temp tables');
+					}
+				});
+			});
+		}
+
+		return true;
+	};
+
 	client.importFact = function (stream, table, ids, callback) {
-		const stagingTable = `staging_${table}`;
+		const stagingTable = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(ids)) {
@@ -93,6 +121,7 @@ module.exports = function (config, columnConfig) {
 
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
+		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
 		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
@@ -181,7 +210,7 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.importDimension = function (stream, table, sk, nk, scds, callback, tableDef = {}) {
-		const stagingTbl = `staging_${table}`;
+		const stagingTbl = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(nk)) {
@@ -198,6 +227,7 @@ module.exports = function (config, columnConfig) {
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
+		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
 		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
@@ -273,6 +303,7 @@ module.exports = function (config, columnConfig) {
 					}
 
 					// let's figure out which SCDs needs to happen
+					tempTables.push(`${qualifiedStagingTable}_changes`);
 					connection.query(`create table ${qualifiedStagingTable}_changes as 
 				select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
@@ -327,8 +358,8 @@ module.exports = function (config, columnConfig) {
 										`, done);
 						});
 
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
@@ -463,11 +494,11 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.changeTableStructure = async function (structures) {
-		return new Promise((resolve, reject) => {
-			let tasks = [];
-			let tableResults = {};
+		let tasks = [];
+		let tableResults = {};
 
-			client.describeTables().then(results => {
+		return new Promise(resolve => {
+			client.describeTables().then(() => {
 				Object.keys(structures).forEach(table => {
 					tableResults[table] = 'Unmodified';
 					tasks.push(done => {
@@ -477,8 +508,6 @@ module.exports = function (config, columnConfig) {
 								client.createTable(table, structures[table]).then(() => {
 									// Success creating table. Move to the next one.
 									done();
-								}).catch(err => {
-									reject(err);
 								});
 							} else {
 								let fieldLookup = fields.reduce((acc, field) => {
@@ -505,33 +534,27 @@ module.exports = function (config, columnConfig) {
 									client.updateTable(table, missingFields).then(() => {
 										// success updating table. Move to the next one.
 										done();
-									}).catch(err => {
-										reject(err);
 									});
 								} else {
 									done();
 								}
 							}
-						}).catch(err => {
-							reject(err);
 						});
 					});
 				});
 
 				async.parallelLimit(tasks, 20, (err) => {
 					if (err) {
-						reject(err);
+						throw err;
 					}
 
 					resolve(tableResults);
 				});
-			}).catch(err => {
-				reject(err);
 			});
 		});
 	};
 
-	client.createTable = function (table, definition, callback) {
+	client.createTable = async function (table, definition) {
 		let fields = [];
 		let defaults = [];
 		let dbType = (config.type || '').toLowerCase();
@@ -659,9 +682,17 @@ module.exports = function (config, columnConfig) {
 		queries.map(q => {
 			tasks.push(done => client.query(q, err => done(err)));
 		});
-		async.series(tasks, callback);
+		return new Promise(resolve => {
+			async.series(tasks, err => {
+				if (err) {
+					throw err;
+				}
+
+				resolve();
+			});
+		});
 	};
-	client.updateTable = function (table, definition, callback) {
+	client.updateTable = async function (table, definition) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
@@ -714,9 +745,18 @@ module.exports = function (config, columnConfig) {
 		queries.map(q => {
 			sqls.push(q);
 		});
-		async.eachSeries(sqls, function (sql, done) {
-			client.query(sql, err => done(err));
-		}, callback);
+
+		return new Promise(resolve => {
+			async.eachSeries(sqls, function (sql, done) {
+				client.query(sql, err => done(err));
+			}, err => {
+				if (err) {
+					throw err;
+				}
+
+				resolve();
+			});
+		});
 	};
 
 	client.findAuditDate = function (table, callback) {
@@ -815,7 +855,7 @@ module.exports = function (config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let qualifiedStagingTable = `${columnConfig.stageSchema}.staging_${tableName}`;
+		let qualifiedStagingTable = `${columnConfig.stageSchema}.${columnConfig.stageTablePrefix}_${tableName}`;
 		tasks.push((done) => {
 			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
