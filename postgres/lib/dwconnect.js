@@ -7,6 +7,7 @@ const logger = require('leo-logger');
 module.exports = function (config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
+	let tempTables = [];
 	columnConfig = Object.assign({
 		_auditdate: '_auditdate',
 		_current: '_current',
@@ -78,6 +79,32 @@ module.exports = function (config, columnConfig) {
 		};
 	}
 
+	/**
+	 * Drop temp tables when we’re finished with them
+	 */
+	client.dropTempTables = async () => {
+		if (tempTables.length) {
+			let tasks = [];
+
+			tempTables.forEach(table => {
+				tasks.push(done => client.query(`drop table ${table}`, done));
+			});
+
+			return new Promise(resolve => {
+				async.series(tasks, err => {
+					if (err) {
+						throw err;
+					} else {
+						tempTables = [];
+						return resolve('Cleaned up temp tables');
+					}
+				});
+			});
+		}
+
+		return true;
+	};
+
 	client.importFact = function (stream, table, ids, callback) {
 		const stagingTable = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
@@ -94,6 +121,7 @@ module.exports = function (config, columnConfig) {
 
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
+		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
 		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
@@ -199,6 +227,7 @@ module.exports = function (config, columnConfig) {
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
+		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
 		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
@@ -274,6 +303,7 @@ module.exports = function (config, columnConfig) {
 					}
 
 					// let's figure out which SCDs needs to happen
+					tempTables.push(`${qualifiedStagingTable}_changes`);
 					connection.query(`create table ${qualifiedStagingTable}_changes as 
 				select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
 					${scdSQL.join(',\n')}
@@ -328,8 +358,8 @@ module.exports = function (config, columnConfig) {
 										`, done);
 						});
 
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
+						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
