@@ -22,6 +22,7 @@ module.exports = function (config, columnConfig) {
 			return field.dim_column ? field.dim_column : `d_${column.replace(/_id$/, '').replace(/^d_/, '')}`;
 		},
 		stageSchema: 'public',
+		stageTablePrefix: 'staging',
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
@@ -78,7 +79,7 @@ module.exports = function (config, columnConfig) {
 	}
 
 	client.importFact = function (stream, table, ids, callback) {
-		const stagingTable = `staging_${table}`;
+		const stagingTable = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(ids)) {
@@ -181,7 +182,7 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.importDimension = function (stream, table, sk, nk, scds, callback, tableDef = {}) {
-		const stagingTbl = `staging_${table}`;
+		const stagingTbl = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
 		if (!Array.isArray(nk)) {
@@ -467,7 +468,7 @@ module.exports = function (config, columnConfig) {
 		let tableResults = {};
 
 		return new Promise(resolve => {
-			client.describeTables().then(results => {
+			client.describeTables().then(() => {
 				Object.keys(structures).forEach(table => {
 					tableResults[table] = 'Unmodified';
 					tasks.push(done => {
@@ -824,7 +825,7 @@ module.exports = function (config, columnConfig) {
 		var tableName = table.identifier;
 		var tasks = [];
 		let loadCount = 0;
-		let qualifiedStagingTable = `${columnConfig.stageSchema}.staging_${tableName}`;
+		let qualifiedStagingTable = `${columnConfig.stageSchema}.${columnConfig.stageTablePrefix}_${tableName}`;
 		tasks.push((done) => {
 			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
