@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-common",
-	"version": "2.1.8",
+	"version": "3.0.0",
 	"description": "Common package for all Leo Platform database connectors",
 	"main": "index.js",
 	"directories": {},
