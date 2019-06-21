@@ -305,8 +305,8 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 				});
 			}
 		});
-	}), err => {
-		client.dropTempTables();
+	}), async err => {
+		await client.dropTempTables();
 		// close the error stream if open
 		if (errorStream && errorStream.Writable) {
 			errorStream.end(streamError => {
