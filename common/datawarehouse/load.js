@@ -92,7 +92,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 			// find the table name
 			// first check the config object key
 			if (tableConfig[tableName]) {
-				table = tableConfig[t];
+				table = tableConfig[tableName];
 			} else {
 				// then check the config label
 				Object.keys(tableConfig).some(entity => {
@@ -103,16 +103,23 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 						}
 					}
 				});
+
+				if (!table || !table.structure) {
+					handleFailedValidation(ID, source, obj, `No matching table found.`);
+					invalid = true;
+				}
 			}
 
 			// find the nk and make sure it’s filled
-			invalid = Object.keys(table.structure).some(field => {
-				if (table.structure[field].nk && !eventObj[field]) {
-					return handleFailedValidation(ID, source, obj, `No value found for NK ${field}`);
-				}
+			if (!invalid) {
+				invalid = Object.keys(table.structure).some(field => {
+					if (table.structure[field].nk && !eventObj[field]) {
+						return handleFailedValidation(ID, source, obj, `No value found for NK ${field}`);
+					}
 
-				return false;
-			});
+					return false;
+				});
+			}
 
 			if (!invalid) {
 				// note: this returns TRUE when something is invalid.
