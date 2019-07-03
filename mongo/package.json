@@ -11,9 +11,9 @@
 	"dependencies": {
 		"crypto": "^1.0.1",
 		"leo-aws": "^1.4.3",
-		"leo-connector-common": "^3.0.2",
+		"leo-connector-common": "^3.0.3",
 		"leo-logger": "^1.0.1",
-		"leo-sdk": "^3.1.0",
+		"leo-sdk": "^3.1.1",
 		"leo-streams": "^1.1.1",
 		"moment": "^2.24.0",
 		"moment-timezone": "^0.5.25",
