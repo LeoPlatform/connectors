@@ -10,7 +10,7 @@
 	"license": "MIT",
 	"dependencies": {
 		"crypto": "^1.0.1",
-		"leo-aws": "^1.4.2",
+		"leo-aws": "^1.4.3",
 		"leo-connector-common": "^3.0.2",
 		"leo-logger": "^1.0.1",
 		"leo-sdk": "^3.1.0",
