@@ -57,7 +57,7 @@ function create (pool, parentCache) {
 					logger.info(`Table "${qualifiedTable}" schema from cache`, cache.timestamp);
 					resolve(cache.schema[qualifiedTable]);
 				} else {
-					this.describeTables(tableSchema).then(schema => {
+					client.describeTables(tableSchema).then(schema => {
 						if (schema && schema[qualifiedTable]) {
 							return resolve(schema[qualifiedTable]);
 						}
