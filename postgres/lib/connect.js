@@ -62,7 +62,7 @@ function create (pool, parentCache) {
 							return resolve(schema[qualifiedTable]);
 						}
 
-						throw new Error('Unable to find schema for selected table');
+						reject('NO_SCHEMA_FOUND');
 					});
 				}
 			});
