@@ -57,12 +57,12 @@ function create (pool, parentCache) {
 					logger.info(`Table "${qualifiedTable}" schema from cache`, cache.timestamp);
 					resolve(cache.schema[qualifiedTable]);
 				} else {
-					this.describeTables(tableSchema).then(schema => {
+					client.describeTables(tableSchema).then(schema => {
 						if (schema && schema[qualifiedTable]) {
 							return resolve(schema[qualifiedTable]);
 						}
 
-						throw new Error('Unable to find schema for selected table');
+						reject('NO_SCHEMA_FOUND');
 					});
 				}
 			});

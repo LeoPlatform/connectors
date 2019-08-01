@@ -503,41 +503,47 @@ module.exports = function (config, columnConfig) {
 					tableResults[table] = 'Unmodified';
 					tasks.push(done => {
 						client.describeTable(table).then(fields => {
-							if (!fields || !fields.length) {
-								tableResults[table] = 'Created';
-								client.createTable(table, structures[table]).then(() => {
-									// Success creating table. Move to the next one.
+							let fieldLookup = fields.reduce((acc, field) => {
+								acc[field.column_name] = field;
+								return acc;
+							}, {});
+							let missingFields = {};
+							if (!structures[table].isDimension) {
+								structures[table].structure[columnConfig._deleted] = structures[table].structure[columnConfig._deleted] || 'boolean';
+							}
+							Object.keys(structures[table].structure).forEach(f => {
+								let field = structures[table].structure[f];
+								if (!(f in fieldLookup)) {
+									missingFields[f] = structures[table].structure[f];
+								} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
+									let missingDim = columnConfig.dimColumnTransform(f, field);
+									missingFields[missingDim] = {
+										type: 'integer',
+									};
+								}
+							});
+							if (Object.keys(missingFields).length) {
+								tableResults[table] = 'Modified';
+								client.updateTable(table, missingFields).then(() => {
+									// success updating table. Move to the next one.
 									done();
 								});
 							} else {
-								let fieldLookup = fields.reduce((acc, field) => {
-									acc[field.column_name] = field;
-									return acc;
-								}, {});
-								let missingFields = {};
-								if (!structures[table].isDimension) {
-									structures[table].structure[columnConfig._deleted] = structures[table].structure[columnConfig._deleted] || 'boolean';
-								}
-								Object.keys(structures[table].structure).forEach(f => {
-									let field = structures[table].structure[f];
-									if (!(f in fieldLookup)) {
-										missingFields[f] = structures[table].structure[f];
-									} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
-										let missingDim = columnConfig.dimColumnTransform(f, field);
-										missingFields[missingDim] = {
-											type: 'integer',
-										};
-									}
-								});
-								if (Object.keys(missingFields).length) {
-									tableResults[table] = 'Modified';
-									client.updateTable(table, missingFields).then(() => {
-										// success updating table. Move to the next one.
-										done();
-									});
-								} else {
+								done();
+							}
+						}).catch(err => {
+							// if the error is that we couldn’t find schema data, attempt to create the table.
+							if (err === 'NO_SCHEMA_FOUND') {
+								logger.info('Creating table', table);
+								client.createTable(table, structures[table]).then(() => {
+									tableResults[table] = 'Created';
+									logger.info('table created');
 									done();
-								}
+								}).catch(err => {
+									throw err;
+								});
+							} else {
+								throw err;
 							}
 						});
 					});
