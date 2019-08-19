@@ -1,0 +1,35 @@
+version: "3.3"
+services:
+  leo-node:
+    image: leo-node:node
+    build:
+      context: ../..
+      dockerfile: docker/node/Dockerfile
+    environment:
+      - NODE_ENV=local
+      - EXTUSER=${USER}
+    volumes:
+      - ~/.aws:/app/.aws:ro
+      - ../../../sqlserver:/app/src
+      - ../../data:/data
+    tty: true
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    volumes:
+      - ../../data:/opt/app
+    container_name: mssql
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=P@ssword1
+      - MSSQL_PID=Developer
+    ports:
+      - 1433:1433
+
+  mssql-setup:
+    image: microsoft/mssql-tools:latest
+    volumes:
+      - ../../data:/opt/app
+    command: /opt/mssql-tools/bin/sqlcmd -i /opt/app/setup.sql -U sa -P P@ssword1 -S mssql
+    depends_on:
+      - mssql

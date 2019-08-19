@@ -10,25 +10,57 @@ const moment = require("moment");
 const loader = require("../");
 const streamer = require("../").streamChanges;
 
+const Mssql = require('./libs/mssql')
+
 describe('SQL', function() {
+	let streamConfig = {
+		user: 'sa',
+		password: 'P@ssword1',
+		host: 'mssql',
+		database: 'test',
+		name: 'streamer'
+	}
+	let loaderConfig = {
+		user: 'sa',
+		password: 'P@ssword1',
+		server: 'mssql',
+		database: 'test',
+		name: 'loader'
+	}
+	let mssql
+
+	before(async () => {
+		mssql = await Mssql(streamConfig)
+		let test = {
+			FirstName: 'Stu'
+		}
+		let lead = {
+			FirstName: 'Stu'
+		}
+		await mssql.insertAll([
+			{ 'Test': test },
+			{ 'Lead': lead }
+		  ])
+		
+
+	})
+	after(async () => {
+		// await mssql.end()
+	})
 	it('Should be able to stream changed IDs in and receive full objects out', function(done) {
 		this.timeout(1000 * 5);
 
-		let changes = streamer({
-			user: 'root',
-			password: 'Leo1234TestPassword',
-			server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-			database: 'test',
-			name: 'streamer'
-		}, ['test', 'test']);
+		let changes = streamer(streamConfig, 
+		{ 
+			start: 0.1,
+			tables : {
+				Test : ["ID"],
+				Lead : ["ID"]
+			} 
+		});
 
-		let transform = loader({
-			user: 'root',
-			password: 'Leo1234TestPassword',
-			server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-			database: 'test',
-			name: 'loader'
-		}, {
+		console.log('loader', JSON.stringify(loader))
+		let transform = loader(loaderConfig, {
 			test: true
 		}, function(ids) {
 			return {
@@ -62,7 +94,7 @@ describe('SQL', function() {
 			done(err);
 		});
 	});
-	it.only("Should be able to stream the entire table", function(done) {
+	it("Should be able to stream the entire table", function(done) {
 		this.timeout(240000);
 
 		let event = 'Lead',
@@ -70,20 +102,20 @@ describe('SQL', function() {
 			timestamp = moment(),
 			// create the stream
 			stream = loader.nibble({
-				user: 'root',
-				password: 'Leo1234TestPassword',
-				server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-				database: 'rentdynamics'
+				user: 'sa',
+				password: 'P@ssword1',
+				server: 'mssql',
+				database: 'test'
 			}, 'Lead', 'ID', {
 				limit: 5000,
 				maxLimit: 5000
 			}),
 			// transform the data
 			transform = loader.load({
-				user: 'root',
-				password: 'Leo1234TestPassword',
-				server: 'sampleloader.cokgfbx1qbtx.us-west-2.rds.amazonaws.com',
-				database: 'rentdynamics'
+				user: 'sa',
+				password: 'P@ssword1',
+				server: 'mssql',
+				database: 'test'
 			}, {
 				Lead: true
 			}, function(ids) {

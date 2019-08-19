@@ -33,5 +33,31 @@ AND ps.index_id < 2
 AND so.name IS NOT NULL
 ```
 
+# Docker
+
+1. __Build the fullstack docker container__
+
+    - ```docker build --no-cache --build-arg UID=1000 --build-arg GID=1000 -t leo-node:node docker/node/```
+
+2. __Up the fullstack container__
+
+    - __Attached Mode__:
+    
+        - ```docker-compose -f docker/node/docker-compose.yml up```
+    
+    - __Detached Mode__:
+    
+        - ```docker-compose -f docker/node/docker-compose.yml up -d```
+    
+3. __Obtain an interactive shell in the container__
+
+    - ```docker exec -it node_leo-node_1 sh```
+
+4. __From the shell you can run ```npm test```; test the CDC bot, etc__
+
+    -  ```npm install```
+
+    -  ```npm test```
+
 # Support
 Want to hire an expert, or need technical support? Reach out to the Leo team: https://leoinsights.com/contact

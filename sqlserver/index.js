@@ -14,7 +14,7 @@ class connector extends parent {
 	}
 
 	streamChanges(config, opts = {}) {
-		let client = this.connect(config);
+		let client = connect(config);
 
 		let stream = new PassThrough({
 			objectMode: true
@@ -70,7 +70,9 @@ class connector extends parent {
 			return query;
 		});
 
+		
 		let changeQuery = sqlTables.join(" UNION ") + ` order by SYS_CHANGE_VERSION asc, ${order}`;
+		console.log('changeQuery', changeQuery)
 		client.query(changeQuery, (err, result) => {
 			logger.log(changeQuery);
 			if (!err) {
