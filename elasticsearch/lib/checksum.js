@@ -1,5 +1,4 @@
 "use strict";
-var aws = require("aws-sdk");
 const crypto = require('crypto');
 var base = require("leo-connector-common/checksum/lib/handler.js");
 var moment = require("moment");
@@ -26,7 +25,6 @@ module.exports = function(client) {
 		var es = getClient(event.settings);
 		var checksum = event.data;
 		var settings = event.settings;
-		var session = event.session;
 		var fields = settings.fields;
 		var results = {
 			qty: 0,
@@ -104,7 +102,6 @@ module.exports = function(client) {
 
 		var checksum = event.data;
 		var settings = event.settings;
-		var session = event.session;
 		var fields = settings.fields;
 
 		var es = getClient(settings);
@@ -194,7 +191,6 @@ module.exports = function(client) {
 		var es = getClient(event.settings);
 		var checksum = event.data;
 		var settings = event.settings;
-		var session = event.session;
 		var fields = settings.fields;
 
 		var query = query = {
@@ -360,7 +356,6 @@ module.exports = function(client) {
 		console.log("Calling Nibble", JSON.stringify(event, null, 2));
 		var data = event.data;
 		var settings = event.settings;
-		var forward = !data.reverse;
 
 		var es = getClient(settings);
 		var query = {};
@@ -370,7 +365,7 @@ module.exports = function(client) {
 		if (data.end) {
 			query.lte = data.end;
 		}
-		var query = {
+		query = {
 			range: {
 				[settings.id_column]: query
 			}
@@ -382,7 +377,7 @@ module.exports = function(client) {
 				}
 			};
 		}
-		var s = es.search({
+		es.search({
 			index: settings.index,
 			type: settings.type,
 			body: {

@@ -1,11 +1,10 @@
 "use strict";
 
 const elasticsearch = require("elasticsearch");
-const logger = require("leo-sdk/lib/logger")("leo.connector.elasticsearch");
+const logger = require("leo-logger")("leo.connector.elasticsearch");
 let leo = require("leo-sdk")
 let ls = leo.streams;
 var aws = require("leo-sdk/lib/leo-aws");
-
 
 module.exports = function(config) {
 	let m;

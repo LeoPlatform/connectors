@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-elasticsearch",
-	"version": "1.0.4",
+	"version": "1.1.2",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -9,9 +9,8 @@
 	"author": "",
 	"license": "MIT",
 	"dependencies": {
-		"leo-sdk": "^1.0.66",
-		"elasticsearch": "^13.2.0",
-		"http-aws-es": "^4.0.0",
-		"leo-connector-common": "^1.0.14"
+		"elasticsearch": "16.1.1",
+		"http-aws-es": "6.0.0",
+		"leo-connector-common": "3.0.4"
 	}
 }
