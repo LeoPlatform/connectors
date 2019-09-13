@@ -189,7 +189,7 @@ module.exports = {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
 					}
-					data.id = `${resourcePrefix}${options.botSuffix || ""}`;
+					data.id = `${eventPrefix}${options.botSuffix || ""}`;
 					data.event = `${eventPrefix}${resourceSuffix}`;
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
 					let system = opts.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
