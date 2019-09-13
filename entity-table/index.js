@@ -116,7 +116,8 @@ module.exports = {
 							return reject(err);
 						}
 						if (statsData.units > 0) {
-							leo.bot.checkpoint(botId, `system:dynamodb.${table.replace(/-[A-Z0-9]{12,}$/, "")}.${entity}`, {
+							let system = opts.system || `system:dynamodb.${table.replace(/-[A-Z0-9]{12,}$/, "")}.${entity}`;
+							leo.bot.checkpoint(botId, system, {
 								type: "write",
 								eid: statsData.eid,
 								records: statsData.units,
@@ -191,7 +192,8 @@ module.exports = {
 					data.id = `${resourcePrefix}${options.botSuffix || ""}`;
 					data.event = `${eventPrefix}${resourceSuffix}`;
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					data.correlation_id.source = `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+					let system = opts.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+					data.correlation_id.source = system;
 
 					let stream = getStream(data.id);
 					stream.write(data) ? done() : stream.once("drain", () => done());
