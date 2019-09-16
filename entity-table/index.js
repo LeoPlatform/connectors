@@ -212,7 +212,7 @@ module.exports = {
 			return pfx ? pfx.trim().replace(/-$/, "").trim() : "";
 		}
 	},
-	tableProcessor: function(event, context, callback) {
+	tableProcessor: function(event, context, callback) {	// old function for supporting old way before we had tableOldNewProcessor
 		this.tableOldNewProcessor({
 		    botSuffix: "_entity_changes",
 		    defaultQueue: "Unknown",
