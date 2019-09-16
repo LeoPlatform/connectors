@@ -192,8 +192,8 @@ module.exports = {
 					data.id = `${eventPrefix}${options.botSuffix || ""}`;
 					data.event = `${eventPrefix}${resourceSuffix}`;
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					let system = opts.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
-					data.correlation_id.source = system;
+					let source = opts.abbreviatedSystem ? `system:ddb-${sanitizedSrc}-${eventPrefix}` : `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+					data.correlation_id.source = source;
 
 					let stream = getStream(data.id);
 					stream.write(data) ? done() : stream.once("drain", () => done());
