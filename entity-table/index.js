@@ -135,13 +135,6 @@ module.exports = {
 			);
 		});
 	},
-	tableProcessor: function(event, context, callback) {
-		this.tableOldNewProcessor({
-		    defaultQueue: "Unknown",
-		    eventSuffix: "_changes",
-		    botSuffix: "_entity_changes"
-		});
-	},
 	tableOldNewProcessor: function(options) {
 		return function(event, context, callback) {
 			let streams = {};
@@ -189,11 +182,10 @@ module.exports = {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
 					}
-					data.id = `${eventPrefix}${options.botSuffix || ""}`;
+					data.id = `${resourcePrefix}${options.botSuffix || ""}`;
 					data.event = `${eventPrefix}${resourceSuffix}`;
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					let source = opts.abbreviatedSystem ? `system:ddb-${sanitizedSrc}-${eventPrefix}` : `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
-					data.correlation_id.source = source;
+					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
 					let stream = getStream(data.id);
 					stream.write(data) ? done() : stream.once("drain", () => done());
@@ -216,10 +208,16 @@ module.exports = {
 				}
 			);
 		};
-
 		function sanitizePrefix(pfx) {
 			return pfx ? pfx.trim().replace(/-$/, "").trim() : "";
 		}
+	},
+	tableProcessor: function(event, context, callback) {
+		this.tableOldNewProcessor({
+		    botSuffix: "_entity_changes",
+		    defaultQueue: "Unknown",
+		    eventSuffix: "_changes",
+		});
 	}
 };
 
