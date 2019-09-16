@@ -116,7 +116,8 @@ module.exports = {
 							return reject(err);
 						}
 						if (statsData.units > 0) {
-							leo.bot.checkpoint(botId, `system:dynamodb.${table.replace(/-[A-Z0-9]{12,}$/, "")}.${entity}`, {
+							let system = opts.system || `system:dynamodb.${table.replace(/-[A-Z0-9]{12,}$/, "")}.${entity}`;
+							leo.bot.checkpoint(botId, system, {
 								type: "write",
 								eid: statsData.eid,
 								records: statsData.units,
@@ -134,83 +135,7 @@ module.exports = {
 			);
 		});
 	},
-	tableProcessor: function(event, context, callback) {
-		// TODO: Make sure this works, then delete this function's code
-		// this.tableOldNewProcessor({
-		//     defaultQueue: "Unknown",
-		//     eventSuffix: "_changes",
-		//     botSuffix: "_entity_changes"
-		// });
-		let streams = {};
-		let index = 0;
-		let defaultEntity = "Unknown";
-		let suffix = "_changes";
-		let getStream = (id) => {
-			if (!(id in streams)) {
-				streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint({
-					force: true
-				}));
-			}
-			return streams[id];
-		};
-		async.doWhilst(
-			function(done) {
-				let record = event.Records[index];
-				let data = {
-					id: context.botId,
-					event: defaultEntity,
-					payload: {
-						new: null,
-						old: null
-					},
-					event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
-					timestamp: Date.now(),
-					correlation_id: {
-						start: record.eventID,
-						source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
-					}
-				};
-				let id = null;
-				if ("OldImage" in record.dynamodb) {
-					let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
-					data.payload.old = image;
-					data.event = image.partition.split(/-/)[0];
-				}
-				if ("NewImage" in record.dynamodb) {
-					let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
-					data.payload.new = image;
-					data.event = image.partition.split(/-/)[0];
-				}
-				data.id = `${data.event}_entity_changes`;
-				data.correlation_id.source = `system:dynamodb.${data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "")}.${data.event}`;
-				data.event = data.event + suffix;
-				let stream = getStream(data.id);
-				if (!stream.write(data)) {
-					stream.once("drain", () => done());
-				} else {
-					done();
-				}
-			},
-			function() {
-				index++;
-				return index < event.Records.length;
-			},
-			function(err) {
-				if (err) {
-					return callback(err);
-				}
-				async.parallel(Object.keys(streams).map(key => {
-					return function(done) {
-						streams[key].end((err) => {
-							done(err);
-						});
-					};
-				}), callback);
-			}
-		);
-	},
 	tableOldNewProcessor: function(options) {
-
 		return function(event, context, callback) {
 			let streams = {};
 			let index = 0;
@@ -260,7 +185,7 @@ module.exports = {
 					data.id = `${resourcePrefix}${options.botSuffix || ""}`;
 					data.event = `${eventPrefix}${resourceSuffix}`;
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					data.correlation_id.source = `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
 					let stream = getStream(data.id);
 					stream.write(data) ? done() : stream.once("drain", () => done());
@@ -283,10 +208,16 @@ module.exports = {
 				}
 			);
 		};
-
 		function sanitizePrefix(pfx) {
 			return pfx ? pfx.trim().replace(/-$/, "").trim() : "";
 		}
+	},
+	tableProcessor: function(event, context, callback) {	// old function for supporting old way before we had tableOldNewProcessor
+		this.tableOldNewProcessor({
+		    botSuffix: "_entity_changes",
+		    defaultQueue: "Unknown",
+		    eventSuffix: "_changes",
+		});
 	}
 };
 
