@@ -17,12 +17,14 @@ module.exports = () => {
         return obj[settings.id_column];
     };
     const getQueryIdFunction = (settings) => {
+        let fn = (a) => a;
         if (settings.extractId) {
-            return eval(`(${settings.extractId})`);
-        } else if (settings.id_column == "_id") {
-            return (v) => new ObjectID(v);
+            fn = eval(`(${settings.extractId})`);
+        } 
+        if (settings.id_column == "_id") {
+            return (v) => new ObjectID(fn(v));
         } else {
-            return (v) => v;
+            return fn;
         }
     };
     const getWhereObject = (settings) => {
