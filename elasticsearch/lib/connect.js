@@ -78,7 +78,7 @@ module.exports = function(config) {
 
 				client.bulk({
 					body: body,
-					fields: false,
+					fields: settings.fieldsUndefined ? undefined : false,
 					_source: false
 				}, function(err, data) {
 					if (err || data.errors) {
