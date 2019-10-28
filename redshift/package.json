@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-redshift",
-	"version": "2.0.3",
+	"version": "2.0.4",
 	"description": "A Redshift database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
@@ -18,12 +18,12 @@
 	},
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
-		"fast-csv": "^2.4.1",
-		"leo-connector-common": "^3.0.4",
-		"pg": "^7.8.0",
-		"pg-copy-streams": "^1.2.0",
-		"pg-native": "^3.0.0",
-		"pg-format": "^1.0.4"
+		"fast-csv": "2.4.1",
+		"leo-connector-common": "3.0.5",
+		"pg": "7.8.2",
+		"pg-copy-streams": "1.2.0",
+		"pg-native": "3.0.0",
+		"pg-format": "1.0.4"
 	},
 	"devDependencies": {
 		"chai": "^4.2.0",
