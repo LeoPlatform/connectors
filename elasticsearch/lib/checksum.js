@@ -80,13 +80,13 @@ module.exports = function(client) {
 				results.qty += 1;
 			});
 
-			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total))
+				//console.log("Total Hits:", (typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total)
 				callback(null, {
 					ids: checksum.ids,
 					start: checksum.start,
@@ -175,13 +175,13 @@ module.exports = function(client) {
 				})
 			});
 
-			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total))
+				//console.log("Total Hits:", (typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total)
 				callback(null, results);
 			};
 		});
@@ -238,7 +238,7 @@ module.exports = function(client) {
 				results.push(item);
 			});
 
-			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.length) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.length) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
@@ -350,7 +350,7 @@ module.exports = function(client) {
 				callback(null, {
 					min: id(min.hits.hits[0]),
 					max: id(max.hits.hits[0]),
-					total: ((typeof min.hits.total === 'object') ? min.hits.total.value : min.hits.total)
+					total: (typeof min.hits.total === 'object') ? min.hits.total.value : min.hits.total,
 				});
 			});
 
