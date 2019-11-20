@@ -80,13 +80,13 @@ module.exports = function(client) {
 				results.qty += 1;
 			});
 
-			if (scroll && (((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total) !== results.qty) {
+			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total))
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total))
 				callback(null, {
 					ids: checksum.ids,
 					start: checksum.start,
@@ -175,13 +175,13 @@ module.exports = function(client) {
 				})
 			});
 
-			if (scroll && (((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total) !== results.qty) {
+			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total))
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total))
 				callback(null, results);
 			};
 		});
@@ -238,7 +238,7 @@ module.exports = function(client) {
 				results.push(item);
 			});
 
-			if (scroll && (((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total) !== results.length) {
+			if (scroll && (((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.length) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
@@ -267,7 +267,7 @@ module.exports = function(client) {
 					})
 				}
 
-				//console.log("Total Hits:", ((typeof results.hits.total === 'object') ? results.hits.total.value : results.hits.total), fields)
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total), fields)
 				//console.log(JSON.stringify(a, null, 2));
 				callback(null, a);
 			};
