@@ -86,7 +86,7 @@ module.exports = function(client) {
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total))
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total))
 				callback(null, {
 					ids: checksum.ids,
 					start: checksum.start,
@@ -181,7 +181,7 @@ module.exports = function(client) {
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total))
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total))
 				callback(null, results);
 			};
 		});
@@ -267,7 +267,7 @@ module.exports = function(client) {
 					})
 				}
 
-				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : results.hits.total), fields)
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total), fields)
 				//console.log(JSON.stringify(a, null, 2));
 				callback(null, a);
 			};
