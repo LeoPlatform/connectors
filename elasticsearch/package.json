@@ -11,7 +11,9 @@
 	"dependencies": {
 		"elasticsearch": "16.1.1",
 		"http-aws-es": "6.0.0",
-		"leo-connector-common": "3.0.7"
+		"leo-aws": "^1.5.0",
+		"leo-connector-common": "3.0.7",
+		"leo-logger": "^1.0.1"
 	},
 	"peerDependencies": {
 		"aws-sdk": "^2.581.0"
