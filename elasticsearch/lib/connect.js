@@ -6,8 +6,8 @@ const https = require('https');
 const logger = require('leo-logger')('leo.connector.elasticsearch');
 const moment = require('moment');
 const refUtil = require('leo-sdk/lib/reference.js');
-let leo = require('leo-sdk');
-let ls = leo.streams;
+const leo = require('leo-sdk');
+const ls = require('leo-streams');
 const s3 = require('leo-aws/factory')('S3', {
 	httpOptions: {
 		agent: new https.Agent({
