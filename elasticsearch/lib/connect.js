@@ -15,21 +15,23 @@ const s3 = require('leo-aws/factory')('S3', {
 		}),
 	},
 })._service;
-var aws = require('leo-sdk/lib/leo-aws');
 
 module.exports = function (config) {
-	// m = elasticsearch client
+	// elasticsearch client
 	let m;
-	if (config && config.search) {
+	if (config && typeof config === 'object' && config.search) {
 		m = config;
 	} else {
+		if (typeof config === 'string') {
+			config = {
+				host: config,
+			};
+		}
+
 		m = elasticsearch.Client(Object.assign({
-			awsConfig: new aws.Config({
-				credentials: config.credentials,
-				region: leo.configuration.region,
-			}),
+			awsConfig: require('leo-aws/factory')('Config')._service,
 			connectionClass: require('http-aws-es'),
-			hosts: host,
+			timeout: '1000000m',
 		}, config));
 	}
 
