@@ -15,20 +15,23 @@ const s3 = require('leo-aws/factory')('S3', {
 		}),
 	},
 })._service;
-var aws = require('leo-sdk/lib/leo-aws');
 
 module.exports = function (config) {
+	// elasticsearch client
 	let m;
-	if (config && config.search) {
+	if (config && typeof config === 'object' && config.search) {
 		m = config;
 	} else {
+		if (typeof config === 'string') {
+			config = {
+				host: config,
+			};
+		}
+
 		m = elasticsearch.Client(Object.assign({
-			awsConfig: new aws.Config({
-				credentials: config.credentials,
-				region: leo.configuration.region,
-			}),
+			awsConfig: require('leo-aws/factory')('Config')._service,
 			connectionClass: require('http-aws-es'),
-			hosts: host,
+			timeout: '1000000m',
 		}, config));
 	}
 
@@ -309,6 +312,196 @@ module.exports = function (config) {
 					milliseconds: 200,
 				},
 			}), send);
+		},
+		streamParallel: (settings) => {
+			let parallelLimit = (settings.warmParallelLimit != undefined ? settings.warmParallelLimit : settings.parallelLimit) || 1;
+			let requireType = settings.requireType || false;
+			let total = settings.startTotal || 0;
+			let startTime = Date.now();
+			let duration = 0;
+			let lastDuration = 0;
+			let lastStartTime = Date.now();
+			let lastAvg = 0;
+			let fileCount = 0;
+			let format = ls.through({
+				highWaterMark: 16,
+			}, function (event, done) {
+				let data = event.payload || event;
+
+				if (!data || !data.index || (requireType && !data.type) || data.id == undefined) {
+					logger.error('Invalid data. index, type, & id are required', JSON.stringify(data || ''));
+					done('Invalid data. index, type, & id are required ' + JSON.stringify(data || ''));
+					return;
+				}
+				deleteByQuery(this, client, event, data, done);
+			}, function flush (callback) {
+				logger.debug('Transform: On Flush');
+				callback();
+			});
+
+			format.push = (function (self, push) {
+				return function (meta, command, data) {
+					if (meta == null) {
+						push.call(self, null);
+						return;
+					}
+					let result = '';
+					if (command != undefined) {
+						result = JSON.stringify(command) + '\n';
+						if (data) {
+							result += JSON.stringify(data) + '\n';
+						}
+					}
+					push.call(self, Object.assign({}, meta, {
+						payload: result,
+					}));
+				};
+			})(format, format.push);
+
+			let systemRef = refUtil.ref(settings.system, 'system');
+			let toSend = [];
+			let firstStart = Date.now();
+
+			let sendFunc = function (done) {
+				let cnt = 0;
+				let batchCnt = 0;
+				lastDuration = 0;
+
+				parallelLimit = settings.parallelLimit || parallelLimit;
+				batchStream.updateLimits(bufferOpts);
+				logger.time('es_emit');
+
+				async.map(toSend, (input, done) => {
+					let index = ++cnt + ' ';
+					let meta = Object.assign({}, input);
+					meta.event = systemRef.refId();
+					delete meta.payload;
+
+					settings.logSummary && logger.info(index + 'ES Object Size:', input.bytes, input.payload.length, total, (Date.now() - startTime) / total, lastAvg, Date.now() - firstStart, duration, duration / total);
+					batchCnt += input.payload.length;
+					total += input.payload.length;
+					let body = input.payload.map(a => a.payload).join('');
+					if (!body.length) {
+						done(null, Object.assign(meta, {
+							payload: {
+								message: 'All deletes. No body to run.',
+							},
+						}));
+						return;
+					}
+					logger.time(index + 'es_emit');
+					logger.time(index + 'es_bulk');
+					client.bulk({
+						_source: false,
+						body,
+						fields: settings.fieldsUndefined ? undefined : false,
+					}, function (err, data) {
+						logger.timeEnd(index + 'es_bulk');
+						logger.info(index, !err && data.took);
+
+						if (data && data.took) {
+							lastDuration = Math.max(lastDuration, data.took);
+						}
+						if (err || data.errors) {
+							if (data && data.Message) {
+								err = data.Message;
+							} else if (data && data.items) {
+								logger.error(data.items.filter((r) => {
+									return 'error' in r.update;
+								}).map(e => JSON.stringify(e, null, 2)));
+								err = 'Cannot load';
+							} else {
+								logger.error(err);
+								err = 'Cannot load';
+							}
+						}
+						if (err) {
+							logger.error(err);
+						}
+
+						let timestamp = moment();
+						let rand = Math.floor(Math.random() * 1000000);
+						let key = `files/elasticsearch/${(systemRef && systemRef.id) || 'unknown'}/${meta.id || 'unknown'}/${timestamp.format('YYYY/MM/DD/HH/mm/') + timestamp.valueOf()}-${++fileCount}-${rand}`;
+
+						if (!settings.dontSaveResults) {
+							logger.time(index + 'es_save');
+							logger.debug(leo.configuration.bus.s3, key);
+							s3.upload({
+								Body: JSON.stringify({
+									body,
+									response: data,
+								}),
+								Bucket: leo.configuration.bus.s3,
+								Key: key,
+							}, (uploaderr, data) => {
+								logger.timeEnd(index + 'es_save');
+								logger.timeEnd(index + 'es_emit');
+								done(err, Object.assign(meta, {
+									payload: {
+										error: err,
+										file: data && data.Location,
+										uploadError: uploaderr,
+									},
+								}));
+							});
+						} else {
+							logger.timeEnd(index + 'es_emit');
+							done(err, Object.assign(meta, {
+								payload: {
+									error: err,
+								},
+							}));
+						}
+					});
+				}, (err, results) => {
+					toSend = [];
+					if (!err) {
+						results.map(r => {
+							this.push(r);
+						});
+					}
+					duration += lastDuration;
+					lastAvg = (Date.now() - lastStartTime) / batchCnt;
+					lastStartTime = Date.now();
+					logger.timeEnd('es_emit');
+					logger.info(lastAvg);
+					done && done(err);
+				});
+			};
+			let send = ls.through({
+				highWaterMark: 16,
+			}, function (input, done) {
+				if (input.payload && input.payload.length) {
+					toSend.push(input);
+					if (toSend.length >= parallelLimit) {
+						sendFunc.call(this, done);
+						return;
+					}
+				}
+				done();
+			},
+			function flush (callback) {
+				logger.debug('Elasticsearch Upload: On Flush');
+				if (toSend.length) {
+					sendFunc.call(this, callback);
+				} else {
+					callback();
+				}
+			});
+
+			const bufferOpts = (typeof (settings.buffer) === 'object') ? settings.buffer : {
+				records: settings.buffer,
+			};
+
+			let batchStream = ls.batch({
+				bytes: bufferOpts.bytes || 10485760 * 0.95, // 9.5MB
+				field: 'payload',
+				records: settings.warmup || bufferOpts.records,
+				time: bufferOpts.time || {
+					milliseconds: 200,
+				},
+			});
+			return ls.pipeline(format, batchStream, send);
 		},
 		streamToTableFromS3: function (table, opts) {
 			throw new Error('Not Implemented');
