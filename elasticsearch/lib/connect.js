@@ -29,7 +29,6 @@ module.exports = function (config) {
 		}
 
 		m = elasticsearch.Client(Object.assign({
-			awsConfig: require('leo-aws/factory')('Config')._service,
 			connectionClass: require('http-aws-es'),
 			timeout: '1000000m',
 		}, config));
