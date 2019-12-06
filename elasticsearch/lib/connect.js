@@ -16,16 +16,32 @@ const s3 = require('leo-aws/factory')('S3', {
 	},
 })._service;
 
-module.exports = function (config) {
+/**
+ *
+ * @param clientConfigHost
+ * @param region
+ * @returns {({search} & {disconnect: m.disconnect, streamToTableFromS3: m.streamToTableFromS3, queryWithScroll: (function(*, *=): Promise<unknown>), describeTable: m.describeTable, stream: (function(*=)), streamToTableBatch: (function(*=): *), query: m.query, getIds: m.getIds, describeTables: m.describeTables, streamParallel: (function(*=)), streamToTable: (function(*=): *)}) | any}
+ */
+module.exports = function (clientConfigHost, region) {
 	// elasticsearch client
 	let m;
-	if (config && typeof config === 'object' && config.search) {
-		m = config;
+	let config;
+	if (clientConfigHost && typeof clientConfigHost === 'object' && clientConfigHost.search) {
+		m = clientConfigHost;
 	} else {
-		if (typeof config === 'string') {
+		if (typeof clientConfigHost === 'string') {
 			config = {
-				host: config,
+				host: clientConfigHost,
 			};
+		} else {
+			config = clientConfigHost;
+		}
+
+		if (region) {
+			const aws = require('aws-sdk');
+			config.awsConfig = new aws.Config({
+				region,
+			});
 		}
 
 		m = elasticsearch.Client(Object.assign({

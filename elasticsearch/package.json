@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-elasticsearch",
-	"version": "1.4.1",
+	"version": "1.4.2",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -11,8 +11,7 @@
 	"dependencies": {
 		"elasticsearch": "16.5.0",
 		"http-aws-es": "6.0.0",
-		"leo-aws": "^1.6.0",
-		"leo-connector-common": "^3.0.7",
+		"leo-connector-common": "^3.0.8",
 		"leo-logger": "^1.0.1",
 		"leo-streams": "^1.1.2"
 	},
