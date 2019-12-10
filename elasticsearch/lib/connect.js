@@ -45,6 +45,7 @@ module.exports = function (clientConfigHost, region) {
 		}
 
 		m = elasticsearch.Client(Object.assign({
+			apiVersion: '7.0',
 			connectionClass: require('http-aws-es'),
 			timeout: '1000000m',
 		}, config));
