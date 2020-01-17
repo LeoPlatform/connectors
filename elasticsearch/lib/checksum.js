@@ -58,7 +58,8 @@ module.exports = function(client) {
 				_source: fields,
 				size: 10000
 			},
-			scroll: scroll
+			scroll: scroll,
+			track_total_hits: settings.track_total_hits
 		};
 		//console.log(JSON.stringify(params, null, 2))
 		var s = es.search(params, function getUntilDone(err, result) {
@@ -79,13 +80,13 @@ module.exports = function(client) {
 				results.qty += 1;
 			});
 
-			if (scroll && result.hits.total !== results.qty) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", result.hits.total)
+				//console.log("Total Hits:", (typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total)
 				callback(null, {
 					ids: checksum.ids,
 					start: checksum.start,
@@ -155,7 +156,8 @@ module.exports = function(client) {
 
 				size: 10000
 			},
-			scroll: scroll
+			scroll: scroll,
+			track_total_hits: settings.track_total_hits
 		}, function getUntilDone(err, result) {
 			//console.timeEnd("search")
 			if (err) {
@@ -173,13 +175,13 @@ module.exports = function(client) {
 				})
 			});
 
-			if (scroll && result.hits.total !== results.qty) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
-				//console.log("Total Hits:", result.hits.total)
+				//console.log("Total Hits:", (typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total)
 				callback(null, results);
 			};
 		});
@@ -221,7 +223,8 @@ module.exports = function(client) {
 				_source: fields,
 				size: 10000
 			},
-			scroll: scroll
+			scroll: scroll,
+			track_total_hits: settings.track_total_hits
 		}, function getUntilDone(err, result) {
 			//console.timeEnd("search")
 			if (err) {
@@ -235,7 +238,7 @@ module.exports = function(client) {
 				results.push(item);
 			});
 
-			if (scroll && result.hits.total !== results.length) {
+			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.length) {
 				es.scroll({
 					scrollId: result._scroll_id,
 					scroll: scroll
@@ -264,7 +267,7 @@ module.exports = function(client) {
 					})
 				}
 
-				//console.log("Total Hits:", result.hits.total, fields)
+				//console.log("Total Hits:", ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total), fields)
 				//console.log(JSON.stringify(a, null, 2));
 				callback(null, a);
 			};
@@ -310,7 +313,8 @@ module.exports = function(client) {
 				},
 				_source: [settings.id_column],
 				size: 1
-			}
+			},
+			track_total_hits: settings.track_total_hits
 		}, (err, min) => {
 			if (err) {
 				console.log(err);
@@ -328,7 +332,8 @@ module.exports = function(client) {
 					},
 					_source: [settings.id_column],
 					size: 1
-				}
+				},
+				track_total_hits: settings.track_total_hits
 			}, (err, max) => {
 				if (err) {
 					console.log(err);
@@ -345,7 +350,7 @@ module.exports = function(client) {
 				callback(null, {
 					min: id(min.hits.hits[0]),
 					max: id(max.hits.hits[0]),
-					total: min.hits.total
+					total: (typeof min.hits.total === 'object') ? min.hits.total.value : min.hits.total,
 				});
 			});
 
@@ -388,7 +393,8 @@ module.exports = function(client) {
 				_source: [settings.id_column],
 				size: 2,
 				from: data.limit - 1
-			}
+			},
+			track_total_hits: settings.track_total_hits
 		}, (err, result) => {
 			if (err) {
 				console.log(err);

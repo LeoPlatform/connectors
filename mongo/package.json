@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-mongo",
-	"version": "1.3.0",
+	"version": "1.3.1",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -9,7 +9,7 @@
 	"author": "",
 	"license": "MIT",
 	"dependencies": {
-		"leo-connector-common": "3.0.4",
+		"leo-connector-common": "3.0.5",
 		"moment": "2.24.0",
 		"moment-timezone": "0.5.26",
 		"mongodb": "3.3.2"
