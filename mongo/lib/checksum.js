@@ -306,12 +306,19 @@ module.exports = () => {
         logger.info('Connection Info');
         logger.info('database', opts.database);
         logger.info('collection', opts.collection);
-        logger.info('mongoClient', opts.mongoClient);
+        logger.info('connectString', opts.connectString);
         try {
             let mongoClient;
-            // if a mongoClient is passed in, use it; otherwise create one
-            if (opts.mongoClient) {
-                mongoClient = opts.mongoClient;
+            // if a ca is passed in, use the provided connect string and ca for SSL; otherwise, just use old way
+            if (opts.ca) {
+                let ca = opts.ca;
+                let connectString = opts.connectString;
+                let mongoConfig = {
+                    useNewUrlParser: true,
+                    sslValidate: true,
+                    sslCA: ca
+                };
+                mongoClient = await MongoClient.connect(connectString, mongoConfig);
             } else {
                 mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: true });
             }
