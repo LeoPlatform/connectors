@@ -49,7 +49,7 @@ module.exports = {
 		function connect() {
 			clearTimeout(delayedTimeout);
 			clearTimeout(sendTimeout);
-			let localDatabaseConnectString = `mongodb://${settings.server}/local?readPreference=secondary&slaveOk=true`;
+			let localDatabaseConnectString = `mongodb://${settings.server}/admin?readPreference=secondary&slaveOk=true`;
 			let databaseConnectString = `mongodb://${settings.server}/${settings.db}?readPreference=secondary&slaveOk=true`;
 			Promise.all([
 				MongoClient.connect(localDatabaseConnectString, { useNewUrlParser: true }),
@@ -57,7 +57,7 @@ module.exports = {
 			]).then(mongoClientArray => {
 				attempts = 0;
 				pass.mongoClientArray = mongoClientArray;
-				let localdb = mongoClientArray[0].db();
+				let localdb = mongoClientArray[0].db('local');
 				let db = pass.database = mongoClientArray[1].db();
 				let collection = pass.collection = db.collection(settings.collection);
 
