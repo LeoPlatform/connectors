@@ -56,12 +56,11 @@ module.exports = () => {
                     $lte: id(end)
                 }
             });
-            let method = settings.method || "find";
             let projection = settings.projectionFields || {};
             let sortObject = {};
             sortObject[settings.id_column] = 1;
             cursor = ls.pipe(
-                collection[method](where, projection).sort(sortObject).stream(), 
+                collection.find(where, projection).sort(sortObject).stream(), 
                 ls.through(function (obj, done) {
                     this.invalid = () => { };
                     let result = extract.call(this, obj);
@@ -108,12 +107,11 @@ module.exports = () => {
                         $in: ids.map(idFn)
                     }
                 });
-                let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
                 let sortObject = {};
                 sortObject[settings.id_column] = 1;
                 cursor = ls.pipe(
-                    collection[method](where, projection).sort(sortObject).stream(),
+                    collection.find(where, projection).sort(sortObject).stream(),
                     ls.through(function (obj, done) {
                         this.invalid = () => { };
                         let result = extract.call(this, obj);
@@ -149,11 +147,10 @@ module.exports = () => {
                         $lte: id(end)
                     }
                 });
-                let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
                 let sortObject = {};
                 sortObject[settings.id_column] = !reverse ? 1 : -1;
-                let rows = await collection[method](where, projection).sort(sortObject).limit(2).skip(limit-1).toArray();
+                let rows = await collection.find(where, projection).sort(sortObject).limit(2).skip(limit-1).toArray();
                 let r = rows[1] && extract.call({
                     push: (obj) => {
                         if (!reverse) {
@@ -229,20 +226,19 @@ module.exports = () => {
                 }
                 logger.debug("min", min);
                 logger.debug("max", max);
-                let method = settings.method || "find";
                 let projection = settings.projectionFields || {};
                 logger.debug("projection", projection);
                 let startSortObject = {};
                 startSortObject[settings.id_column] = 1;
                 logger.debug("startSortObject", startSortObject);
-                let startResult = await collection[method](min, projection).sort(startSortObject).limit(1).toArray();
+                let startResult = await collection.find(min, projection).sort(startSortObject).limit(1).toArray();
                 logger.debug("startResult", startResult);
                 let endSortObject = {};
                 endSortObject[settings.id_column] = -1;
                 logger.debug("endSortObject", endSortObject);
-                let endResult = await collection[method](max, projection).sort(endSortObject).limit(1).toArray();
+                let endResult = await collection.find(max, projection).sort(endSortObject).limit(1).toArray();
                 logger.debug("endResult", endResult);
-                totalResult = await collection[method](total).count();
+                totalResult = await collection.find(total).count();
                 logger.debug("totalResult", totalResult);
                 let r = extract.call({
                     push: (obj) => {
