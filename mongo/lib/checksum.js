@@ -303,9 +303,18 @@ module.exports = () => {
     });
     async function getCollection(settings) {
         let opts = Object.assign({}, settings);
-        logger.info("Connection Info", opts.database, opts.collection);
+        logger.info('Connection Info');
+        logger.info('database', opts.database);
+        logger.info('collection', opts.collection);
+        logger.info('mongoClient', opts.mongoClient);
         try {
-            let mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: true });
+            let mongoClient;
+            // if a mongoClient is passed in, use it; otherwise create one
+            if (opts.mongoClient) {
+                mongoClient = opts.mongoClient;
+            } else {
+                mongoClient = await MongoClient.connect(opts.database, { useNewUrlParser: true });
+            }
             cachedMongoClient = mongoClient;
             let db = mongoClient.db();
             return db.collection(opts.collection);
