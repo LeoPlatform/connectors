@@ -299,10 +299,7 @@ module.exports = () => {
     });
     async function getCollection(settings) {
         let opts = Object.assign({}, settings);
-        logger.info('Connection Info');
-        logger.info('database', opts.database);
-        logger.info('collection', opts.collection);
-        logger.info('connectString', opts.connectString);
+        logger.info('Connection Info', 'database', opts.database, 'collection', opts.collection);
         try {
             let mongoClient;
             // if a ca is passed in, use the provided connect string and ca for SSL; otherwise, just use old way
