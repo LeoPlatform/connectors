@@ -83,7 +83,7 @@ module.exports = {
 			}),
 			ls.through((payload, done) => {
 				// check size
-				let size = Buffer.byteLength(payload);
+				let size = Buffer.byteLength(JSON.stringify(payload));
 
 				if (size > GZIP_MIN) {
 					let compressedObj = {

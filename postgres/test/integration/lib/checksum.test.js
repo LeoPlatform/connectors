@@ -1,8 +1,8 @@
 require("chai").should();
 const checksum = require("../../../lib/checksum");
 
-require("leo-sdk/lib/logger").configure(/.*/, {
-	all: true
+require('leo-logger').configure(/.*/, {
+	all: true,
 });
 
 describe.skip('SQL', function() {

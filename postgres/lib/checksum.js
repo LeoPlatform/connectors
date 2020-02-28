@@ -2,7 +2,7 @@
 const uuid = require("uuid");
 const base = require("leo-connector-common/checksum/lib/handler.js");
 const moment = require("moment");
-const logger = require("leo-sdk/lib/logger")("postgres-checksum-api");
+const logger = require('leo-logger')('postgres-checksum-api');
 
 let fieldTypes = {
     INT4: 23,
@@ -329,7 +329,7 @@ module.exports = function (connection, fieldsTable) {
 					FROM ${tableName}
 					WHERE ${event.settings.id_column} __IDCOLUMNLIMIT__`;
             }
-			
+
             let sql = event.settings.sql;
             let sqlIdColumnReplaced = sql.replace("__IDCOLUMN__", event.settings.secondaryIdColumn ? `${event.settings.secondaryIdColumn}` : `${event.settings.table}.${event.settings.id_column}`);
             let sqlIdColumnLimitReplaced = sqlIdColumnReplaced.replace("__IDCOLUMNLIMIT__", " between '1' and '0' ");
@@ -355,7 +355,7 @@ module.exports = function (connection, fieldsTable) {
             });
         });
     }
-	
+
     function getExtractIdFunction(settings) {
         if (settings.extractId) {
             return eval(`(${settings.extractId})`);
