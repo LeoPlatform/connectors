@@ -9,7 +9,7 @@ let aws = require("aws-sdk");
 
 const logger = require('leo-logger')('leo-connector-entity-table');
 const GZIP_MIN = 5000;
-const zlib = require('zlib');
+const pako = require('pako');
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -86,11 +86,10 @@ module.exports = {
 				let size = Buffer.byteLength(payload);
 
 				if (size > GZIP_MIN) {
-					let content = Buffer.from(JSON.stringify(payload));
 					let compressedObj = {
 						[opts.range]: payload[opts.range],
 						[opts.hash]: payload[opts.hash],
-						compressedData: zlib.deflate(content),
+						compressedData: pako.deflate(JSON.stringify(payload)),
 					};
 					payload = compressedObj;
 				}
@@ -191,7 +190,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.old = zlib.inflate(image.compressedData);
+							data.payload.old = pako.inflate(image.compressedData, { to: 'string' });
 						} else {
 							data.payload.old = image;
 						}
@@ -205,7 +204,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.new = zlib.inflate(image.compressedData);
+							data.payload.new = pako.inflate(image.compressedData, { to: 'string' });
 						} else {
 							data.payload.new = image;
 						}
