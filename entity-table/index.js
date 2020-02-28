@@ -7,7 +7,9 @@ var backoff = require("backoff");
 var async = require("async");
 let aws = require("aws-sdk");
 
-const logger = require("leo-sdk/lib/logger")("leo-connector-entity-table");
+const logger = require('leo-logger')('leo-connector-entity-table');
+const GZIP_MIN = 5000;
+const zlib = require('zlib');
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -78,6 +80,22 @@ module.exports = {
 					throw new Error(`${opts.hash} is required`);
 				}
 				done(null, e);
+			}),
+			ls.through((payload, done) => {
+				// check size
+				let size = Buffer.byteLength(payload);
+
+				if (size > GZIP_MIN) {
+					let content = Buffer.from(JSON.stringify(payload));
+					let compressedObj = {
+						[opts.range]: payload[opts.range],
+						[opts.hash]: payload[opts.hash],
+						compressedData: zlib.deflate(content),
+					};
+					payload = compressedObj;
+				}
+
+				done(null, payload);
 			}),
 			toDynamoDB(table, opts)
 		);
@@ -170,14 +188,28 @@ module.exports = {
 					let eventPrefix = resourcePrefix;
 					if ("OldImage" in record.dynamodb) {
 						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
-						data.payload.old = image;
+
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							data.payload.old = zlib.inflate(image.compressedData);
+						} else {
+							data.payload.old = image;
+						}
+
 						if (resourcePrefix.length === 0) {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
 					}
 					if ("NewImage" in record.dynamodb) {
 						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
-						data.payload.new = image;
+
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							data.payload.new = zlib.inflate(image.compressedData);
+						} else {
+							data.payload.new = image;
+						}
+
 						if (resourcePrefix.length === 0) {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
