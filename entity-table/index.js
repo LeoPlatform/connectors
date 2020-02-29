@@ -6,10 +6,10 @@ let merge = require("lodash.merge");
 var backoff = require("backoff");
 var async = require("async");
 let aws = require("aws-sdk");
+const zlib = require('zlib');
 
 const logger = require('leo-logger')('leo-connector-entity-table');
 const GZIP_MIN = 5000;
-const pako = require('pako');
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -30,6 +30,29 @@ function hashCode(str) {
 		hash |= 0; // Convert to 32bit integer
 	}
 	return hash;
+}
+
+function deflate(string) {
+	return new Promise((resolve, reject) => {
+		zlib.deflate(string, (err, buffer) => {
+			if (!err) {
+				return resolve(buffer.toString('base64'));
+			}
+			reject(err);
+		});
+	});
+}
+
+function inflate(string) {
+	return new Promise((resolve, reject) => {
+		zlib.unzip(Buffer.from(string, 'base64'), (err, buffer) => {
+			if (err) {
+				return reject(err);
+			}
+
+			return resolve(buffer.toString());
+		});
+	});
 }
 
 module.exports = {
@@ -81,7 +104,7 @@ module.exports = {
 				}
 				done(null, e);
 			}),
-			ls.through((payload, done) => {
+			ls.through(async (payload, done) => {
 				// check size
 				let size = Buffer.byteLength(JSON.stringify(payload));
 
@@ -89,7 +112,7 @@ module.exports = {
 					let compressedObj = {
 						[opts.range]: payload[opts.range],
 						[opts.hash]: payload[opts.hash],
-						compressedData: Buffer.from(pako.deflate(JSON.stringify(payload), { to: 'string' })).toString('base64'),
+						compressedData: await deflate(JSON.stringify(payload)),
 					};
 					payload = compressedObj;
 				}
@@ -168,7 +191,7 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				function(done) {
+				async function(done) {
 					let record = event.Records[index];
 					let data = {
 						id: context.botId,
@@ -190,7 +213,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.old = JSON.parse(pako.inflate(Buffer.from(image.compressedData, 'base64').toString('utf-8'), { to: 'string' }));
+							data.payload.old = inflate(image.compressedData);
 						} else {
 							data.payload.old = image;
 						}
@@ -204,7 +227,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.new = JSON.parse(pako.inflate(Buffer.from(image.compressedData, 'base64').toString('utf-8'), { to: 'string' }));
+							data.payload.new = inflate(image.compressedData);
 						} else {
 							data.payload.new = image;
 						}
