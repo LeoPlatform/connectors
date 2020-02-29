@@ -213,7 +213,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.old = inflate(image.compressedData);
+							data.payload.old = await inflate(image.compressedData);
 						} else {
 							data.payload.old = image;
 						}
@@ -227,7 +227,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.new = inflate(image.compressedData);
+							data.payload.new = await inflate(image.compressedData);
 						} else {
 							data.payload.new = image;
 						}
