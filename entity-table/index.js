@@ -32,7 +32,12 @@ function hashCode(str) {
 	return hash;
 }
 
-function deflate(string) {
+/**
+ * Expects a string, deflates it, and converts it to base64
+ * @param string
+ * @returns {Promise<string>}
+ */
+function deflate (string) {
 	return new Promise((resolve, reject) => {
 		zlib.deflate(string, (err, buffer) => {
 			if (!err) {
@@ -43,7 +48,12 @@ function deflate(string) {
 	});
 }
 
-function inflate(string) {
+/**
+ * Expects a base64 encoded string, decodes it, and inflates it.
+ * @param string
+ * @returns {Promise<string>}
+ */
+function inflate (string) {
 	return new Promise((resolve, reject) => {
 		zlib.unzip(Buffer.from(string, 'base64'), (err, buffer) => {
 			if (err) {
@@ -214,7 +224,8 @@ module.exports = {
 
 							if (image.compressedData) {
 								// compressedData contains everything including hash/range
-								data.payload.old = await inflate(image.compressedData);
+								let inflated = await inflate(image.compressedData);
+								data.payload.old = JSON.parse(inflated);
 							} else {
 								data.payload.old = image;
 							}
@@ -228,7 +239,8 @@ module.exports = {
 
 							if (image.compressedData) {
 								// compressedData contains everything including hash/range
-								data.payload.new = await inflate(image.compressedData);
+								let inflated = await inflate(image.compressedData);
+								data.payload.new = JSON.parse(inflated);
 							} else {
 								data.payload.new = image;
 							}
