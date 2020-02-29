@@ -89,7 +89,7 @@ module.exports = {
 					let compressedObj = {
 						[opts.range]: payload[opts.range],
 						[opts.hash]: payload[opts.hash],
-						compressedData: pako.deflate(JSON.stringify(payload)),
+						compressedData: Buffer.from(pako.deflate(JSON.stringify(payload), { to: 'string' })).toString('base64'),
 					};
 					payload = compressedObj;
 				}
@@ -190,7 +190,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.old = pako.inflate(image.compressedData, { to: 'string' });
+							data.payload.old = JSON.parse(pako.inflate(Buffer.from(image.compressedData, 'base64').toString('utf-8'), { to: 'string' }));
 						} else {
 							data.payload.old = image;
 						}
@@ -204,7 +204,7 @@ module.exports = {
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
-							data.payload.new = pako.inflate(image.compressedData, { to: 'string' });
+							data.payload.new = JSON.parse(pako.inflate(Buffer.from(image.compressedData, 'base64').toString('utf-8'), { to: 'string' }));
 						} else {
 							data.payload.new = image;
 						}
