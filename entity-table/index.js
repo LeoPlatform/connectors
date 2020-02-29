@@ -191,58 +191,60 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				async function(done) {
-					let record = event.Records[index];
-					let data = {
-						id: context.botId,
-						event: defaultQueue,
-						payload: {
-							new: null,
-							old: null
-						},
-						event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
-						timestamp: Date.now(),
-						correlation_id: {
-							start: record.eventID,
-							source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
-						}
-					};
-					let eventPrefix = resourcePrefix;
-					if ("OldImage" in record.dynamodb) {
-						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
+				async function () {
+					return new Promise(async (resolve, reject) => {
+						let record = event.Records[index];
+						let data = {
+							id: context.botId,
+							event: defaultQueue,
+							payload: {
+								new: null,
+								old: null
+							},
+							event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
+							timestamp: Date.now(),
+							correlation_id: {
+								start: record.eventID,
+								source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
+							}
+						};
+						let eventPrefix = resourcePrefix;
+						if ("OldImage" in record.dynamodb) {
+							let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
 
-						if (image.compressedData) {
-							// compressedData contains everything including hash/range
-							data.payload.old = await inflate(image.compressedData);
-						} else {
-							data.payload.old = image;
-						}
+							if (image.compressedData) {
+								// compressedData contains everything including hash/range
+								data.payload.old = await inflate(image.compressedData);
+							} else {
+								data.payload.old = image;
+							}
 
-						if (resourcePrefix.length === 0) {
-							eventPrefix = image.partition.split(/-/)[0];
+							if (resourcePrefix.length === 0) {
+								eventPrefix = image.partition.split(/-/)[0];
+							}
 						}
-					}
-					if ("NewImage" in record.dynamodb) {
-						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
+						if ("NewImage" in record.dynamodb) {
+							let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
 
-						if (image.compressedData) {
-							// compressedData contains everything including hash/range
-							data.payload.new = await inflate(image.compressedData);
-						} else {
-							data.payload.new = image;
+							if (image.compressedData) {
+								// compressedData contains everything including hash/range
+								data.payload.new = await inflate(image.compressedData);
+							} else {
+								data.payload.new = image;
+							}
+
+							if (resourcePrefix.length === 0) {
+								eventPrefix = image.partition.split(/-/)[0];
+							}
 						}
+						data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
+						data.event = `${eventPrefix}${resourceSuffix}`;
+						let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
+						data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
-						if (resourcePrefix.length === 0) {
-							eventPrefix = image.partition.split(/-/)[0];
-						}
-					}
-					data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
-					data.event = `${eventPrefix}${resourceSuffix}`;
-					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
-
-					let stream = getStream(data.id);
-					stream.write(data) ? done() : stream.once("drain", () => done());
+						let stream = getStream(data.id);
+						stream.write(data) ? resolve() : stream.once("drain", () => resolve());
+					});
 				},
 				function() {
 					index++;
