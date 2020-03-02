@@ -1,5 +1,6 @@
 const leoaws = require('leo-aws');
 let leo = require("leo-sdk");
+const logger = require('leo-logger')('leo-connector-entity-table');
 let ls = leo.streams;
 let refUtil = require("leo-sdk/lib/reference.js");
 let merge = require("lodash.merge");
@@ -8,7 +9,6 @@ var async = require("async");
 let aws = require("aws-sdk");
 const zlib = require('zlib');
 
-const logger = require('leo-logger')('leo-connector-entity-table');
 const GZIP_MIN = 5000;
 
 function hashCode(str) {
@@ -36,9 +36,9 @@ module.exports = {
 	/**
 	 * Expects a string, deflates it, and converts it to base64
 	 * @param string
-	 * @returns {Promise<string>}
+	 * @returns {string}
 	 */
-	deflate: async string => {
+	deflate: string => {
 		let buffer = zlib.deflateSync(string);
 		return buffer.toString('base64');
 	},
@@ -49,9 +49,9 @@ module.exports = {
 	/**
 	 * Expects a base64 encoded string, decodes it, and inflates it.
 	 * @param string
-	 * @returns {Promise<string>}
+	 * @returns {string}
 	 */
-	inflate: async string => {
+	inflate: string => {
 		let buffer = Buffer.from(string, 'base64');
 		return zlib.inflateSync(buffer).toString();
 	},
@@ -99,7 +99,7 @@ module.exports = {
 				}
 				done(null, e);
 			}),
-			ls.through(async (payload, done) => {
+			ls.through((payload, done) => {
 				// check size
 				let size = Buffer.byteLength(JSON.stringify(payload));
 
@@ -107,7 +107,7 @@ module.exports = {
 					let compressedObj = {
 						[opts.range]: payload[opts.range],
 						[opts.hash]: payload[opts.hash],
-						compressedData: await self.deflate(JSON.stringify(payload)),
+						compressedData: self.deflate(JSON.stringify(payload)),
 					};
 					payload = compressedObj;
 				}
@@ -187,62 +187,60 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				async function () {
-					return new Promise(async (resolve, reject) => {
-						let record = event.Records[index];
-						let data = {
-							id: context.botId,
-							event: defaultQueue,
-							payload: {
-								new: null,
-								old: null
-							},
-							event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
-							timestamp: Date.now(),
-							correlation_id: {
-								start: record.eventID,
-								source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
-							}
-						};
-						let eventPrefix = resourcePrefix;
-						if ("OldImage" in record.dynamodb) {
-							let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
-
-							if (image.compressedData) {
-								// compressedData contains everything including hash/range
-								let inflated = await self.inflate(image.compressedData);
-								data.payload.old = JSON.parse(inflated);
-							} else {
-								data.payload.old = image;
-							}
-
-							if (resourcePrefix.length === 0) {
-								eventPrefix = image.partition.split(/-/)[0];
-							}
+		function (done) {
+					let record = event.Records[index];
+					let data = {
+						id: context.botId,
+						event: defaultQueue,
+						payload: {
+							new: null,
+							old: null
+						},
+						event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
+						timestamp: Date.now(),
+						correlation_id: {
+							start: record.eventID,
+							source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
 						}
-						if ("NewImage" in record.dynamodb) {
-							let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
+					};
+					let eventPrefix = resourcePrefix;
+					if ("OldImage" in record.dynamodb) {
+						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
 
-							if (image.compressedData) {
-								// compressedData contains everything including hash/range
-								let inflated = await self.inflate(image.compressedData);
-								data.payload.new = JSON.parse(inflated);
-							} else {
-								data.payload.new = image;
-							}
-
-							if (resourcePrefix.length === 0) {
-								eventPrefix = image.partition.split(/-/)[0];
-							}
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							let inflated = self.inflate(image.compressedData);
+							data.payload.old = JSON.parse(inflated);
+						} else {
+							data.payload.old = image;
 						}
-						data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
-						data.event = `${eventPrefix}${resourceSuffix}`;
-						let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-						data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
-						let stream = getStream(data.id);
-						stream.write(data) ? resolve() : stream.once("drain", () => resolve());
-					});
+						if (resourcePrefix.length === 0) {
+							eventPrefix = image.partition.split(/-/)[0];
+						}
+					}
+					if ("NewImage" in record.dynamodb) {
+						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
+
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							let inflated = self.inflate(image.compressedData);
+							data.payload.new = JSON.parse(inflated);
+						} else {
+							data.payload.new = image;
+						}
+
+						if (resourcePrefix.length === 0) {
+							eventPrefix = image.partition.split(/-/)[0];
+						}
+					}
+					data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
+					data.event = `${eventPrefix}${resourceSuffix}`;
+					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
+					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+
+					let stream = getStream(data.id);
+					stream.write(data) ? done() : stream.once("drain", () => done());
 				},
 				function() {
 					index++;
