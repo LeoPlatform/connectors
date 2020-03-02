@@ -32,30 +32,28 @@ function hashCode(str) {
 	return hash;
 }
 
-/**
- * Expects a string, deflates it, and converts it to base64
- * @param string
- * @returns {Promise<string>}
- */
-async function deflate (string) {
-	let buffer = zlib.deflateSync(string);
-	return buffer.toString('base64');
-}
-
-/**
- * Expects a base64 encoded string, decodes it, and inflates it.
- * @param string
- * @returns {Promise<string>}
- */
-async function inflate (string) {
-	let buffer = Buffer.from(string, 'base64');
-	return zlib.inflateSync(buffer).toString();
-}
-
 module.exports = {
+	/**
+	 * Expects a string, deflates it, and converts it to base64
+	 * @param string
+	 * @returns {Promise<string>}
+	 */
+	deflate: async string => {
+		let buffer = zlib.deflateSync(string);
+		return buffer.toString('base64');
+	},
 	hash: (entity, id, count = 10) => {
 		let hash = Math.abs(hashCode(id)) % count;
 		return `${entity}-${hash}`;
+	},
+	/**
+	 * Expects a base64 encoded string, decodes it, and inflates it.
+	 * @param string
+	 * @returns {Promise<string>}
+	 */
+	inflate: async string => {
+		let buffer = Buffer.from(string, 'base64');
+		return zlib.inflateSync(buffer).toString();
 	},
 	get: function(table, entity, id) {
 		if (id === undefined) {
@@ -109,7 +107,7 @@ module.exports = {
 					let compressedObj = {
 						[opts.range]: payload[opts.range],
 						[opts.hash]: payload[opts.hash],
-						compressedData: await deflate(JSON.stringify(payload)),
+						compressedData: await self.deflate(JSON.stringify(payload)),
 					};
 					payload = compressedObj;
 				}
@@ -173,6 +171,7 @@ module.exports = {
 		});
 	},
 	tableOldNewProcessor: function(options) {
+		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
 			let index = 0;
@@ -211,7 +210,7 @@ module.exports = {
 
 							if (image.compressedData) {
 								// compressedData contains everything including hash/range
-								let inflated = await inflate(image.compressedData);
+								let inflated = await self.inflate(image.compressedData);
 								data.payload.old = JSON.parse(inflated);
 							} else {
 								data.payload.old = image;
@@ -226,7 +225,7 @@ module.exports = {
 
 							if (image.compressedData) {
 								// compressedData contains everything including hash/range
-								let inflated = await inflate(image.compressedData);
+								let inflated = await self.inflate(image.compressedData);
 								data.payload.new = JSON.parse(inflated);
 							} else {
 								data.payload.new = image;
