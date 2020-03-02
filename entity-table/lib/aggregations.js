@@ -178,6 +178,13 @@ module.exports = {
 		});
 		return hash;
 	},
+	/**
+	 *
+	 * @param tableName
+	 * @param ns entity
+	 * @param t transform function
+	 * @returns {*}
+	 */
 	aggregator: function(tableName, ns, t) {
 		if (!t) {
 			t = ns;

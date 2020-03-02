@@ -1,6 +1,6 @@
 {
   "name": "leo-connector-mysql",
-  "version": "2.0.2",
+  "version": "2.1.1",
   "description": "A MySQL database connector for use with Leo Platform",
   "repository": {
     "type": "git",
@@ -18,7 +18,7 @@
   "homepage": "https://github.com/LeoPlatform/connectors#readme",
   "dependencies": {
     "chai": "4.2.0",
-    "leo-connector-common": "3.0.8",
+    "leo-connector-common": "3.1.1",
     "mysql2": "1.6.5",
     "zongji": "0.4.7"
   },

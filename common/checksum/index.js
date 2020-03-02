@@ -17,7 +17,7 @@ const ls = leo.streams;
 const async = require("async");
 
 const tableName = leo.configuration.resources.LeoCron;
-let logger = require("leo-sdk/lib/logger")("leo-checksum");
+let logger = require('leo-logger')('leo-checksum');
 
 function saveProgress(systemId, botId, data) {
 	return leoaws.dynamodb.merge(tableName, botId, {

@@ -1,13 +1,15 @@
 const leoaws = require('leo-aws');
 let leo = require("leo-sdk");
+const logger = require('leo-logger')('leo-connector-entity-table');
 let ls = leo.streams;
 let refUtil = require("leo-sdk/lib/reference.js");
 let merge = require("lodash.merge");
 var backoff = require("backoff");
 var async = require("async");
 let aws = require("aws-sdk");
+const zlib = require('zlib');
 
-const logger = require("leo-sdk/lib/logger")("leo-connector-entity-table");
+const GZIP_MIN = 5000;
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -31,9 +33,27 @@ function hashCode(str) {
 }
 
 module.exports = {
+	/**
+	 * Expects a string, deflates it, and converts it to base64
+	 * @param string
+	 * @returns {string}
+	 */
+	deflate: string => {
+		let buffer = zlib.deflateSync(string);
+		return buffer.toString('base64');
+	},
 	hash: (entity, id, count = 10) => {
 		let hash = Math.abs(hashCode(id)) % count;
 		return `${entity}-${hash}`;
+	},
+	/**
+	 * Expects a base64 encoded string, decodes it, and inflates it.
+	 * @param string
+	 * @returns {string}
+	 */
+	inflate: string => {
+		let buffer = Buffer.from(string, 'base64');
+		return zlib.inflateSync(buffer).toString();
 	},
 	get: function(table, entity, id) {
 		if (id === undefined) {
@@ -78,6 +98,21 @@ module.exports = {
 					throw new Error(`${opts.hash} is required`);
 				}
 				done(null, e);
+			}),
+			ls.through((payload, done) => {
+				// check size
+				let size = Buffer.byteLength(JSON.stringify(payload));
+
+				if (size > GZIP_MIN) {
+					let compressedObj = {
+						[opts.range]: payload[opts.range],
+						[opts.hash]: payload[opts.hash],
+						compressedData: self.deflate(JSON.stringify(payload)),
+					};
+					payload = compressedObj;
+				}
+
+				done(null, payload);
 			}),
 			toDynamoDB(table, opts)
 		);
@@ -136,6 +171,7 @@ module.exports = {
 		});
 	},
 	tableOldNewProcessor: function(options) {
+		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
 			let index = 0;
@@ -151,7 +187,7 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				function(done) {
+		function (done) {
 					let record = event.Records[index];
 					let data = {
 						id: context.botId,
@@ -170,14 +206,30 @@ module.exports = {
 					let eventPrefix = resourcePrefix;
 					if ("OldImage" in record.dynamodb) {
 						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
-						data.payload.old = image;
+
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							let inflated = self.inflate(image.compressedData);
+							data.payload.old = JSON.parse(inflated);
+						} else {
+							data.payload.old = image;
+						}
+
 						if (resourcePrefix.length === 0) {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
 					}
 					if ("NewImage" in record.dynamodb) {
 						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
-						data.payload.new = image;
+
+						if (image.compressedData) {
+							// compressedData contains everything including hash/range
+							let inflated = self.inflate(image.compressedData);
+							data.payload.new = JSON.parse(inflated);
+						} else {
+							data.payload.new = image;
+						}
+
 						if (resourcePrefix.length === 0) {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
