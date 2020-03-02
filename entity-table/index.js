@@ -37,15 +37,9 @@ function hashCode(str) {
  * @param string
  * @returns {Promise<string>}
  */
-function deflate (string) {
-	return new Promise((resolve, reject) => {
-		zlib.deflate(string, (err, buffer) => {
-			if (!err) {
-				return resolve(buffer.toString('base64'));
-			}
-			reject(err);
-		});
-	});
+async function deflate (string) {
+	let buffer = zlib.deflateSync(string);
+	return buffer.toString('base64');
 }
 
 /**
@@ -53,16 +47,9 @@ function deflate (string) {
  * @param string
  * @returns {Promise<string>}
  */
-function inflate (string) {
-	return new Promise((resolve, reject) => {
-		zlib.unzip(Buffer.from(string, 'base64'), (err, buffer) => {
-			if (err) {
-				return reject(err);
-			}
-
-			return resolve(buffer.toString());
-		});
-	});
+async function inflate (string) {
+	let buffer = Buffer.from(string, 'base64');
+	return zlib.inflateSync(buffer).toString();
 }
 
 module.exports = {
