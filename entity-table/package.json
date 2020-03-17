@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-entity-table",
-	"version": "2.4.2",
+	"version": "2.6.10",
 	"description": "A Leo entity table connector",
 	"repository": {
 		"type": "git",
@@ -21,9 +21,9 @@
 		"async": "2.6.3",
 		"backoff": "2.5.0",
 		"js-beautify": "1.10.2",
-		"leo-aws": "1.5.0",
+		"leo-aws": "1.6.0",
 		"leo-logger": "1.0.1",
-		"leo-sdk": "3.2.0"
+		"leo-sdk": "4.1.0"
 	},
 	"devDependencies": {
 		"chai": "^4.1.2",

@@ -1,6 +1,6 @@
 require("chai").should();
 
-const logger = require("leo-sdk/lib/logger")("connector.sql");
+const logger = require('leo-logger')('connector.sql');
 const PassThrough = require("stream").PassThrough;
 const async = require("async");
 const ls = require("leo-sdk").streams;

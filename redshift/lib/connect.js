@@ -1,12 +1,10 @@
 const {
 	Pool
 } = require('pg');
-const logger = require("leo-sdk/lib/logger")("connector.sql.postgres");
+const logger = require('leo-logger')('connector.sql.postgres');
 const moment = require("moment");
 const format = require('pg-format');
 const async = require('async');
-
-// require("leo-sdk/lib/logger").configure(true);
 
 var copyFrom = require('pg-copy-streams').from;
 var copyTo = require('pg-copy-streams').to;
@@ -83,7 +81,7 @@ function create(pool, parentCache) {
 			});
 		},
 		disconnect: pool.end.bind(pool),
-		end: pool.end.bind(pool),	
+		end: pool.end.bind(pool),
 		release: (destroy) => {
 			pool.release && pool.release(destroy);
 		},
@@ -288,7 +286,7 @@ function create(pool, parentCache) {
 				schema = ts[0];
 				shortTable = ts[1];
 			}
-					
+
 			// opts = Object.assign({
 			// 	records: 10000
 			// }, opts || {});
