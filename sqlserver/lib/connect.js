@@ -2,7 +2,7 @@
 
 require("./tediousAsRow.js");
 const mssql = require("mssql");
-const logger = require("leo-sdk/lib/logger")("connector.sql.mssql");
+const logger = require('leo-logger')('connector.sql.mssql');
 let connections = {};
 
 module.exports = function(config) {

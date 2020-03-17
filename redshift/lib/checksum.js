@@ -2,7 +2,7 @@
 const uuid = require("uuid");
 const base = require("leo-connector-common/checksum/lib/handler.js");
 const moment = require("moment");
-const logger = require("leo-sdk/lib/logger")("postgres-checksum-api");
+const logger = require('leo-logger')('postgres-checksum-api');
 
 let fieldTypes = {
     INT4: 23,
