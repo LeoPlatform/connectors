@@ -163,7 +163,7 @@ module.exports = function(config) {
 			let err;
 
 			try {
-				connections[connectionHash] = undefined;
+				delete connections[connectionHash];
 				pool.close();
 			} catch (e) {
 				err = e;

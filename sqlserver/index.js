@@ -123,7 +123,11 @@ module.exports = {
 				console.log(err);
 			}
 
-			stream.end();
+			client.end(() => {
+				console.log('Closing the SQLSERVER connection');
+				// end the stream
+				stream.end();
+			});
 		}, {inRowMode: false});
 
 		return stream;
