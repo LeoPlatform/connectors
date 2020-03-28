@@ -19,11 +19,15 @@ function DomainObjectLoader(client) {
 }
 
 module.exports = {
+	getClient: function(config) {
+		return connect(config);
+	},
 	load: function(config, sql, domain, opts, idColumns) {
+		let client = (config.query) ? config : this.getClient(config);
 		if (Array.isArray(idColumns)) {
-			return sqlLoaderJoin(connect(config), idColumns, sql, domain, opts);
+			return sqlLoaderJoin(client, idColumns, sql, domain, opts);
 		} else {
-			return sqlLoader(connect(config), sql, domain, opts);
+			return sqlLoader(client, sql, domain, opts);
 		}
 	},
 	nibble: function(config, table, id, opts) {
@@ -140,10 +144,13 @@ module.exports = {
 		} else {
 			let stream = leo.read(bot_id, opts.inQueue, {start: opts.start});
 			let stats = ls.stats(bot_id, opts.inQueue);
+			let client = this.getClient(dbConfig);
 
-			ls.pipe(stream, stats, this.load(dbConfig, sql, domain, opts, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
-				if (err) return callback(err);
-				return stats.checkpoint(callback);
+			ls.pipe(stream, stats, this.load(client, sql, domain, opts, dbConfig.id), leo.load(bot_id, opts.outQueue || dbConfig.table), err => {
+				client.end(() => {
+					if (err) return callback(err);
+					return stats.checkpoint(callback);
+				});
 			});
 		}
 	},
