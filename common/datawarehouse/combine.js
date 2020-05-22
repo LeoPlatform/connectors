@@ -3,8 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const merge = require("lodash/merge");
 const PassThrough = require("stream").PassThrough;
-const leo = require("leo-sdk");
-const ls = leo.streams;
+const { streams: ls } = require("leo-sdk");
 const transform = require("./transform.js");
 const async = require("async");
 const crypto = require("crypto");
@@ -44,7 +43,17 @@ module.exports = function(tableIds, opts) {
 		}
 		Object.keys(values).forEach(f => stream.fields[f] = 1);
 		let id = crypto.createHash('md5');
-		id.update(tableIds[table].map(f => values[f]).join(','));
+		try {
+			id.update(tableIds[table].map(f => {
+				const idValue = values[f];
+				if (typeof idValue === 'undefined') {
+					throw new Error("Unable to combine. ID Value undefined");
+				}
+				return idValue;
+			}).join(','));
+		} catch (err)  {
+			return done(err);
+		}
 
 		if (!stream.stream.write(`${id.digest('hex')}-${("00000000"+count).slice(-9)}` + JSON.stringify(values) + "\n")) {
 			stream.stream.once('drain', () => {

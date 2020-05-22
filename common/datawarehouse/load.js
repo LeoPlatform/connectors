@@ -9,7 +9,30 @@ const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
 
-module.exports = function (ID, source, client, tableConfig, stream, callback) {
+const getDeleteIds = (field, id) => {
+	if (typeof field == 'string') {
+		let delIds = {};
+		delIds[field] = id;
+		if (field !== "id") {
+			delIds.id = `_del_${id}`;
+		}
+		return delIds;
+	} else if (typeof id === 'object') {
+		return id;
+	}
+};
+
+const getDeleteField = (field, id) => {
+	if (typeof field === 'undefined') {
+		if (typeof id === 'object') {
+			return Object.keys(id);
+		}
+		return 'id';
+	}
+	return field;
+};
+
+module.exports = function(client, tableConfig, stream, callback) {
 
 	// adding backwards compatibility for ID and source
 	if (!callback) {
@@ -20,7 +43,6 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 		source = 'queue:dw.load';
 		ID = 'system:dw-ingest';
 	}
-
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
@@ -46,20 +68,21 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 			let entities = data.entities || [];
 			ids.map(id => {
 				entities.map(entity => {
-					let field = entity.field || 'id';
-					this.push(Object.assign({}, obj, {
+					let leoDelField = getDeleteField(entity.field, id);
+					const deleteEntity = Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
+							table: entity.table,
 							entity: entity.name,
-							command: 'delete',
-							field: field,
-							data: {
-								id: field === 'id' ? id : `_del_${id}`,
-								__leo_delete__: field,
+							command: "delete",
+							field: leoDelField,
+							data: Object.assign({
+								__leo_delete__: leoDelField,
 								__leo_delete_id__: id
-							}
+							}, getDeleteIds(entity.field, id))
 						}
-					}));
+					});
+					this.push(deleteEntity);
 				});
 			});
 			done();
@@ -250,7 +273,6 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 					let tasks = [];
 					Object.keys(obj).forEach(t => {
 						let config = tableConfig[t];
-						let sk = null;
 						let nk = [];
 						let scds = {
 							0: [],

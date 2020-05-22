@@ -23,13 +23,12 @@ module.exports = {
 	},
 	parseValues: function(obj, dateformat) {
 		let outObj = {};
-		let matches;
 
 		for (var key in obj) {
 			var value = obj[key];
 			if (key.match(/^[A-Z]/)) {
-				let columnName = key.toLowerCase().replace(/[^a-z0-9\:]/g, '_');
-				if (matches = columnName.match(/^ts(:.*|$)/)) {
+				let columnName = key.toLowerCase().replace(/[^a-z0-9:]/g, '_');
+				if (columnName.match(/^ts(:.*|$)/)) {
 					columnName = columnName.replace(/^ts:?/i, '') + "_ts";
 					if (columnName == "_ts") {
 						columnName = "ts";

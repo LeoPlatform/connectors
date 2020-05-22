@@ -42,6 +42,22 @@
 				"${workspaceFolder}/postgres/test/unit/**/*.test.js"
 			],
 			"internalConsoleOptions": "openOnSessionStart"
-		}
-	]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Common Unit Tests",
+            "program": "${workspaceFolder}/common/node_modules/mocha/bin/_mocha",
+            "cwd": "${workspaceFolder}/common",
+            "args": [
+                "-u",
+                "tdd",
+                "--timeout",
+                "999999",
+                "--colors",
+                "${workspaceFolder}/common/test/**/*.test.js"
+            ],
+            "internalConsoleOptions": "openOnSessionStart"
+        }
+    ]
 }
