@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-common",
-	"version": "4.0.2",
+	"version": "4.0.7-rc",
 	"description": "Common package for all Leo Platform database connectors",
 	"main": "index.js",
 	"directories": {},
@@ -20,13 +20,16 @@
 	"devDependencies": {
 		"chai": "^4.1.2",
 		"eslint": "^4.17.0",
-		"mocha": "^5.0.0"
+		"mocha": "^5.0.0",
+		"leo-sdk": "^5.0.8"
+	},
+	"peerDependencies": {
+		"leo-sdk": ">=5.0.8"
 	},
 	"dependencies": {
 		"async": "2.6.3",
-		"leo-aws": "2.0.0",
+		"leo-aws": "2.0.1",
 		"leo-logger": "1.0.1",
-		"leo-sdk": "5.0.4",
 		"leo-streams": "2.0.0",
 		"moment": "2.24.0",
 		"sqlstring": "2.3.1"
