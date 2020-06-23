@@ -2,7 +2,7 @@
 const connect = require("./lib/connect.js");
 const logger = require("leo-logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
-const checksum = require('lib/checksum');
+const checksum = require('./lib/checksum');
 
 let modules = {
     checksum,
