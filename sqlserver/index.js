@@ -5,6 +5,7 @@ const PassThrough = require("stream").PassThrough;
 const checksum = require('./lib/checksum');
 
 let modules = {
+	connect,
     checksum,
 	streamChanges: async (config, opts = {}) => {
 		let client = await connect(config);
@@ -55,7 +56,7 @@ let modules = {
 				order = order || opts.tables[t] + ' asc';
 			}
 
-			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION
+			let query = `SELECT '${t}' as tableName, ${fields}, SYS_CHANGE_VERSION __SYS_CHANGE_VERSION, SYS_CHANGE_OPERATION AS changeOperation
 				FROM  CHANGETABLE(CHANGES ${t}, ${Math.max(version - 1, 0)}) AS CT
 				where SYS_CHANGE_VERSION > ${version}${where}`;
 
@@ -68,31 +69,42 @@ let modules = {
 
 		logger.debug('Query Result', result);
 
-        result && result.recordset && result.recordset.length && result.recordset.forEach(r => {
-            let tableName = r.tableName;
-            let sys_change_version = r.__SYS_CHANGE_VERSION;
-            delete r.tableName;
-            delete r.__SYS_CHANGE_VERSION;
+        result && result.recordset && result.recordset.length && result.recordset.forEach(row => {
+            let tableName = row.tableName;
+            let sys_change_version = row.__SYS_CHANGE_VERSION;
+            delete row.tableName;
+            delete row.__SYS_CHANGE_VERSION;
 
-            if (!obj.payload[tableName]) {
-                obj.payload[tableName] = [];
+            // automatically assume update (insert/update)
+            let changeOperation = 'update';
+            // if it’s specifically delete, use delete
+            if (row.changeOperation === 'D') {
+            	changeOperation = 'delete';
+            }
+            delete row.changeOperation;
+
+            if (!obj.payload[changeOperation]) {
+            	obj.payload[changeOperation] = {};
+            }
+            if (!obj.payload[changeOperation][tableName]) {
+                obj.payload[changeOperation][tableName] = [];
             }
 
             let eid = `${sys_change_version}.`;
             let payload;
-            if (Object.keys(r).length > 1) {
-                eid += opts.tables[tableName].map(field => r[field]).join('.');
-                payload = r;
+            if (Object.keys(row).length > 1) {
+                eid += Object.keys(opts.tables[tableName]).map(field => row[field]).join('.');
+                payload = row;
             } else {
-                eid += r[opts.tables[tableName]];
-                payload = r[opts.tables[tableName]];
+                eid += row[opts.tables[tableName]];
+                payload = row[opts.tables[tableName]];
             }
 
             obj.correlation_id.units++;
             obj.correlation_id.start = obj.correlation_id.start || eid;
             obj.correlation_id.end = eid;
             obj.eid = eid;
-            obj.payload[tableName].push(payload);
+            obj.payload[changeOperation][tableName].push(payload);
         });
 
         if (obj.correlation_id.units > 0) {
