@@ -133,6 +133,18 @@ module.exports = {
 			if (opts.start) {
 				readOpts.start = opts.start;
 			}
+			if (opts.fast_s3_read) {
+				readOpts.fast_s3_read = opts.fast_s3_read;
+			}
+			if (opts.fast_s3_read_parallel_fetch_max_bytes) {
+				readOpts.fast_s3_read_parallel_fetch_max_bytes = opts.fast_s3_read_parallel_fetch_max_bytes;
+			}
+			if (opts.stream_query_limit) {
+				readOpts.stream_query_limit = opts.stream_query_limit;
+			}
+			if (opts.loops) {
+				readOpts.loops = opts.loops;
+			}
 			ls.pipe(
 				leo.read(botId, queue, readOpts),
 				stats,
@@ -187,7 +199,7 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-		function (done) {
+				function (done) {
 					let record = event.Records[index];
 					let data = {
 						id: context.botId,
@@ -266,9 +278,9 @@ module.exports = {
 	},
 	tableProcessor: function(event, context, callback) {	// old function for supporting old way before we had tableOldNewProcessor
 		this.tableOldNewProcessor({
-		    botSuffix: "_entity_changes",
-		    defaultQueue: "Unknown",
-		    eventSuffix: "_changes",
+			botSuffix: "_entity_changes",
+			defaultQueue: "Unknown",
+			eventSuffix: "_changes",
 		});
 	}
 };
