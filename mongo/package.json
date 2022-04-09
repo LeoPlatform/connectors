@@ -10,7 +10,7 @@
 	"license": "MIT",
 	"dependencies": {
 		"leo-connector-common": "4.0.6",
-		"moment": "2.24.0",
+		"moment": "2.29.2",
 		"moment-timezone": "0.5.26",
 		"mongodb": "3.5.5"
 	},
