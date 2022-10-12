@@ -27,6 +27,13 @@ module.exports = function (config, columnConfig) {
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
+	
+
+	if(config.hashedSurrogateKeys && config.useSlowlyChangingDimensions) {
+		logger.error(`Unsupported configuration, useSlowlyChangingDimensions:${useSlowlyChangingDimensions} hashedSurrogateKeys:${hashedSurrogateKeys}.`);
+		process.exit();
+	};
+
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
@@ -118,15 +125,23 @@ module.exports = function (config, columnConfig) {
 		schema[qualifiedStagingTable] = schema[qualifiedTable];
 
 		let tasks = [];
-
+		
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
-		tempTables.push(qualifiedStagingTable);
+		tempTables.push(qualifiedStagingTable); //Looks like we don't actually need this due to the next line
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
-		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
-		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
-		tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
-		// tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
+		if(config.version !== 'redshift') {
+			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+			tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
+		} else {
+			tasks.push(done => 
+				client.query(`create table ${qualifiedStagingTable} 
+							  diststyle all 
+							  as select *
+								 from ${qualifiedTable}
+								 limit 0;`, done));
+		};
+
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -181,14 +196,18 @@ module.exports = function (config, columnConfig) {
 					// Now insert any we were missing
 					tasks.push(done => {
 						connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
-								SELECT ${columns.map(column => `coalesce(staging.${column}, prev.${column})`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
+								SELECT ${columns.map(column => `staging.${column}`)},
+										false AS ${columnConfig._deleted},
+										${dwClient.auditdate} as ${columnConfig._auditdate}
 								FROM ${qualifiedStagingTable} staging
-								LEFT JOIN ${qualifiedTable} as prev on ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
-								WHERE prev.${ids[0]} is null	
+								WHERE NOT EXISTS (
+									SELECT *
+									FROM   ${qualifiedTable} as prev
+									WHERE ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
+								)	
 							`, done);
 					});
-					// tasks.push(done => connection.query(`drop table ${stagingTbl}`, done));
-
+					
 					async.series(tasks, err => {
 						if (!err) {
 							connection.query(`commit`, e => {
@@ -227,13 +246,22 @@ module.exports = function (config, columnConfig) {
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
-		tempTables.push(qualifiedStagingTable);
+		// Prepare staging tables
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
-		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
-		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
+		if(config.version !== 'redshift') {
+			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+			tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
+		} else {
+			tasks.push(done => 
+				client.query(`create table ${qualifiedStagingTable} 
+							  diststyle all 
+							  as select *
+								 from ${qualifiedTable}
+								 limit 0;`, done));
+		};
 		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
-		// tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
+		
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -262,7 +290,6 @@ module.exports = function (config, columnConfig) {
 						return callback(err);
 					}
 
-					// let scd0 = scds[0] || []; // Not Used
 					let scd2 = scds[2] || [];
 					let scd3 = scds[3] || [];
 					let scd6 = Object.keys(scds[6] || {});
@@ -278,88 +305,102 @@ module.exports = function (config, columnConfig) {
 
 					let scdSQL = [];
 
-					// if (!scd2.length && !scd3.length && !scd6.length) {
-					//	scdSQL.push(`1 as runSCD1`);
-					// } else
-					if (scd1.length) {
-						scdSQL.push(`CASE WHEN md5(${scd1.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd1.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
-					} else {
-						scdSQL.push(`0 as runSCD1`);
-					}
-					if (scd2.length) {
-						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd2.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
-					} else {
-						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
-					}
-					if (scd3.length) {
-						scdSQL.push(`CASE WHEN md5(${scd3.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd3.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
-					} else {
-						scdSQL.push(`0 as runSCD3`);
-					}
-					if (scd6.length) {
-						scdSQL.push(`CASE WHEN md5(${scd6.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd6.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
-					} else {
-						scdSQL.push(`0 as runSCD6`);
-					}
+					if(!config.bypassSlowlyChangingDimensions) {
+						if (scd1.length) {
+							scdSQL.push(`CASE WHEN md5(${scd1.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd1.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
+						} else {
+							scdSQL.push(`0 as runSCD1`);
+						}
+						if (scd2.length) {
+							scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd2.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
+						} else {
+							scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
+						}
+						if (scd3.length) {
+							scdSQL.push(`CASE WHEN md5(${scd3.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd3.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
+						} else {
+							scdSQL.push(`0 as runSCD3`);
+						}
+						if (scd6.length) {
+							scdSQL.push(`CASE WHEN md5(${scd6.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd6.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
+						} else {
+							scdSQL.push(`0 as runSCD6`);
+						}
+					};
 
-					// let's figure out which SCDs needs to happen
-					tempTables.push(`${qualifiedStagingTable}_changes`);
 					connection.query(`create table ${qualifiedStagingTable}_changes as 
-				select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
-					${scdSQL.join(',\n')}
-					FROM ${qualifiedStagingTable} s
-					LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
+									  	select ${nk.map(id => `s.${id}`).join(', ')}, 
+											   d.${nk[0]} is null as isNew
+										${!config.bypassSlowlyChangingDimensions ? `,${scdSQL.join(',\n')}` : ``}
+										FROM ${qualifiedStagingTable} s
+										LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
 						if (err) {
 							logger.error(err);
 							process.exit();
 						}
+
 						let tasks = [];
 						let rowId = null;
 						let totalRecords = 0;
 						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
-						tasks.push(done => {
-							connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
-								if (err) {
-									return done(err);
-								}
-								rowId = results[0].maxid || 10000;
-								totalRecords = (rowId - 10000);
-								done();
-							});
-						});
 
 						// The following code relies on the fact that now() will return the same time during all transaction events
 						tasks.push(done => connection.query(`Begin Transaction`, done));
 
-						tasks.push(done => {
-							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
-							connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-								FROM ${qualifiedStagingTable}_changes changes  
-								JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-								LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
-								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
-								`, done);
-						});
-
+						let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+						
+						if(!config.bypassSlowlyChangingDimensions) {
+							tasks.push(done => {
+								let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
+									SELECT row_number() over () + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+									FROM ${qualifiedStagingTable}_changes changes  
+									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+									WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
+									`, done);
+							});
+						} else if (config.hashedSurrogateKeys) {
+							tasks.push(done => {
+								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
+									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join('-')}), ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+									FROM ${qualifiedStagingTable}_changes changes  
+									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+									WHERE isNew = true		
+									`, done);
+							});
+						};
+						
 						// This needs to be done last
-						tasks.push(done => {
-							// RUN SCD1 / SCD6 columns  (where we update the old records)
-							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
-							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
-							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
-							connection.query(`update ${qualifiedTable} as prev
-										set  ${columns.join(', ')}
-										FROM ${qualifiedStagingTable}_changes changes
-										JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-										where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
-											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
-										`, done);
-						});
+						if(!config.bypassSlowlyChangingDimensions) {
+							tasks.push(done => {
+								// RUN SCD1 / SCD6 columns  (where we update the old records)
+								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
+								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
+								columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
+								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
+								connection.query(`update ${qualifiedTable} as prev
+											set  ${columns.join(', ')}
+											FROM ${qualifiedStagingTable}_changes changes
+											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
+											`, done);
+							});
+						} else if(config.hashedSurrogateKeys) {
+							tasks.push(done => {
+								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
+								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
+								connection.query(`update ${qualifiedTable} as prev
+											set  ${columns.join(', ')}
+											FROM ${qualifiedStagingTable}_changes changes
+											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false
+											`, done);
+							});
+						};
 
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
@@ -382,62 +423,66 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.insertMissingDimensions = function (usedTables, tableConfig, tableSks, tableNks, callback) {
-		let unions = {};
-		let isDate = {
-			d_date: true,
-			d_datetime: true,
-			d_time: true,
-			date: true,
-			datetime: true,
-			dim_date: true,
-			dim_datetime: true,
-			dim_time: true,
-			time: true,
-		};
-		Object.keys(usedTables).map(table => {
-			Object.keys(tableConfig[table].structure).map(column => {
-				let field = tableConfig[table].structure[column];
-				if (field.dimension && !isDate[field.dimension]) {
-					if (!(unions[field.dimension])) {
-						unions[field.dimension] = [];
-					}
-					if (typeof tableNks[field.dimension] === 'undefined') {
-						throw new Error(`${field.dimension} not found in tableNks`);
-					}
-					let dimTableNk = tableNks[field.dimension][0];
-					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
-				}
-			});
-		});
-		let missingDimTasks = Object.keys(unions).map(table => {
-			let sk = tableSks[table];
-			let nk = tableNks[table][0];
-			return (callback) => {
-				let done = (err, data) => {
-					trx && trx.release();
-					callback(err, data);
-				};
-				let trx;
-				client.connect().then(transaction => {
-					trx = transaction;
-					transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
-						if (err) {
-							return done(err);
-						}
-						let rowId = results[0].maxid || 10000;
-						let _auditdate = dwClient.auditdate; // results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
-						let unionQuery = unions[table].join('\nUNION\n');
-						transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
-							done(err);
-						});
-					});
-				}).catch(done);
+		if(config.hashedSurrogateKeys) {
+			callback(null);
+		} else {
+			let unions = {};
+			let isDate = {
+				d_date: true,
+				d_datetime: true,
+				d_time: true,
+				date: true,
+				datetime: true,
+				dim_date: true,
+				dim_datetime: true,
+				dim_time: true,
+				time: true,
 			};
-		});
-		async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
-			logger.info(`Missing Dimensions ${!missingDimError && 'Inserted'} ----------------------------`, missingDimError || '');
-			callback(missingDimError);
-		});
+			Object.keys(usedTables).map(table => {
+				Object.keys(tableConfig[table].structure).map(column => {
+					let field = tableConfig[table].structure[column];
+					if (field.dimension && !isDate[field.dimension]) {
+						if (!(unions[field.dimension])) {
+							unions[field.dimension] = [];
+						}
+						if (typeof tableNks[field.dimension] === 'undefined') {
+							throw new Error(`${field.dimension} not found in tableNks`);
+						}
+						let dimTableNk = tableNks[field.dimension][0];
+						unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
+					}
+				});
+			});
+			let missingDimTasks = Object.keys(unions).map(table => {
+				let sk = tableSks[table];
+				let nk = tableNks[table][0];
+				return (callback) => {
+					let done = (err, data) => {
+						trx && trx.release();
+						callback(err, data);
+					};
+					let trx;
+					client.connect().then(transaction => {
+						trx = transaction;
+						transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
+							if (err) {
+								return done(err);
+							}
+							let rowId = results[0].maxid || 10000;
+							let _auditdate = dwClient.auditdate; // results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
+							let unionQuery = unions[table].join('\nUNION\n');
+							transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
+								done(err);
+							});
+						});
+					}).catch(done);
+				};
+			});
+			async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
+				logger.info(`Missing Dimensions ${!missingDimError && 'Inserted'} ----------------------------`, missingDimError || '');
+				callback(missingDimError);
+			});
+		};
 	};
 
 	client.linkDimensions = function (table, links, nk, callback, tableStatus) {
@@ -449,7 +494,7 @@ module.exports = function (config, columnConfig) {
 
 			// Only run analyze on the table if this is the first load
 			if (tableStatus === 'First Load') {
-				tasks.push(done => client.query(`analyze ${table}`, done));
+				tasks.push(done => client.query(`ANALYZE ${table}`, done));
 			}
 			tasks.push(done => {
 				let joinTables = links.map(link => {
@@ -461,26 +506,32 @@ module.exports = function (config, columnConfig) {
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_time' || link.table === 'time' || link.table === 'dim_time')) {
 						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 					} else {
-						sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
-						var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
-						if (Array.isArray(link.source)) {
-							joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
-						}
-						return `LEFT JOIN ${link.table} ${link.join_id}_join_table
-                            on ${joinOn} 
-                                and t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
-                                and (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+						if(config.hashedSurrogateKeys) {
+							sets.push(`${link.destination} = coalesce(farmFingerPrint64(t.${link.source}), 1)`);
+							return ``;
+						} else {
+							var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
+
+							if (Array.isArray(link.source)) {
+								joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
+							}
+							return `LEFT JOIN ${link.table} ${link.join_id}_join_table
+								ON ${joinOn} 
+									AND t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
+									AND (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+						};
 					}
 				});
 
 				if (sets.length) {
-					client.query(`Update ${table} dm
+					client.query(`UPDATE ${table} dm
                         SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
                         FROM ${table} t
-                        ${joinTables.join('\n')}
-                        where ${nk.map(id => `dm.${id} = t.${id}`).join(' and ')}
+						${joinTables.join('\n')}
+                        WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
 							AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
+					// removed join logic from above ${joinTables.join('\n')}
 				} else {
 					done();
 				}
