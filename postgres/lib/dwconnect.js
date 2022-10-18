@@ -142,24 +142,45 @@ module.exports = function (config, columnConfig) {
 								 limit 0;`, done));
 		};
 
-		tasks.push(done => {
-			ls.pipe(stream, ls.through((obj, done, push) => {
-				if (obj.__leo_delete__) {
-					if (obj.__leo_delete__ === 'id') {
-						push(obj);
+		if (config.version !== 'redshift') {
+			tasks.push(done => {
+				ls.pipe(stream, ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ === 'id') {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
 					}
-					deleteHandler.add(obj, done);
-				} else {
-					done(null, obj);
-				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
-				if (err) {
-					return done(err);
-				} else {
-					deleteHandler.flush(done);
-				}
+				}), client.streamToTable(qualifiedStagingTable), (err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
 			});
-		});
+		} else {
+			tasks.push(done => {
+				ls.pipe(stream, ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ === 'id') {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTableFromS3(qualifiedStagingTable, config), (err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
+			});
+		};
 
 		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
 
@@ -174,7 +195,7 @@ module.exports = function (config, columnConfig) {
 
 					let tasks = [];
 					let totalRecords = 0;
-					// The following code relies on the fact that now() will return the same time during all transaction events
+					// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
 					tasks.push(done => connection.query(`Begin Transaction`, done));
 					tasks.push(done => {
 						connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
@@ -262,24 +283,45 @@ module.exports = function (config, columnConfig) {
 		};
 		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
 		
-		tasks.push(done => {
-			ls.pipe(stream, ls.through((obj, done, push) => {
-				if (obj.__leo_delete__) {
-					if (obj.__leo_delete__ === 'id') {
-						push(obj);
+		if (config.version !== 'redshift') {
+			tasks.push(done => {
+				ls.pipe(stream, ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ === 'id') {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
 					}
-					deleteHandler.add(obj, done);
-				} else {
-					done(null, obj);
-				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
-				if (err) {
-					return done(err);
-				} else {
-					deleteHandler.flush(done);
-				}
+				}), client.streamToTable(qualifiedStagingTable), (err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
 			});
-		});
+		} else {
+			tasks.push(done => {
+				ls.pipe(stream, ls.through((obj, done, push) => {
+					if (obj.__leo_delete__) {
+						if (obj.__leo_delete__ === 'id') {
+							push(obj);
+						}
+						deleteHandler.add(obj, done);
+					} else {
+						done(null, obj);
+					}
+				}), client.streamToTableFromS3(qualifiedStagingTable, config.s3prefix, config.keepS3Filess), (err) => {
+					if (err) {
+						return done(err);
+					} else {
+						deleteHandler.flush(done);
+					}
+				});
+			});
+		};
 
 		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
 
@@ -344,7 +386,7 @@ module.exports = function (config, columnConfig) {
 						let totalRecords = 0;
 						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
 
-						// The following code relies on the fact that now() will return the same time during all transaction events
+						// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
 						tasks.push(done => connection.query(`Begin Transaction`, done));
 
 						let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
@@ -353,7 +395,12 @@ module.exports = function (config, columnConfig) {
 							tasks.push(done => {
 								let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-									SELECT row_number() over () + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+									SELECT row_number() over () + ${rowId}, 
+										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
+										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
+										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.verion === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
+										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, 
+										   true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
 									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
 									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
@@ -363,7 +410,11 @@ module.exports = function (config, columnConfig) {
 						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join('-')}), ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
+									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join('-')}), 
+										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
+										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
+										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.verion === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
+										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
 									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
 									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
@@ -377,14 +428,14 @@ module.exports = function (config, columnConfig) {
 							tasks.push(done => {
 								// RUN SCD1 / SCD6 columns  (where we update the old records)
 								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
+								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.verion === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
 								columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 								connection.query(`update ${qualifiedTable} as prev
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.verion === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
@@ -396,7 +447,7 @@ module.exports = function (config, columnConfig) {
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false
+											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.verion === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
 											`, done);
 							});
 						};
@@ -469,7 +520,7 @@ module.exports = function (config, columnConfig) {
 								return done(err);
 							}
 							let rowId = results[0].maxid || 10000;
-							let _auditdate = dwClient.auditdate; // results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
+							let _auditdate = dwClient.auditdate;
 							let unionQuery = unions[table].join('\nUNION\n');
 							transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
 								done(err);
@@ -714,7 +765,7 @@ module.exports = function (config, columnConfig) {
 			// Add empty row to new dim
 			defaults = defaults.concat([{
 				column: columnConfig._auditdate,
-				value: 'now()',
+				value: config.verion === 'redshift' ? 'sysdate' : 'now()',
 			}, {
 				column: columnConfig._startdate,
 				value: client.escapeValueNoToLower('1900-01-01 00:00:00'),
