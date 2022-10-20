@@ -27,9 +27,9 @@ module.exports = function (config, columnConfig) {
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
-	
 
-	if(config.hashedSurrogateKeys && config.useSlowlyChangingDimensions) {
+
+	if (config.hashedSurrogateKeys && config.useSlowlyChangingDimensions) {
 		logger.error(`Unsupported configuration, useSlowlyChangingDimensions:${useSlowlyChangingDimensions} hashedSurrogateKeys:${hashedSurrogateKeys}.`);
 		process.exit();
 	};
@@ -37,7 +37,7 @@ module.exports = function (config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
-	function deletesSetup (qualifiedTable, schema, field, value, where = '') {
+	function deletesSetup(qualifiedTable, schema, field, value, where = '') {
 		let colLookup = {};
 		schema.map(col => {
 			colLookup[col.column_name] = true;
@@ -48,7 +48,7 @@ module.exports = function (config, columnConfig) {
 			where = `and ${where}`;
 		}
 
-		function tryFlushDelete (done, force = false) {
+		function tryFlushDelete(done, force = false) {
 			if (force || toDeleteCount >= 1000) {
 				let deleteTasks = Object.keys(toDelete).map(col => {
 					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
@@ -125,16 +125,16 @@ module.exports = function (config, columnConfig) {
 		schema[qualifiedStagingTable] = schema[qualifiedTable];
 
 		let tasks = [];
-		
+
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
-		tempTables.push(qualifiedStagingTable); //Looks like we don't actually need this due to the next line
+		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
-		if(config.version !== 'redshift') {
+		if (config.version !== 'redshift') {
 			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
 			tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
 		} else {
-			tasks.push(done => 
+			tasks.push(done =>
 				client.query(`create table ${qualifiedStagingTable} 
 							  diststyle all 
 							  as select *
@@ -228,7 +228,7 @@ module.exports = function (config, columnConfig) {
 								)	
 							`, done);
 					});
-					
+
 					async.series(tasks, err => {
 						if (!err) {
 							connection.query(`commit`, e => {
@@ -267,14 +267,16 @@ module.exports = function (config, columnConfig) {
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
+		tempTables.push(qualifiedStagingTable);
+
 		// Prepare staging tables
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
-		if(config.version !== 'redshift') {
+		if (config.version !== 'redshift') {
 			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
 			tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
 		} else {
-			tasks.push(done => 
+			tasks.push(done =>
 				client.query(`create table ${qualifiedStagingTable} 
 							  diststyle all 
 							  as select *
@@ -282,7 +284,7 @@ module.exports = function (config, columnConfig) {
 								 limit 0;`, done));
 		};
 		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
-		
+
 		if (config.version !== 'redshift') {
 			tasks.push(done => {
 				ls.pipe(stream, ls.through((obj, done, push) => {
@@ -347,7 +349,7 @@ module.exports = function (config, columnConfig) {
 
 					let scdSQL = [];
 
-					if(!config.bypassSlowlyChangingDimensions) {
+					if (!config.bypassSlowlyChangingDimensions) {
 						if (scd1.length) {
 							scdSQL.push(`CASE WHEN md5(${scd1.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd1.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
 						} else {
@@ -370,6 +372,7 @@ module.exports = function (config, columnConfig) {
 						}
 					};
 
+					tempTables.push(`${qualifiedStagingTable}_changes`);
 					connection.query(`create table ${qualifiedStagingTable}_changes as 
 									  	select ${nk.map(id => `s.${id}`).join(', ')}, 
 											   d.${nk[0]} is null as isNew
@@ -390,10 +393,20 @@ module.exports = function (config, columnConfig) {
 						tasks.push(done => connection.query(`Begin Transaction`, done));
 
 						let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
-						
-						if(!config.bypassSlowlyChangingDimensions) {
+
+						if (!config.bypassSlowlyChangingDimensions) {
 							tasks.push(done => {
-								let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+								connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
+									if (err) {
+										return done(err);
+									}
+									rowId = results[0].maxid || 10000;
+									totalRecords = (rowId - 10000);
+									done();
+								});
+							});
+
+							tasks.push(done => {
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
 									SELECT row_number() over () + ${rowId}, 
 										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
@@ -422,9 +435,9 @@ module.exports = function (config, columnConfig) {
 									`, done);
 							});
 						};
-						
+
 						// This needs to be done last
-						if(!config.bypassSlowlyChangingDimensions) {
+						if (!config.bypassSlowlyChangingDimensions) {
 							tasks.push(done => {
 								// RUN SCD1 / SCD6 columns  (where we update the old records)
 								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
@@ -439,7 +452,7 @@ module.exports = function (config, columnConfig) {
 												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
-						} else if(config.hashedSurrogateKeys) {
+						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
@@ -474,7 +487,7 @@ module.exports = function (config, columnConfig) {
 	};
 
 	client.insertMissingDimensions = function (usedTables, tableConfig, tableSks, tableNks, callback) {
-		if(config.hashedSurrogateKeys) {
+		if (config.hashedSurrogateKeys) {
 			callback(null);
 		} else {
 			let unions = {};
@@ -557,7 +570,7 @@ module.exports = function (config, columnConfig) {
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_time' || link.table === 'time' || link.table === 'dim_time')) {
 						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
 					} else {
-						if(config.hashedSurrogateKeys) {
+						if (config.hashedSurrogateKeys) {
 							sets.push(`${link.destination} = coalesce(farmFingerPrint64(t.${link.source}), 1)`);
 							return ``;
 						} else {
@@ -567,7 +580,7 @@ module.exports = function (config, columnConfig) {
 								joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
 							}
 							return `LEFT JOIN ${link.table} ${link.join_id}_join_table
-								ON ${joinOn} 
+									ON ${joinOn} 
 									AND t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
 									AND (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
 						};
@@ -578,7 +591,7 @@ module.exports = function (config, columnConfig) {
 					client.query(`UPDATE ${table} dm
                         SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
                         FROM ${table} t
-						${joinTables.join('\n')}
+						${config.hashedSurrogateKeys ? '' : joinTables.join('\n')}
                         WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
 							AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
