@@ -313,7 +313,7 @@ module.exports = function (config, columnConfig) {
 					} else {
 						done(null, obj);
 					}
-				}), client.streamToTableFromS3(qualifiedStagingTable, config.s3prefix, config.keepS3Filess), (err) => {
+				}), client.streamToTableFromS3(qualifiedStagingTable, config), (err) => {
 					if (err) {
 						return done(err);
 					} else {
@@ -398,7 +398,7 @@ module.exports = function (config, columnConfig) {
 									SELECT row_number() over () + ${rowId}, 
 										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
 										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
-										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.verion === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
+										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
 										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, 
 										   true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
@@ -413,7 +413,7 @@ module.exports = function (config, columnConfig) {
 									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join('-')}), 
 										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
 										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
-										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.verion === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
+										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
 										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
 									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
@@ -428,14 +428,14 @@ module.exports = function (config, columnConfig) {
 							tasks.push(done => {
 								// RUN SCD1 / SCD6 columns  (where we update the old records)
 								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.verion === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
+								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.version === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
 								columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 								connection.query(`update ${qualifiedTable} as prev
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.verion === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
@@ -447,7 +447,7 @@ module.exports = function (config, columnConfig) {
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.verion === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
+											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
 											`, done);
 							});
 						};
@@ -765,7 +765,7 @@ module.exports = function (config, columnConfig) {
 			// Add empty row to new dim
 			defaults = defaults.concat([{
 				column: columnConfig._auditdate,
-				value: config.verion === 'redshift' ? 'sysdate' : 'now()',
+				value: config.version === 'redshift' ? 'sysdate' : 'now()',
 			}, {
 				column: columnConfig._startdate,
 				value: client.escapeValueNoToLower('1900-01-01 00:00:00'),

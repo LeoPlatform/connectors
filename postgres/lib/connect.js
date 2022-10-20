@@ -11,13 +11,15 @@ var copyFrom = require('pg-copy-streams').from;
 var copyTo = require('pg-copy-streams').to;
 let csv = require('fast-csv');
 
+// need to confirm there is no issue adding these dependencies
+const leo = require('leo-sdk');
+const ls = leo.streams;
+
 require('pg').types.setTypeParser(1114, (val) => {
 	val += 'Z';
 	logger.debug(val);
 	return moment(val).unix() + '  ' + moment(val).utc().format();
 });
-
-const ls = require('leo-sdk').streams;
 
 let queryCount = 0;
 module.exports = function (config) {
@@ -700,7 +702,7 @@ function create (pool, parentCache) {
 									let f = columns.map(f => `"${f}"`);
 									let file = `s3://${leo.configuration.s3}/${s3FileName}`;
 									let manifest = '';
-									let role = dbconfig.loaderRole;
+									let role = config.loaderRole;
 									myClient.query(
 										`copy ${table} (${f}) from '${file}' ${manifest} ${role ? `credentials 'aws_iam_role=${role}'` : ''
 										} NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`,
