@@ -574,6 +574,7 @@ module.exports = function (config, columnConfig) {
 							sets.push(`${link.destination} = coalesce(farmFingerPrint64(t.${link.source}), 1)`);
 							return ``;
 						} else {
+							sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
 							var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
 
 							if (Array.isArray(link.source)) {
