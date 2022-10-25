@@ -1,9 +1,6 @@
 {
-	"name": "connector-postgres",
+	"name": "@leoplatform/connector-postgres",
 	"description": "A Postgres database connector for use with Leo Platform",
-	"publishConfig": {
-		"registry": "https://npm.pkg.github.com"
-	},
 	"repository": {
 		"type": "git",
 		"url": "git://github.com/LeoPlatform/connectors.git"
