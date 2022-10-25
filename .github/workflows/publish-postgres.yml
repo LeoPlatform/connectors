@@ -12,8 +12,8 @@ jobs:
   publish-new-release:
     runs-on: ubuntu-latest
     steps:
-    - run: cd postgres
     - uses: actions/checkout@v2
+    - run: cd postgres
     - name: Node 12
       uses: actions/setup-node@v2
       with:
