@@ -28,9 +28,9 @@ module.exports = function (config, columnConfig) {
 	}, columnConfig || {});
 
 
-
-	if (config.hashedSurrogateKeys && config.useSlowlyChangingDimensions) {
-		logger.error(`Unsupported configuration, useSlowlyChangingDimensions:${useSlowlyChangingDimensions} hashedSurrogateKeys:${hashedSurrogateKeys}.`);
+	// Control flow for both of these configurations set to true has not been added. An error will be thrown until that is supported.
+	if (config.hashedSurrogateKeys && config.bypassSlowlyChangingDimensions) {
+		logger.error(`Unsupported configuration, bypassSlowlyChangingDimensions:${bypassSlowlyChangingDimensions} hashedSurrogateKeys:${hashedSurrogateKeys}.`);
 		process.exit();
 	};
 
@@ -277,6 +277,7 @@ module.exports = function (config, columnConfig) {
 			tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
 		} else {
 			tasks.push(done =>
+				// Create staging table with DISTSTYLE ALL to prevent cross talk
 				client.query(`create table ${qualifiedStagingTable} 
 							  diststyle all 
 							  as select *
@@ -394,7 +395,7 @@ module.exports = function (config, columnConfig) {
 
 						let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
 
-						if (!config.bypassSlowlyChangingDimensions) {
+						if (!config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
 									if (err) {
@@ -423,24 +424,24 @@ module.exports = function (config, columnConfig) {
 						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join('-')}), 
-										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, 
+									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join(`|| '-' ||`)}),
+										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, // Don't think we need the coalesce anymore
 										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
 										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
 										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
 									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current} // validate nothing will set _current to false, if so get rid of this join
 									WHERE isNew = true		
 									`, done);
 							});
-						};
+						}; // Final else is needed to support hashed surrogate keys and slowly changing dimensions
 
 						// This needs to be done last
+						let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
 						if (!config.bypassSlowlyChangingDimensions) {
 							tasks.push(done => {
 								// RUN SCD1 / SCD6 columns  (where we update the old records)
-								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
 								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.version === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
 								columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
@@ -448,18 +449,19 @@ module.exports = function (config, columnConfig) {
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+											where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false 
+											/*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
 												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
 						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
-								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
 								connection.query(`update ${qualifiedTable} as prev
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+																												// might be able to remove the _startdate dependency since we aren't using slowly changing dimensions
 											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
 											`, done);
 							});
@@ -596,7 +598,6 @@ module.exports = function (config, columnConfig) {
                         WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
 							AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
                     `, done);
-					// removed join logic from above ${joinTables.join('\n')}
 				} else {
 					done();
 				}
