@@ -11,9 +11,11 @@ on:
 jobs:
   publish-new-release:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./postgres
     steps:
     - uses: actions/checkout@v2
-    - run: cd postgres
     - name: Node 12
       uses: actions/setup-node@v2
       with:
