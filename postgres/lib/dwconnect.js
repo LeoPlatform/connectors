@@ -428,13 +428,13 @@ module.exports = function (config, columnConfig) {
 							tasks.push(done => {
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
 									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join(`|| '-' ||`)}),
-										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, // Don't think we need the coalesce anymore
+										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)},
 										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
 										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
 										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
 									FROM ${qualifiedStagingTable}_changes changes  
 									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current} // validate nothing will set _current to false, if so get rid of this join
+									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current} 
 									WHERE isNew = true		
 									`, done);
 							});
