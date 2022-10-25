@@ -29,8 +29,11 @@ module.exports = function (config, columnConfig) {
 
 
 	// Control flow for both of these configurations set to true has not been added. An error will be thrown until that is supported.
-	if (config.hashedSurrogateKeys && config.bypassSlowlyChangingDimensions) {
-		logger.error(`Unsupported configuration, bypassSlowlyChangingDimensions:${bypassSlowlyChangingDimensions} hashedSurrogateKeys:${hashedSurrogateKeys}.`);
+	if (
+		(config.hashedSurrogateKeys && !config.bypassSlowlyChangingDimensions) // hashed surrogate keys and slowly changing dimensions not supported
+		|| (config.hashedSurrogateKeys && config.bypassSlowlyChangingDimensions === undefined) // covering the case where slowly changing dimensions has been omitted
+	) {
+		logger.error(`Unsupported configuration, bypassSlowlyChangingDimensions:${config.bypassSlowlyChangingDimensions} hashedSurrogateKeys:${config.hashedSurrogateKeys}.`);
 		process.exit();
 	};
 
