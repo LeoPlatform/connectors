@@ -21,7 +21,7 @@ jobs:
       with:
         node-version: '12.x'
         # cache: 'npm'
-        # registry-url: 'https://npm.pkg.github.com'
+        registry-url: 'https://npm.pkg.github.com'
     - run: |
         pwd
         ls
