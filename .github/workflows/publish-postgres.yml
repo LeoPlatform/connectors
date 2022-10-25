@@ -28,6 +28,9 @@ jobs:
     # - run: git config user.email "githubactions@commercehub.com" #skipping this for now since we don't have a servie account for LeoPlatform yet
     - run: git config user.name "GitHub-Actions"
     - run: npm version ${{ github.event.release.tag_name }}
+    - run: echo "//npm.pkg.github.com/:_authToken=$NODE_AUTH_TOKEN" > .npmrc
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - run: |
         npm config get registry
       env:
