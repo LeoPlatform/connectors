@@ -426,6 +426,11 @@ module.exports = function (config, columnConfig) {
 							});
 						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
+								/*
+								* Likely don't need the coalesce anymore
+								* validate nothing will set _current to false, if so get rid of this join
+								* general need to review SCD fields to make sure we can ignore them
+								*/
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
 									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join(`|| '-' ||`)}),
 										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)},
@@ -460,11 +465,13 @@ module.exports = function (config, columnConfig) {
 						} else if (config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
+								/*
+								*  might be able to remove the _startdate dependency since we aren't using slowly changing dimensions
+								*/
 								connection.query(`update ${qualifiedTable} as prev
 											set  ${columns.join(', ')}
 											FROM ${qualifiedStagingTable}_changes changes
 											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-																												// might be able to remove the _startdate dependency since we aren't using slowly changing dimensions
 											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
 											`, done);
 							});
