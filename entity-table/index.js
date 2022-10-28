@@ -182,38 +182,57 @@ module.exports = {
 			);
 		});
 	},
-	tableOldNewProcessor: function(options) {
+	tableOldNewProcessor: function(optionsIn) {
+		let options = Object.assign({ kinesisBatchLimit: 200}, optionsIn);
 		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
+			let batchSize = event.Records.length;
+			let filePrefix = event.Records[0].eventID;
+			logger.info(`batchSize=${batchSize}`);
+			let localReadOpts = Object.assign({
+				prefix: filePrefix,
+				toCheckpoint: { force: true}
+			}, options.read);
+			if (batchSize >= options.kinesisBatchLimit) {
+				logger.info(`using S3 for batchSize of ${batchSize}`);
+				localReadOpts.useS3 = true;
+			}
+			else {
+				logger.info(`using Kinesis for batchSize of ${batchSize}`);
+				localReadOpts.useS3 = false;
+			}
+			
 			let index = 0;
 			let defaultQueue = options.defaultQueue || "Unknown";
 			let resourcePrefix = sanitizePrefix(options.resourcePrefix);
 			let resourceSuffix = options.eventSuffix || "_table_changes";
-			let getStream = id => {
-				if (!(id in streams)) {
-					streams[id] = ls.pipeline(leo.write(id), ls.toCheckpoint({
-						force: true
-					}));
+			let getStream = (id, queue) => {
+				let key = `${id}/${queue}`;
+				if (!(key in streams)) {
+					streams[key] = leo.load(id, queue, localReadOpts);
+					// ls.pipeline(leo.write(id), ls.toCheckpoint({
+					// 	force: true
+					// }));
 				}
-				return streams[id];
+				return streams[key];
 			};
 			async.doWhilst(
 				function (done) {
 					let record = event.Records[index];
 					let data = {
-						id: context.botId,
+						correlation_id: {
+							start: record.eventID,
+							source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
+						},
 						event: defaultQueue,
+						event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
+						id: context.botId,
 						payload: {
 							new: null,
 							old: null
 						},
-						event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
 						timestamp: Date.now(),
-						correlation_id: {
-							start: record.eventID,
-							source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
-						}
 					};
 					let eventPrefix = resourcePrefix;
 					if ("OldImage" in record.dynamodb) {
@@ -251,7 +270,7 @@ module.exports = {
 					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
 					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
-					let stream = getStream(data.id);
+					let stream = getStream(data.id, data.event);
 					stream.write(data) ? done() : stream.once("drain", () => done());
 				},
 				function() {
@@ -293,6 +312,7 @@ function toDynamoDB(table, opts) {
 		time: {
 			seconds: 2
 		},
+		maxAsyncTasks: 10,
 		merge: false
 	}, opts || {});
 
@@ -455,7 +475,8 @@ function toDynamoDB(table, opts) {
 					let newObj = lookup[key(e)];
 					newObj.PutRequest.Item = merge(e, newObj.PutRequest.Item);
 				});
-				async.parallelLimit(tasks, 10, (err, results) => {
+				console.log(`tasks.length = ${tasks && tasks.length || 0}`);
+				async.parallelLimit(tasks, opts.maxAsyncTasks || 10, (err, results) => {
 					if (err) {
 						retry.fail(err);
 					} else {
