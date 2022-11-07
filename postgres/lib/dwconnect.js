@@ -198,28 +198,31 @@ module.exports = function (config, columnConfig) {
 
 					let tasks = [];
 					let totalRecords = 0;
+
 					// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
 					tasks.push(done => connection.query(`Begin Transaction`, done));
-					tasks.push(done => {
-						connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
-							if (err) {
-								return done(err);
-							}
-							totalRecords = results.length;
-							done();
+
+					if (!config.hashedSurrogateKeys) {
+						tasks.push(done => {
+							connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
+								if (err) {
+									return done(err);
+								}
+								totalRecords = results.length;
+								done();
+							});
 						});
-					});
-					tasks.push(done => {
-						connection.query(`Update ${qualifiedTable} prev
+						tasks.push(done => {
+							connection.query(`Update ${qualifiedTable} prev
 								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
 								FROM ${qualifiedStagingTable} staging
 								where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
-					});
+						});
 
-					// Now insert any we were missing
-					tasks.push(done => {
-						connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
+						// Now insert any we were missing
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
 								SELECT ${columns.map(column => `staging.${column}`)},
 										false AS ${columnConfig._deleted},
 										${dwClient.auditdate} as ${columnConfig._auditdate}
@@ -230,7 +233,55 @@ module.exports = function (config, columnConfig) {
 									WHERE ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
 								)	
 							`, done);
-					});
+						});
+					} else {
+						// Retreive copy of existing data
+						tempTables.push(`${qualifiedStagingTable}_previous`);
+						tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_previous;`, done));
+						tasks.push(done => {
+							connection.query(`CREATE TABLE ${qualifiedStagingTable}_previous
+											  DISTSTYLE ALL 
+											  AS SELECT *
+												 FROM   ${qualifiedTable}
+												 LIMIT  0;`, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedStagingTable}_previous
+											  SELECT *
+											  FROM   ${qualifiedTable} AS base
+											  WHERE  EXISTS ( SELECT *
+															  FROM   ${qualifiedStagingTable} AS staging
+															  WHERE  ${ids.map(id => `base.${id} = staging.${id}`).join(` AND `)});`, done);
+						});
+
+						// Merge exiting data into staged copy
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
+											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)}
+											  FROM   ${qualifiedStagingTable}_previous AS prev
+											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
+						});
+
+						// Set audit date for staged data
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+					  						  SET ${columnConfig._auditdate} = ${dwClient.auditdate};`, done);
+						});
+
+						// Delete and reinsert data - avoids costly updates on large tables
+						tasks.push(done => {
+							connection.query(`DELETE FROM ${qualifiedTable}
+											  USING ${qualifiedStagingTable}
+											  WHERE ${ids.map(id => `${qualifiedTable}.${id} = ${qualifiedTable}.${id}`).join(` AND `)}`, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable} (
+											  ${columns.map(column => `${column}`).join(`,\n`)}
+											  )
+											  SELECT ${columns.map(column => `${column}`).join(`,\n`)}
+											  FROM   ${qualifiedStagingTable};`, done);
+						});
+					};
 
 					async.series(tasks, err => {
 						if (!err) {
@@ -287,7 +338,7 @@ module.exports = function (config, columnConfig) {
 								 from ${qualifiedTable}
 								 limit 0;`, done));
 		};
-		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
+		// tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
 
 		if (config.version !== 'redshift') {
 			tasks.push(done => {
@@ -376,29 +427,30 @@ module.exports = function (config, columnConfig) {
 						}
 					};
 
-					tempTables.push(`${qualifiedStagingTable}_changes`);
-					connection.query(`create table ${qualifiedStagingTable}_changes as 
+					let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+					let totalRecords = 0;
+
+					if (!config.hashedSurrogateKeys) {
+						tempTables.push(`${qualifiedStagingTable}_changes`);
+						connection.query(`create table ${qualifiedStagingTable}_changes as 
 									  	select ${nk.map(id => `s.${id}`).join(', ')}, 
 											   d.${nk[0]} is null as isNew
 										${!config.bypassSlowlyChangingDimensions ? `,${scdSQL.join(',\n')}` : ``}
 										FROM ${qualifiedStagingTable} s
 										LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
-						if (err) {
-							logger.error(err);
-							process.exit();
-						}
+							if (err) {
+								logger.error(err);
+								process.exit();
+							}
 
-						let tasks = [];
-						let rowId = null;
-						let totalRecords = 0;
-						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
+							let tasks = [];
+							let rowId = null;
 
-						// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
-						tasks.push(done => connection.query(`Begin Transaction`, done));
+							tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
 
-						let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+							// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
+							tasks.push(done => connection.query(`Begin Transaction`, done));
 
-						if (!config.hashedSurrogateKeys) {
 							tasks.push(done => {
 								connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
 									if (err) {
@@ -424,30 +476,9 @@ module.exports = function (config, columnConfig) {
 									WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
 									`, done);
 							});
-						} else if (config.hashedSurrogateKeys) {
-							tasks.push(done => {
-								/*
-								* Likely don't need the coalesce anymore
-								* validate nothing will set _current to false, if so get rid of this join
-								* general need to review SCD fields to make sure we can ignore them
-								*/
-								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-									SELECT farmFingerPrint64(${nk.map(id => `staging.${id}`).join(`|| '-' ||`)}),
-										   ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)},
-										   ${dwClient.auditdate} as ${columnConfig._auditdate}, 
-										   case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate}, 
-										   '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-									FROM ${qualifiedStagingTable}_changes changes  
-									JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-									LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current} 
-									WHERE isNew = true		
-									`, done);
-							});
-						}; // Final else is needed to support hashed surrogate keys and slowly changing dimensions
 
-						// This needs to be done last
-						let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-						if (!config.bypassSlowlyChangingDimensions) {
+							// This needs to be done last
+							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
 							tasks.push(done => {
 								// RUN SCD1 / SCD6 columns  (where we update the old records)
 								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.version === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
@@ -462,20 +493,73 @@ module.exports = function (config, columnConfig) {
 												and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
-						} else if (config.hashedSurrogateKeys) {
-							tasks.push(done => {
-								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
-								/*
-								*  might be able to remove the _startdate dependency since we aren't using slowly changing dimensions
-								*/
-								connection.query(`update ${qualifiedTable} as prev
-											set  ${columns.join(', ')}
-											FROM ${qualifiedStagingTable}_changes changes
-											JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-											WHERE ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false
-											`, done);
+
+							async.series(tasks, err => {
+								if (!err) {
+									connection.query(`commit`, e => {
+										connection.release();
+										callback(e || err, {
+											count: totalRecords,
+										});
+									});
+								} else {
+									connection.query(`rollback`, (e, d) => {
+										connection.release();
+										callback(e, d);
+									});
+								}
 							});
-						};
+						});
+					} else {
+						//Retreive copy of existing data
+						tempTables.push(`${qualifiedStagingTable}_previous`);
+						tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_previous;`, done));
+						tasks.push(done => {
+							connection.query(`create table ${qualifiedStagingTable}_previous
+											  diststyle all 
+											  as select *
+												 from ${qualifiedTable}
+												 limit 0;`, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedStagingTable}_previous
+											  SELECT *
+											  FROM   ${qualifiedTable} AS base
+											  WHERE  EXISTS ( SELECT *
+															  FROM   ${qualifiedStagingTable} AS staging
+															  WHERE  ${nk.map(id => `base.${id} = staging.${id}`).join(` AND `)});`
+								, done);
+						});
+
+						// Merge exiting data into staged copy
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
+										  	  SET    ${fields.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)}
+										  	  FROM   ${qualifiedStagingTable}_previous AS prev
+										  	  WHERE  ${nk.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`
+								, done);
+						});
+
+						// Set auditdate and surrogate key for stage data (not sure if the sk is actually necessary)
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+				  							  SET ${columnConfig._auditdate} = ${dwClient.auditdate},
+											  ${sk} = farmFingerPrint64(${nk.map(id => `${id}`).join(`|| '-' ||`)});`, done);
+						});
+
+						// Delete and reinsert data - avoids costly updates on large tables
+						tasks.push(done => {
+							connection.query(`DELETE FROM ${qualifiedTable}
+										  	  USING ${qualifiedStagingTable}
+										  	  WHERE ${nk.map(id => `${qualifiedTable}.${id} = ${qualifiedTable}.${id}`).join(` AND `)}`
+								, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable}
+										  	  SELECT *
+										  	  FROM   ${qualifiedStagingTable};`
+								, done);
+						});
 
 						async.series(tasks, err => {
 							if (!err) {
@@ -492,7 +576,7 @@ module.exports = function (config, columnConfig) {
 								});
 							}
 						});
-					});
+					};
 				});
 			}).catch(callback);
 		}).catch(callback);
