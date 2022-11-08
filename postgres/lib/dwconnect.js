@@ -254,18 +254,18 @@ module.exports = function (config, columnConfig) {
 															  WHERE  ${ids.map(id => `base.${id} = staging.${id}`).join(` AND `)});`, done);
 						});
 
+						// Set audit date for staged data
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+					  						  SET ${columnConfig._auditdate} = ${dwClient.auditdate};`, done);
+						});
+
 						// Merge exiting data into staged copy
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
 											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)}
 											  FROM   ${qualifiedStagingTable}_previous AS prev
 											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
-						});
-
-						// Set audit date for staged data
-						tasks.push(done => {
-							connection.query(`UPDATE ${qualifiedStagingTable}
-					  						  SET ${columnConfig._auditdate} = ${dwClient.auditdate};`, done);
 						});
 
 						// Delete and reinsert data - avoids costly updates on large tables
@@ -531,6 +531,13 @@ module.exports = function (config, columnConfig) {
 								, done);
 						});
 
+						// Set auditdate and surrogate key for stage data (not sure if the sk is actually necessary)
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+				  							  SET ${columnConfig._auditdate} = ${dwClient.auditdate},
+											  ${sk} = farmFingerPrint64(${nk.map(id => `${id}`).join(`|| '-' ||`)});`, done);
+						});
+
 						// Merge exiting data into staged copy
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
@@ -538,13 +545,6 @@ module.exports = function (config, columnConfig) {
 										  	  FROM   ${qualifiedStagingTable}_previous AS prev
 										  	  WHERE  ${nk.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`
 								, done);
-						});
-
-						// Set auditdate and surrogate key for stage data (not sure if the sk is actually necessary)
-						tasks.push(done => {
-							connection.query(`UPDATE ${qualifiedStagingTable}
-				  							  SET ${columnConfig._auditdate} = ${dwClient.auditdate},
-											  ${sk} = farmFingerPrint64(${nk.map(id => `${id}`).join(`|| '-' ||`)});`, done);
 						});
 
 						// Delete and reinsert data - avoids costly updates on large tables
@@ -650,6 +650,7 @@ module.exports = function (config, columnConfig) {
 			let tasks = [];
 			let sets = [];
 
+			const qualifiedTable = `public.${table}`;
 			const linkAuditdate = client.escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, 'Z'));
 
 			// Only run analyze on the table if this is the first load
