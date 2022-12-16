@@ -207,6 +207,14 @@ module.exports = function (clientConfigHost, region) {
 		stream: (settings) => {
 			let requireType = settings.requireType || false;
 			let total = settings.startTotal || 0;
+			let batchOpts = Object.assign({
+				bytes: 10485760 * 0.95, // 9.5MB
+				count: 1000,
+				field: 'payload',
+				time: {
+					milliseconds: 200,
+				},
+			}, settings.batchOpts || {});
 			let fileCount = 0;
 			let format = ls.through({
 				highWaterMark: 16,
@@ -320,14 +328,7 @@ module.exports = function (clientConfigHost, region) {
 				callback();
 			});
 
-			return ls.pipeline(format, ls.batch({
-				bytes: 10485760 * 0.95, // 9.5MB
-				count: 1000,
-				field: 'payload',
-				time: {
-					milliseconds: 200,
-				},
-			}), send);
+			return ls.pipeline(format, ls.batch(batchOpts), send);
 		},
 		streamParallel: (settings) => {
 			let parallelLimit = (settings.warmParallelLimit != undefined ? settings.warmParallelLimit : settings.parallelLimit) || 1;
