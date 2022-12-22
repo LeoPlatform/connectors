@@ -272,11 +272,13 @@ module.exports = function (clientConfigHost, region) {
 						}));
 						return;
 					}
+					logger.time('es_bulk');
 					client.bulk({
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
 					}, function (err, data) {
+						logger.timeEnd('es_bulk');
 						if (err || data.errors) {
 							if (data && data.Message) {
 								err = data.Message;
@@ -299,6 +301,7 @@ module.exports = function (clientConfigHost, region) {
 						let key = `files/elasticsearch/${(systemRef && systemRef.id) || 'unknown'}/${meta.id || 'unknown'}/${timestamp.format('YYYY/MM/DD/HH/mm/') + timestamp.valueOf()}-${++fileCount}-${rand}`;
 
 						if (!settings.dontSaveResults) {
+							logger.time('es_save');
 							logger.debug(leo.configuration.bus.s3, key);
 							s3.upload({
 								Body: JSON.stringify({
@@ -308,6 +311,7 @@ module.exports = function (clientConfigHost, region) {
 								Bucket: leo.configuration.bus.s3,
 								Key: key,
 							}, (uploaderr, data) => {
+								logger.timeEnd('es_save');
 								done(err, Object.assign(meta, {
 									payload: {
 										error: err,
