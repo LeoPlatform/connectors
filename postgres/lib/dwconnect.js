@@ -3,9 +3,6 @@ const postgres = require('./connect.js');
 const async = require('async');
 const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
-const { basename } = require('path');
-const { doesNotThrow } = require('assert');
-const { table } = require('console');
 
 module.exports = function (config, columnConfig) {
 	let client = postgres(config);
@@ -244,9 +241,6 @@ module.exports = function (config, columnConfig) {
 											  FROM   ${qualifiedStagingTable};`, (err, results) => {
 								if (err) {
 									return done(err);
-								} else if (results[0].cnt === 0) {
-									totalRecords = results[0].cnt;
-									return done();
 								} else {
 									totalRecords = results[0].cnt;
 									naturalKeyLowerBound = results[0].minid;
@@ -488,7 +482,6 @@ module.exports = function (config, columnConfig) {
 
 							// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
 							tasks.push(done => connection.query(`Begin Transaction`, done));
-
 							tasks.push(done => {
 								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
 												  SELECT row_number() over() + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, 
@@ -517,6 +510,22 @@ module.exports = function (config, columnConfig) {
 												  and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
 											`, done);
 							});
+
+							async.series(tasks, err => {
+								if (!err) {
+									connection.query(`commit`, e => {
+										connection.release();
+										callback(e || err, {
+											count: totalRecords,
+										});
+									});
+								} else {
+									connection.query(`rollback`, (e, d) => {
+										connection.release();
+										callback(e, d);
+									});
+								}
+							});
 						});
 					} else {
 						let naturalKeyLowerBound;
@@ -529,9 +538,6 @@ module.exports = function (config, columnConfig) {
 											  FROM   ${qualifiedStagingTable};`, (err, results) => {
 								if (err) {
 									return done(err);
-								} else if (results[0].cnt === 0) {
-									totalRecords = results[0].cnt;
-									return done();
 								} else {
 									totalRecords = results[0].cnt;
 									naturalKeyLowerBound = results[0].minid;
@@ -595,22 +601,23 @@ module.exports = function (config, columnConfig) {
 											  SELECT ${fields.map(column => `${column}`).join(`, `)}
 											  FROM   ${qualifiedStagingTable}; `, done);
 						});
-					};
-					async.series(tasks, err => {
-						if (!err) {
-							connection.query(`commit`, e => {
-								connection.release();
-								callback(e || err, {
-									count: totalRecords,
+
+						async.series(tasks, err => {
+							if (!err) {
+								connection.query(`commit`, e => {
+									connection.release();
+									callback(e || err, {
+										count: totalRecords,
+									});
 								});
-							});
-						} else {
-							connection.query(`rollback`, (e, d) => {
-								connection.release();
-								callback(e, d);
-							});
-						}
-					});
+							} else {
+								connection.query(`rollback`, (e, d) => {
+									connection.release();
+									callback(e, d);
+								});
+							}
+						});
+					};
 				});
 			}).catch(callback);
 		}).catch(callback);
@@ -746,12 +753,12 @@ module.exports = function (config, columnConfig) {
 							var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source} `;
 
 							if (Array.isArray(link.source)) {
-								joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v} `).join(' AND ');
+								joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
 							}
 							return `LEFT JOIN ${link.table} ${link.join_id}_join_table
 									ON ${joinOn} 
 									AND t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
-									AND(t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+									AND (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
 						};
 					}
 				});
