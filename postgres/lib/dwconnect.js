@@ -278,7 +278,7 @@ module.exports = function (config, columnConfig) {
 															  FROM   ${qualifiedStagingTable} AS staging
 															  WHERE  ${ids.map(id => `base.${id} = staging.${id}`).join(` AND `)}
 															  		 ${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey !== undefined) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``})
-													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``};`, done);
+													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey !== undefined) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``};`, done);
 						});
 
 						// Merge exiting data into staged copy
@@ -456,9 +456,8 @@ module.exports = function (config, columnConfig) {
 					if (!config.hashedSurrogateKeys && !config.bypassSlowlyChangingDimensions) {
 						tempTables.push(`${qualifiedStagingTable}_changes`);
 						connection.query(`create table ${qualifiedStagingTable}_changes as
-										  select ${nk.map(id => `s.${id}`).join(', ')},
-												 d.${nk[0]} is null as isNew
-										  ${!config.bypassSlowlyChangingDimensions ? `,${scdSQL.join(',\n')}` : ``}
+										  select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
+												 ${scdSQL.join(',\n')}
 										  FROM ${qualifiedStagingTable} s
 										  LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
 							if (err) {
