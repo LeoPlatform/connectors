@@ -132,6 +132,7 @@ module.exports = function (config, columnConfig) {
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
 		let sortKey;
+		let sortKeyType;
 
 		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
@@ -141,14 +142,16 @@ module.exports = function (config, columnConfig) {
 		} else {
 			// get sortkey for joins
 			tasks.push(done => {
-				client.query(`SELECT sortkey
-					 		  FROM   public.mv_dist_sort_key
+				client.query(`SELECT sortkey,
+								     sortkeytype
+					 		  FROM   public.v_dist_sort_key
 					 		  WHERE  table_name = '${table}';`, (err, results) => {
 					if (err) {
 						return done(err);
 					} else {
 						if (results[0].sortKey !== null) {
 							sortKey = results[0].sortkey;
+							sortKeyType = results[0].sortkeytype;
 						};
 						done();
 					};
@@ -245,7 +248,13 @@ module.exports = function (config, columnConfig) {
 									totalRecords = results[0].cnt;
 									naturalKeyLowerBound = results[0].minid;
 									if (naturalKeyLowerBound !== null) {
-										naturalKeyFilter = (typeof naturalKeyLowerBound === 'string') ? `'${results[0].minid}'` : `${results[0].minid}`
+										if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+											naturalKeyFilter = `${results[0].minid}`;
+										} else if (sortKeyType === 'varchar') {
+											naturalKeyFilter = `'${results[0].minid}'`;
+										} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+											naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+										};
 									};
 									done();
 								};
@@ -342,6 +351,7 @@ module.exports = function (config, columnConfig) {
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
 		let sortKey;
+		let sortKeyType;
 
 		// Prepare staging tables
 		tempTables.push(qualifiedStagingTable);
@@ -353,14 +363,16 @@ module.exports = function (config, columnConfig) {
 		} else {
 			// get sortkey for joins
 			tasks.push(done => {
-				client.query(`SELECT sortkey
-					  		  FROM   public.mv_dist_sort_key
+				client.query(`SELECT sortkey,
+									 sortkeytype
+					  		  FROM   public.v_dist_sort_key
 					  		  WHERE  table_name = '${table}';`, (err, results) => {
 					if (err) {
 						return done(err);
 					} else {
 						if (results[0].sortkey !== null) {
 							sortKey = results[0].sortkey;
+							sortKeyType = results[0].sortkeytype;
 						};
 						done();
 					};
@@ -541,7 +553,13 @@ module.exports = function (config, columnConfig) {
 									totalRecords = results[0].cnt;
 									naturalKeyLowerBound = results[0].minid;
 									if (naturalKeyLowerBound !== null) {
-										naturalKeyFilter = (typeof naturalKeyLowerBound === 'string') ? `'${results[0].minid}'` : `${results[0].minid}`;
+										if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+											naturalKeyFilter = `${results[0].minid}`;
+										} else if (sortKeyType === 'varchar') {
+											naturalKeyFilter = `'${results[0].minid}'`;
+										} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+											naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+										};
 									};
 									done();
 								};
@@ -698,21 +716,24 @@ module.exports = function (config, columnConfig) {
 				tasks.push(done => client.query(`ANALYZE ${table}`, done));
 			}
 
-			const qualifiedStagingTable = `${columnConfig.stageSchema}.${columnConfig.stageTablePrefix}_${table} `;
+			const qualifiedStagingTable = `${columnConfig.stageSchema}.${columnConfig.stageTablePrefix}_${table}`;
 			let naturalKeyLowerBound;
 			let naturalKeyFilter;
 			let sortKey;
+			let sortKeyType;
 			// Get lower bound for natural key to avoid unnecessary scanning
 			if (config.version === 'redshift') {
 				tasks.push(done => {
-					client.query(`SELECT sortkey
-								  FROM   public.mv_dist_sort_key
-								  WHERE  table_name = '${table}'; `, (err, results) => {
+					client.query(`SELECT sortkey,
+										 sortkeytype
+								  FROM   public.v_dist_sort_key
+								  WHERE  table_name = '${table}';`, (err, results) => {
 						if (err) {
 							return done(err);
 						} else {
 							if (results[0].sortKey !== null) {
 								sortKey = results[0].sortkey;
+								sortKeyType = results[0].sortkeytype;
 							};
 							done();
 						};
@@ -726,7 +747,13 @@ module.exports = function (config, columnConfig) {
 						} else {
 							naturalKeyLowerBound = results[0].minid;
 							if (naturalKeyLowerBound !== null) {
-								naturalKeyFilter = (typeof naturalKeyLowerBound === 'string') ? `'${results[0].minid}'` : `${results[0].minid} `
+								if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+									naturalKeyFilter = `${results[0].minid}`;
+								} else if (sortKeyType === 'varchar') {
+									naturalKeyFilter = `'${results[0].minid}'`;
+								} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+									naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+								};
 							};
 							done();
 						};
@@ -738,11 +765,11 @@ module.exports = function (config, columnConfig) {
 				let joinTables = links.map(link => {
 					if (columnConfig.useSurrogateDateKeys && (link.table === 'd_datetime' || link.table === 'datetime' || link.table === 'dim_datetime')) {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH FROM ${(config.version !== 'redshift') ? `` : `'1970-01-01'::date +`} t.${link.source}::time) + 10000, 1)`);
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_date' || link.table === 'date' || link.table === 'dim_date')) {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_time' || link.table === 'time' || link.table === 'dim_time')) {
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH FROM ${(config.version !== 'redshift') ? `` : `'1970-01-01'::date +`} t.${link.source}::time) + 10000, 1)`);
 					} else {
 						if (config.hashedSurrogateKeys) {
 							sets.push(`${link.destination} = coalesce(farmFingerPrint64(t.${link.source}), 1)`);
@@ -769,7 +796,7 @@ module.exports = function (config, columnConfig) {
 								  ${config.hashedSurrogateKeys ? '' : joinTables.join('\n')}
                         		  WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
 								  AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
-								  ${(naturalKeyFilter !== undefined) ? `AND t.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``} `, done);
+								  ${(naturalKeyFilter !== undefined) ? `AND t.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}`, done);
 				} else {
 					done();
 				}
