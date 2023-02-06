@@ -705,7 +705,7 @@ function create (pool, parentCache) {
 									let role = config.loaderRole;
 									myClient.query(
 										`copy ${table} (${f}) from '${file}' ${manifest} ${role ? `credentials 'aws_iam_role=${role}'` : ''
-										} NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'YYYY-MM-DD HH:MI:SS' COMPUPDATE OFF`,
+										} NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'auto' COMPUPDATE OFF`,
 										copyErr => {
 											if (keepS3Files) {
 												innerDone(copyErr);
