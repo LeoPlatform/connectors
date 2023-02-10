@@ -606,6 +606,14 @@ module.exports = function (config, columnConfig) {
 											  WHERE  staging.${sk} = prev.${sk}`, done);
 						});
 
+						// Set default SCD values
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+											  SET    ${columnConfig._startdate} = COALESCE(${columnConfig._startdate},'1900-01-01 00:00:00'),
+													 ${columnConfig._enddate} = COALESCE(${columnConfig._enddate},'9999-01-01 00:00:00'),
+													 ${columnConfig._current} = COALESCE(${columnConfig._current},true);`, done);
+						});
+
 						// Delete and reinsert data - avoids costly updates on large tables
 						tasks.push(done => {
 							connection.query(`DELETE FROM ${qualifiedTable}
