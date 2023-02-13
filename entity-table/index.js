@@ -192,7 +192,7 @@ module.exports = {
 			logger.info(`batchSize=${batchSize}`);
 			let localReadOpts = Object.assign({
 				prefix: filePrefix,
-				toCheckpoint: { force: true}
+				force: true
 			}, options.read);
 			if (batchSize >= options.kinesisBatchLimit) {
 				logger.info(`using S3 for batchSize of ${batchSize}`);
