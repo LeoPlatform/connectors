@@ -233,7 +233,6 @@ module.exports = function (config, columnConfig) {
 																 WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')})`, done);
 						});
 					} else {
-						columns = columns.concat([columnConfig._auditdate, columnConfig._deleted]);
 						let naturalKeyLowerBound;
 						let naturalKeyFilter;
 
@@ -272,16 +271,11 @@ module.exports = function (config, columnConfig) {
 												 LIMIT  0;`, done);
 						});
 
-						// Set audit date for staged data
-						tasks.push(done => {
-							connection.query(`UPDATE ${qualifiedStagingTable}
-											  SET ${columnConfig._auditdate} = ${dwClient.auditdate};`, done);
-						});
-
 						// Retreive copy of existing data
 						tasks.push(done => {
-							connection.query(`INSERT INTO ${qualifiedStagingTablePrevious} (${columns.map(column => `${column}`).join(`, `)})
-											  SELECT ${columns.map(column => `${column}`).join(`, `)}
+							connection.query(`INSERT INTO ${qualifiedStagingTablePrevious} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._deleted})
+											  SELECT ${columns.map(column => `${column}`).join(`, `)},
+													 ${columnConfig._deleted}
 											  FROM   ${qualifiedTable} AS base
 											  WHERE  EXISTS ( SELECT *
 															  FROM   ${qualifiedStagingTable} AS staging
@@ -293,7 +287,9 @@ module.exports = function (config, columnConfig) {
 						// Merge exiting data into staged copy
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
-											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)}
+											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)},
+											  		 ${columnConfig._auditdate} = ${dwClient.auditdate},
+													 ${columnConfig._deleted} = COALESCE(prev.${columnConfig._deleted}, false)
 											  FROM   ${qualifiedStagingTablePrevious} AS prev
 											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
 						});
@@ -306,8 +302,10 @@ module.exports = function (config, columnConfig) {
 											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey !== undefined ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``}; `, done);
 						});
 						tasks.push(done => {
-							connection.query(`INSERT INTO ${qualifiedTable} (${columns.map(column => `${column}`).join(`, `)})
-											  SELECT ${columns.map(column => `${column}`).join(`, `)}
+							connection.query(`INSERT INTO ${qualifiedTable} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._auditdate}, ${columnConfig._deleted})
+											  SELECT ${columns.map(column => `${column}`).join(`, `)},
+											  		 ${columnConfig._auditdate},
+													 ${columnConfig._deleted}
 											  FROM   ${qualifiedStagingTable}; `, done);
 						});
 					};
