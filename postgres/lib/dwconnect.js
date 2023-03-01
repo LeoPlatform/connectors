@@ -288,10 +288,16 @@ module.exports = function (config, columnConfig) {
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
 											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)},
-											  		 ${columnConfig._auditdate} = ${dwClient.auditdate},
 													 ${columnConfig._deleted} = COALESCE(prev.${columnConfig._deleted}, false)
 											  FROM   ${qualifiedStagingTablePrevious} AS prev
 											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
+						});
+
+						// Set auditdate and _deleted for stage data
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+												SET    ${columnConfig._auditdate} = ${dwClient.auditdate},
+													   ${columnConfig._deleted} = COALESCE(${columnConfig._deleted}, false); `, done);
 						});
 
 						// Delete and reinsert data - avoids costly updates on large tables

@@ -641,8 +641,12 @@ function create (pool, parentCache) {
 			function nonNull(v) {
 				if (v === '' || v === null || v === undefined) {
 					return '\\N';
-				} else if (typeof v === 'string' && v.search(/\r/) !== -1) {
-					return v.replace(/\r\n?/g, '\n');
+				} else if (typeof v === 'string' && (v.search(/\r/) !== -1 || v.search(/\n/) !== -1)) {
+					if (config.version !== 'redshift') {
+						return v.replace(/\r\n?/g, '\n');
+					} else {
+						return v.replace(/\r\n?/g, '\n').slice(0, -1).replace(/\n/g, `\\n`) + v.slice(-1);
+					}
 				} else {
 					return v;
 				}
