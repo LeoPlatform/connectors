@@ -346,11 +346,10 @@ function handleFailedValidation(ID, source, eventObj, error) {
 			errorStream,
 
 			ls.process(ID, function(obj) {
-				this.push(obj, { partial: true });
-				done();
-			}),
-
-			leo.load(ID, `${source}_error`),
+				return obj;
+			}, `${source}_error`),
+			ls.toLeo(ID),
+			ls.devnull(),
 
 			(err) => {
 				err && logger.error('GOT ERROR', err);
