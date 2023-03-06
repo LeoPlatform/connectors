@@ -645,7 +645,7 @@ function create (pool, parentCache) {
 					if (config.version !== 'redshift') {
 						return v.replace(/\r\n?/g, '\n');
 					} else {
-						return v.replace(/\r\n?/g, '\n').slice(0, -1).replace(/\n/g, `\\n`) + v.slice(-1);
+						return v.replace(/\r\n?/g, '\n').replace(/\n/g, `\\n`);
 					}
 				} else {
 					return v;
