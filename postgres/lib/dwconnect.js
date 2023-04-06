@@ -846,7 +846,7 @@ module.exports = function (config, columnConfig) {
 								} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 									let missingDim = columnConfig.dimColumnTransform(f, field);
 									missingFields[missingDim] = {
-										type: 'integer',
+										type: (config.hashedSurrogateKeys) ? 'bigint' : 'integer',
 									};
 								}
 							});
@@ -904,7 +904,7 @@ module.exports = function (config, columnConfig) {
 			if (field === 'sk') {
 				field = {
 					sk: true,
-					type: 'integer primary key',
+					type: `${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'} primary key`,
 				};
 			} else if (typeof field === 'string') {
 				field = {
@@ -953,7 +953,7 @@ module.exports = function (config, columnConfig) {
 					});
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(key, field)} ${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'}`);
 				defaults.push({
 					column: columnConfig.dimColumnTransform(key, field),
 					value: 1,
@@ -1033,7 +1033,7 @@ module.exports = function (config, columnConfig) {
 			let field = definition[key];
 			if (field === 'sk') {
 				field = {
-					type: 'integer primary key',
+					type: `${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'} primary key`,
 				};
 			} else if (typeof field === 'string') {
 				field = {
