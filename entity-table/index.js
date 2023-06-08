@@ -8,8 +8,12 @@ var backoff = require("backoff");
 var async = require("async");
 let aws = require("aws-sdk");
 const zlib = require('zlib');
+const moment = require("moment");
+const uuid = require("uuid");
 
 const GZIP_MIN = 5000;
+const DDB_MAX = 300000; //409600;
+
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -32,6 +36,42 @@ function hashCode(str) {
 	return hash;
 }
 
+async function getS3Reference(data) {
+	let payload = await leo.aws.s3.getObject({
+		Bucket: data.Bucket || data.bucket || leo.configuration.s3,
+		Key: data.Key || data.key,
+	}).promise();
+
+	if (payload[0] === 'H') {
+		payload = zlib.gunzipSync(Buffer.from(payload, 'base64'));
+	} else if (payload[0] === 'e' && payload[1] === 'J') {
+		payload = zlib.inflateSync(Buffer.from(payload, 'base64'));
+	} else if (payload[0] === 'e' && payload[1] === 'y') {
+		payload = Buffer.from(payload, 'base64').toString();
+	}
+	return JSON.parse(payload);
+}
+async function putS3Reference(data, s3ref) {
+
+	var timestamp = moment.utc();
+	let postfix = uuid.v4();
+	s3ref = s3ref || {};
+	let entity = s3ref.entity || "unknown";
+
+	let key = s3ref.Key || s3ref.key || `files/entities/${entity}/z/${timestamp.format("YYYY/MM/DD/HH/mm/") + timestamp.valueOf()}-${postfix}.gz`;
+	let bucket = s3ref.Bucket || s3ref.bucket || leo.configuration.s3;
+
+	let response = await leo.aws.s3.putObject({
+		Bucket: bucket,
+		Key: key,
+		Body: data
+	}).promise();
+	return {
+		hash: response.ContentMD5,
+		key,
+		bucket
+	};
+}
 module.exports = {
 	/**
 	 * Expects a string, deflates it, and converts it to base64
@@ -99,17 +139,37 @@ module.exports = {
 				}
 				done(null, e);
 			}),
-			ls.through((payload, done) => {
+			ls.through(async (payload, done) => {
 				// check size
-				let size = Buffer.byteLength(JSON.stringify(payload));
+				let strJson = JSON.stringify(payload);
+				let size = Buffer.byteLength(strJson);
 
 				if (size > GZIP_MIN) {
-					let compressedObj = {
-						[opts.range]: payload[opts.range],
-						[opts.hash]: payload[opts.hash],
-						compressedData: self.deflate(JSON.stringify(payload)),
-					};
-					payload = compressedObj;
+					let compressedJson = self.deflate(strJson);
+					const gzipSize = Buffer.byteLength(compressedJson);
+					if (gzipSize > DDB_MAX) {
+						// This is not expected to happen frequently
+						// So adding an await should be ok.  If this changes we will need to do them in batch
+						try {
+							payload = {
+								[opts.range]: payload[opts.range],
+								[opts.hash]: payload[opts.hash],
+								s3Reference: await putS3Reference(compressedJson, {
+									entity
+								})
+							};
+						} catch (e) {
+							return done(e);
+						}
+					} else {
+
+						let compressedObj = {
+							[opts.range]: payload[opts.range],
+							[opts.hash]: payload[opts.hash],
+							compressedData: compressedJson,
+						};
+						payload = compressedObj;
+					}
 				}
 
 				done(null, payload);
@@ -199,7 +259,7 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				function (done) {
+				function(done) {
 					let record = event.Records[index];
 					let data = {
 						id: context.botId,
@@ -216,6 +276,9 @@ module.exports = {
 						}
 					};
 					let eventPrefix = resourcePrefix;
+					let s3Promises = [];
+					let oldS3Ref;
+					let newS3Ref;
 					if ("OldImage" in record.dynamodb) {
 						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
 
@@ -223,6 +286,11 @@ module.exports = {
 							// compressedData contains everything including hash/range
 							let inflated = self.inflate(image.compressedData);
 							data.payload.old = JSON.parse(inflated);
+						} else if (image.s3Reference) {
+							oldS3Ref = image.s3Reference;
+							s3Promises.push(() => getS3Reference(image.s3Reference).then(s3Data => {
+								data.payload.old = s3Data;
+							}));
 						} else {
 							data.payload.old = image;
 						}
@@ -238,6 +306,11 @@ module.exports = {
 							// compressedData contains everything including hash/range
 							let inflated = self.inflate(image.compressedData);
 							data.payload.new = JSON.parse(inflated);
+						} else if (image.s3Reference) {
+							newS3Ref = image.s3Reference;
+							s3Promises.push(() => getS3Reference(image.s3Reference).then(s3Data => {
+								data.payload.new = s3Data;
+							}));
 						} else {
 							data.payload.new = image;
 						}
@@ -246,13 +319,32 @@ module.exports = {
 							eventPrefix = image.partition.split(/-/)[0];
 						}
 					}
-					data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
-					data.event = `${eventPrefix}${resourceSuffix}`;
-					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
-					let stream = getStream(data.id);
-					stream.write(data) ? done() : stream.once("drain", () => done());
+					(async () => {
+						let shouldWrite = true;
+						if (s3Promises.length > 0) {
+							try {
+								if (oldS3Ref == null || newS3Ref == null || newS3Ref.hash !== oldS3Ref.hash) {
+									await Promise.all(s3Promises.map(goGetS3Data => goGetS3Data()));
+								} else {
+									// The records are the same
+									shouldWrite = false;
+								}
+							} catch (e) {
+								return done(e);
+							}
+						}
+
+						if (shouldWrite) {
+							data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
+							data.event = `${eventPrefix}${resourceSuffix}`;
+							let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
+							data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
+
+							let stream = getStream(data.id);
+							stream.write(data) ? done() : stream.once("drain", () => done());
+						}
+					})();
 				},
 				function() {
 					index++;
@@ -425,8 +517,7 @@ function toDynamoDB(table, opts) {
 							[table]: myRecords
 						},
 						"ReturnConsumedCapacity": 'TOTAL'
-					},
-					function(err, data) {
+					}, function(err, data) {
 						if (err) {
 							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
 							logger.error(myRecords);
