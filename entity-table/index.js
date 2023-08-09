@@ -114,7 +114,7 @@ module.exports = {
 
 				done(null, payload);
 			}),
-			toDynamoDB(table, opts)
+			typeof opts.merge === "function" ? toDynamoDBMerge(table, opts) : toDynamoDB(table, opts)
 		);
 	},
 	loadFromQueue: function(table, queue, objFunc, opts) {
@@ -199,7 +199,7 @@ module.exports = {
 				return streams[id];
 			};
 			async.doWhilst(
-				function (done) {
+				function(done) {
 					let record = event.Records[index];
 					let data = {
 						id: context.botId,
@@ -426,25 +426,25 @@ function toDynamoDB(table, opts) {
 						},
 						"ReturnConsumedCapacity": 'TOTAL'
 					},
-					function(err, data) {
-						if (err) {
-							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
-							logger.error(myRecords);
-							if (err.retryable) {
-								retry.backoff(err);
+						function(err, data) {
+							if (err) {
+								logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
+								logger.error(myRecords);
+								if (err.retryable) {
+									retry.backoff(err);
+								} else {
+									retry.fail(err);
+								}
+							} else if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
+								//reset();
+								//data.UnprocessedItems[table].map(m => records.push(m.PutRequest.Item));
+								myRecords = data.UnprocessedItems[table];
+								retry.backoff();
 							} else {
-								retry.fail(err);
+								logger.info(table, "saved");
+								retry.success();
 							}
-						} else if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
-							//reset();
-							//data.UnprocessedItems[table].map(m => records.push(m.PutRequest.Item));
-							myRecords = data.UnprocessedItems[table];
-							retry.backoff();
-						} else {
-							logger.info(table, "saved");
-							retry.success();
-						}
-					});
+						});
 				});
 			}
 			getExisting((err, existing) => {
@@ -502,4 +502,260 @@ function toDynamoDB(table, opts) {
 		logger.info("toDynamoDB On Flush");
 		done();
 	});
+}
+
+
+function toDynamoDBMerge(table, opts) {
+	opts = Object.assign({
+		records: 25,
+		size: 1024 * 1024 * 2,
+		time: {
+			seconds: 2
+		},
+		merge: false
+	}, opts || {});
+
+	// Setup functions to get table key & assign/merge data
+	const key = getKeyFunction(opts);
+
+	const assign = getAssignFunction(opts);
+
+	const retry = getDynamodbInsert(opts, assign, key, leo, table, module.exports);
+
+	// buffer the stream and retry.run on emit
+	return ls.buffer({
+		writeStream: true,
+		label: "toDynamoDB",
+		time: opts.time,
+		size: opts.size,
+		records: opts.records,
+		buffer: opts.buffer,
+		debug: opts.debug
+	}, function(obj, done) {
+		retry.push(obj);
+
+		done(null, {
+			size: obj.gzipSize,
+			records: 1
+		});
+	}, retry.run, function flush(done) {
+		logger.info("toDynamoDB On Flush");
+		done();
+	});
+}
+
+
+
+function getDynamodbInsert(opts, assign, key, leo, table, connector) {
+	const mergeFn = typeof opts.merge === "function" ? opts.merge : merge;
+	let records;
+	// Reset buffer to push to dynamodb
+	function reset() {
+		if (opts.hash || opts.range) {
+			records = {
+				length: 0,
+				data: {},
+				push: function(obj) {
+					this.length++;
+					return assign(this, key(obj), obj);
+				},
+				map: function(each) {
+					return Object.keys(this.data).map(key => each(this.data[key]));
+				}
+			};
+		} else {
+			records = [];
+		}
+	}
+	reset();
+	const retry = backoff.fibonacci({
+		randomisationFactor: 0,
+		initialDelay: 100,
+		maxDelay: 1000
+	});
+
+	retry.push = (r) => records.push(r);
+	retry.failAfter(10);
+	retry.success = function() {
+		retry.reset();
+		retry.emit("success");
+	};
+	retry.run = function(callback) {
+		const fail = (err) => {
+			retry.removeListener("success", success);
+			callback(err || "failed");
+		};
+		const success = () => {
+			retry.removeListener("fail", fail);
+			reset();
+			callback();
+		};
+		retry.once("fail", fail).once("success", success);
+		retry.fail = function(err) {
+			retry.reset();
+			callback(err);
+		};
+		retry.backoff();
+	};
+	retry.on("ready", function(number, delay) {
+		if (records.length === 0) {
+			retry.success();
+		} else {
+			logger.info("sending", records.length, number, delay);
+			logger.time("dynamodb request");
+			const keys = [];
+			const lookup = {};
+			const all = records.map((r) => {
+				const wrapper = {
+					PutRequest: {
+						Item: r
+					}
+				};
+				if (opts.merge && opts.hash) {
+					lookup[key(r)] = wrapper;
+					keys.push({
+						[opts.hash]: r[opts.hash],
+						[opts.range]: opts.range && r[opts.range]
+					});
+				}
+				return wrapper;
+			});
+			const getExisting = (opts.merge && opts.mergeDb !== false) ? (done) => {
+				leo.aws.dynamodb.batchGetTable(table, keys, {}, done);
+			} : done => done(null, []);
+
+			const tasks = [];
+			for (let ndx = 0; ndx < all.length; ndx += 25) {
+				let myRecords = all.slice(ndx, ndx + 25);
+				tasks.push(function(done) {
+					const retry = {
+						backoff: (err) => {
+							done(null, {
+								backoff: err || "error",
+								records: myRecords
+							});
+						},
+						fail: (err) => {
+							done(null, {
+								fail: err || "error",
+								records: myRecords
+							});
+						},
+						success: () => {
+							done(null, {
+								success: true
+							});
+						}
+					};
+					const compressedRecords = myRecords.map(dynamoEntry => {
+						let record = dynamoEntry.PutRequest.Item;
+						let size = Buffer.byteLength(JSON.stringify(record));
+
+						if (size > GZIP_MIN && !record.compressedData) {
+							let compressedObj = {
+								[opts.range]: record[opts.range],
+								[opts.hash]: record[opts.hash],
+								compressedData: connector.deflate(JSON.stringify(record)),
+							};
+							dynamoEntry.PutRequest.Item = compressedObj;
+						}
+						return dynamoEntry;
+					});
+					// console.log(JSON.stringify(compressedRecords));
+					// retry.success();
+					leo.aws.dynamodb.docClient.batchWrite({
+						RequestItems: {
+							[table]: compressedRecords
+						},
+						ReturnConsumedCapacity: "TOTAL"
+					}, function(err, data) {
+						if (err) {
+							logger.info(`All ${compressedRecords.length} records failed! Retryable: ${err.retryable}`, err);
+							logger.error(compressedRecords);
+							if (err.retryable) {
+								retry.backoff(err);
+							} else {
+								retry.fail(err);
+							}
+						} else if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
+							myRecords = data.UnprocessedItems[table];
+							retry.backoff(undefined);
+						} else {
+							logger.info(table, "saved");
+							retry.success();
+						}
+					});
+				});
+			}
+			getExisting((err, existing) => {
+				if (err) {
+					retry.fail(err);
+					return;
+				}
+				existing.map(e => {
+					const newObj = lookup[key(e)];
+					if (e.compressedData) {
+						let buffer = Buffer.from(e.compressedData, "base64");
+						e = JSON.parse(zlib.gunzipSync(buffer).toString());
+					}
+					newObj.PutRequest.Item = mergeFn(e, newObj.PutRequest.Item);
+				});
+				async.parallelLimit(tasks, 10, (err, results) => {
+					if (err) {
+						retry.fail(err);
+					} else {
+						let fail = false;
+						let backoff = false;
+						reset();
+						results.map(r => {
+							fail = fail || r.fail;
+							backoff = backoff || r.backoff;
+							if (!r.success) {
+								r.records.map(m => records.push(m.PutRequest.Item));
+							}
+						});
+						if (fail) {
+							retry.fail(fail);
+						} else if (backoff) {
+							retry.backoff(backoff);
+						} else {
+							retry.success();
+						}
+					}
+				});
+			});
+		}
+	});
+
+	return retry;
+}
+
+function getKeyFunction(opts) {
+	const keysArray = [opts.hash];
+	opts.range && keysArray.push(opts.range);
+	return opts.range ? (obj) => {
+		return `${obj[opts.hash]}-${obj[opts.range]}`;
+	} : (obj) => {
+		return `${obj[opts.hash]}`;
+	};
+}
+
+function getAssignFunction(opts) {
+	if (opts.merge) {
+		const mergeFn = typeof opts.merge === "function" ? opts.merge : merge;
+		return (self, key, obj) => {
+			if (key in self.data) {
+				self.data[key] = mergeFn(self.data[key], obj);
+				return true;
+			} else {
+				self.data[key] = obj;
+				return false;
+			}
+		};
+	} else {
+		return (self, key, obj) => {
+			self.data[key] = obj;
+			return false;
+		};
+	}
 }
