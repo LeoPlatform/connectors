@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "4.0.19-beta",
+	"version": "4.0.20-beta",
 	"description": "A Postgres database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
