@@ -4,7 +4,7 @@ const async = require('async');
 const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
 
-module.exports = function (config, columnConfig) {
+module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
 	let tempTables = [];
@@ -69,7 +69,7 @@ module.exports = function (config, columnConfig) {
 		}
 
 		return {
-			add: function (obj, done) {
+			add: function(obj, done) {
 				let field = obj.__leo_delete__;
 				let id = obj.__leo_delete_id__;
 				if (id !== undefined && colLookup[field]) {
@@ -96,26 +96,32 @@ module.exports = function (config, columnConfig) {
 		if (tempTables.length) {
 			let tasks = [];
 
-			tempTables.forEach(table => {
-				tasks.push(done => client.query(`drop table ${table}`, done));
-			});
-
-			return new Promise(resolve => {
-				async.series(tasks, err => {
-					if (err) {
-						throw err;
-					} else {
-						tempTables = [];
-						return resolve('Cleaned up temp tables');
-					}
+			try {
+				tempTables.forEach(table => {
+					tasks.push(done => client.query(`drop table if exists ${table}`, done));
 				});
-			});
+
+				await new Promise((resolve, reject) => {
+					async.series(tasks, err => {
+						if (err) {
+							reject(err);
+						} else {
+							tempTables = [];
+							resolve('Cleaned up temp tables');
+						}
+					});
+				});
+			} catch (dropError) {
+				// Temp tables are cleaned up before use in the next invocation
+				// so just log it and move on
+				logger.info('Error dropping temp tables', dropError);
+			}
 		}
 
 		return true;
 	};
 
-	client.importFact = function (stream, table, ids, callback) {
+	client.importFact = function(stream, table, ids, callback) {
 		const stagingTable = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
@@ -327,7 +333,7 @@ module.exports = function (config, columnConfig) {
 						} else {
 							connection.query(`rollback`, (e, d) => {
 								connection.release();
-								callback(e, d);
+								callback(e || err, d);
 							});
 						}
 					});
@@ -336,7 +342,7 @@ module.exports = function (config, columnConfig) {
 		}).catch(callback);
 	};
 
-	client.importDimension = function (stream, table, sk, nk, scds, callback, tableDef = {}) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTbl = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
@@ -537,7 +543,7 @@ module.exports = function (config, columnConfig) {
 								} else {
 									connection.query(`rollback`, (e, d) => {
 										connection.release();
-										callback(e, d);
+										callback(e || err, d);
 									});
 								}
 							});
@@ -642,7 +648,7 @@ module.exports = function (config, columnConfig) {
 							} else {
 								connection.query(`rollback`, (e, d) => {
 									connection.release();
-									callback(e, d);
+									callback(e || err, d);
 								});
 							}
 						});
@@ -652,7 +658,7 @@ module.exports = function (config, columnConfig) {
 		}).catch(callback);
 	};
 
-	client.insertMissingDimensions = function (usedTables, tableConfig, tableSks, tableNks, callback) {
+	client.insertMissingDimensions = function(usedTables, tableConfig, tableSks, tableNks, callback) {
 		if (config.hashedSurrogateKeys) {
 			callback(null);
 		} else {
@@ -715,7 +721,7 @@ module.exports = function (config, columnConfig) {
 		};
 	};
 
-	client.linkDimensions = function (table, links, nk, callback, tableStatus) {
+	client.linkDimensions = function(table, links, nk, callback, tableStatus) {
 		client.describeTable(table).then(() => {
 			let tasks = [];
 			let sets = [];
@@ -821,7 +827,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.changeTableStructure = async function (structures) {
+	client.changeTableStructure = async function(structures) {
 		let tasks = [];
 		let tableResults = {};
 
@@ -888,7 +894,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.createTable = async function (table, definition) {
+	client.createTable = async function(table, definition) {
 		let fields = [];
 		let defaults = [];
 		let dbType = (config.type || '').toLowerCase();
@@ -1026,7 +1032,7 @@ module.exports = function (config, columnConfig) {
 			});
 		});
 	};
-	client.updateTable = async function (table, definition) {
+	client.updateTable = async function(table, definition) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
@@ -1081,7 +1087,7 @@ module.exports = function (config, columnConfig) {
 		});
 
 		return new Promise(resolve => {
-			async.eachSeries(sqls, function (sql, done) {
+			async.eachSeries(sqls, function(sql, done) {
 				client.query(sql, err => done(err));
 			}, err => {
 				if (err) {
@@ -1093,7 +1099,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.findAuditDate = function (table, callback) {
+	client.findAuditDate = function(table, callback) {
 		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ${client.escapeId(table)}`, (err, auditdate) => {
 			if (err) {
 				callback(err);
@@ -1110,7 +1116,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.exportChanges = function (table, fields, remoteAuditdate, opts, callback) {
+	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
 		let auditdateCompare = remoteAuditdate.auditdate != null ? `${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
 		client.query(`select count(*) as count FROM ${client.escapeId(table)} WHERE ${auditdateCompare}`, (err, result) => {
 			if (err) {
@@ -1178,7 +1184,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.importChanges = function (file, table, fields, opts, callback) {
+	client.importChanges = function(file, table, fields, opts, callback) {
 		if (typeof opts === 'function') {
 			callback = opts;
 			opts = {};
@@ -1239,16 +1245,16 @@ module.exports = function (config, columnConfig) {
 				}
 			});
 		}
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`insert into ${tableName} select * from ${qualifiedStagingTable}`, done);
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`select count(*) from ${qualifiedStagingTable}`, (err, result) => {
 				loadCount = result && parseInt(result[0].count);
 				done(err);
 			});
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
 		async.series(tasks, (err) => {
