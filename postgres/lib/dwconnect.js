@@ -40,6 +40,8 @@ module.exports = function(config, columnConfig) {
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
+	let deleteFlushCount = config.deleteFlushCount || 1000;
+
 	function deletesSetup(qualifiedTable, schema, field, value, where = '') {
 		let colLookup = {};
 		schema.map(col => {
@@ -52,7 +54,7 @@ module.exports = function(config, columnConfig) {
 		}
 
 		function tryFlushDelete(done, force = false) {
-			if (force || toDeleteCount >= 1000) {
+			if (force || toDeleteCount >= deleteFlushCount) {
 				let deleteTasks = Object.keys(toDelete).map(col => {
 					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
 				});
@@ -155,7 +157,7 @@ module.exports = function(config, columnConfig) {
 					if (err) {
 						return done(err);
 					} else {
-						if (results[0].sortKey !== null) {
+						if (results[0].sortKey != null) {
 							sortKey = results[0].sortkey;
 							sortKeyType = results[0].sortkeytype;
 						};
@@ -166,7 +168,7 @@ module.exports = function(config, columnConfig) {
 			tasks.push(done =>
 				client.query(`CREATE TABLE ${qualifiedStagingTable} 
 							  DISTSTYLE ALL 
-							  SORTKEY (${sortKey !== undefined ? sortKey : ids[0]})
+							  SORTKEY (${sortKey != null ? sortKey : ids[0]})
 							  AS SELECT *
 								 FROM   ${qualifiedTable}
 								 LIMIT  0;`, done));
@@ -244,7 +246,7 @@ module.exports = function(config, columnConfig) {
 
 						// Get lower bound for natural key to avoid unnecessary scanning
 						tasks.push(done => {
-							connection.query(`SELECT MIN(${(sortKey !== undefined) ? sortKey : ids[0]}) AS minid,
+							connection.query(`SELECT MIN(${(sortKey != null) ? sortKey : ids[0]}) AS minid,
 													 CAST(COUNT(*) AS INT) AS cnt
 											  FROM   ${qualifiedStagingTable};`, (err, results) => {
 								if (err) {
@@ -286,8 +288,8 @@ module.exports = function(config, columnConfig) {
 											  WHERE  EXISTS ( SELECT *
 															  FROM   ${qualifiedStagingTable} AS staging
 															  WHERE  ${ids.map(id => `base.${id} = staging.${id}`).join(` AND `)}
-															  		 ${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey !== undefined) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``})
-													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey !== undefined) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``};`, done);
+															  		 ${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey != null) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``})
+													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey != null) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``};`, done);
 						});
 
 						// Merge exiting data into staged copy
@@ -311,7 +313,7 @@ module.exports = function(config, columnConfig) {
 							connection.query(`DELETE FROM ${qualifiedTable}
 											  USING  ${qualifiedStagingTable}
 											  WHERE  ${ids.map(id => `${qualifiedTable}.${id} = ${qualifiedStagingTable}.${id}`).join(` AND `)}
-											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey !== undefined ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey != null ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``}; `, done);
 						});
 						tasks.push(done => {
 							connection.query(`INSERT INTO ${qualifiedTable} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._auditdate}, ${columnConfig._deleted})
@@ -380,7 +382,7 @@ module.exports = function(config, columnConfig) {
 					if (err) {
 						return done(err);
 					} else {
-						if (results[0].sortkey !== null) {
+						if (results[0].sortkey != null) {
 							sortKey = results[0].sortkey;
 							sortKeyType = results[0].sortkeytype;
 						};
@@ -392,7 +394,7 @@ module.exports = function(config, columnConfig) {
 				// Create staging table with DISTSTYLE ALL to prevent cross talk
 				client.query(`CREATE TABLE ${qualifiedStagingTable} 
 							  DISTSTYLE ALL
-							  SORTKEY(${sortKey !== undefined ? sortKey : nk[0]})
+							  SORTKEY(${sortKey != null ? sortKey : nk[0]})
 							  AS SELECT *
 							  FROM ${qualifiedTable}
 								LIMIT 0;`, done));
@@ -554,7 +556,7 @@ module.exports = function(config, columnConfig) {
 
 						// Get lower bound for natural key to avoid unnecessary scanning
 						tasks.push(done => {
-							connection.query(`SELECT MIN(${(sortKey !== undefined) ? sortKey : nk[0]}) AS minid,
+							connection.query(`SELECT MIN(${(sortKey != null) ? sortKey : nk[0]}) AS minid,
 													 CAST(COUNT(*) AS INT) AS cnt
 											  FROM   ${qualifiedStagingTable};`, (err, results) => {
 								if (err) {
@@ -604,8 +606,8 @@ module.exports = function(config, columnConfig) {
 											  WHERE  EXISTS(SELECT *
 											  FROM   ${qualifiedStagingTable} AS staging
 															 WHERE  base.${sk} = staging.${sk}
-																	${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``})
-													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+																	${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``})
+													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
 						});
 
 						// Merge exiting data into staged copy
@@ -629,7 +631,7 @@ module.exports = function(config, columnConfig) {
 							connection.query(`DELETE FROM ${qualifiedTable}
 											  USING  ${qualifiedStagingTable}
 											  WHERE  ${qualifiedTable}.${sk} = ${qualifiedStagingTable}.${sk}
-											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey !== undefined ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey != null ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
 						});
 						tasks.push(done => {
 							connection.query(`INSERT INTO ${qualifiedTable} (${fields.map(column => `${column}`).join(`, `)})
@@ -749,7 +751,7 @@ module.exports = function(config, columnConfig) {
 						if (err) {
 							return done(err);
 						} else {
-							if (results[0].sortKey !== null) {
+							if (results[0].sortKey != null) {
 								sortKey = results[0].sortkey;
 								sortKeyType = results[0].sortkeytype;
 							};
@@ -758,7 +760,7 @@ module.exports = function(config, columnConfig) {
 					});
 				});
 				tasks.push(done => {
-					client.query(`SELECT MIN(${(sortKey !== undefined) ? sortKey : nk[0]}) AS minid
+					client.query(`SELECT MIN(${(sortKey != null) ? sortKey : nk[0]}) AS minid
 							  	  FROM   ${qualifiedStagingTable}; `, (err, results) => {
 						if (err) {
 							return done(err);
@@ -814,7 +816,7 @@ module.exports = function(config, columnConfig) {
 								  ${config.hashedSurrogateKeys ? '' : joinTables.join('\n')}
                         		  WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
 								  AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
-								  ${(naturalKeyFilter !== undefined) ? `AND t.${(sortKey !== undefined) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}`, done);
+								  ${(naturalKeyFilter !== undefined) ? `AND t.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}`, done);
 				} else {
 					done();
 				}
