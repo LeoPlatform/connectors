@@ -4,7 +4,7 @@ const async = require('async');
 const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
 
-module.exports = function (config, columnConfig) {
+module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
 	let tempTables = [];
@@ -27,10 +27,22 @@ module.exports = function (config, columnConfig) {
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
+
+	// Control flow for both of these configurations set to true has not been added. An error will be thrown until that is supported.
+	if (
+		(config.hashedSurrogateKeys && !config.bypassSlowlyChangingDimensions) // hashed surrogate keys and slowly changing dimensions not supported
+		|| (config.hashedSurrogateKeys && config.bypassSlowlyChangingDimensions === undefined) // covering the case where slowly changing dimensions has been omitted
+	) {
+		logger.error(`Unsupported configuration, bypassSlowlyChangingDimensions:${config.bypassSlowlyChangingDimensions} hashedSurrogateKeys:${config.hashedSurrogateKeys}.`);
+		process.exit();
+	};
+
 	client.getDimensionColumn = columnConfig.dimColumnTransform;
 	client.columnConfig = columnConfig;
 
-	function deletesSetup (qualifiedTable, schema, field, value, where = '') {
+	let deleteFlushCount = config.deleteFlushCount || 1000;
+
+	function deletesSetup(qualifiedTable, schema, field, value, where = '') {
 		let colLookup = {};
 		schema.map(col => {
 			colLookup[col.column_name] = true;
@@ -41,10 +53,10 @@ module.exports = function (config, columnConfig) {
 			where = `and ${where}`;
 		}
 
-		function tryFlushDelete (done, force = false) {
-			if (force || toDeleteCount >= 1000) {
+		function tryFlushDelete(done, force = false) {
+			if (force || toDeleteCount >= deleteFlushCount) {
 				let deleteTasks = Object.keys(toDelete).map(col => {
-					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
+					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
 				});
 				async.parallelLimit(deleteTasks, 1, (err) => {
 					if (!err) {
@@ -59,7 +71,7 @@ module.exports = function (config, columnConfig) {
 		}
 
 		return {
-			add: function (obj, done) {
+			add: function(obj, done) {
 				let field = obj.__leo_delete__;
 				let id = obj.__leo_delete_id__;
 				if (id !== undefined && colLookup[field]) {
@@ -86,26 +98,32 @@ module.exports = function (config, columnConfig) {
 		if (tempTables.length) {
 			let tasks = [];
 
-			tempTables.forEach(table => {
-				tasks.push(done => client.query(`drop table ${table}`, done));
-			});
-
-			return new Promise(resolve => {
-				async.series(tasks, err => {
-					if (err) {
-						throw err;
-					} else {
-						tempTables = [];
-						return resolve('Cleaned up temp tables');
-					}
+			try {
+				tempTables.forEach(table => {
+					tasks.push(done => client.query(`drop table if exists ${table}`, done));
 				});
-			});
+
+				await new Promise((resolve, reject) => {
+					async.series(tasks, err => {
+						if (err) {
+							reject(err);
+						} else {
+							tempTables = [];
+							resolve('Cleaned up temp tables');
+						}
+					});
+				});
+			} catch (dropError) {
+				// Temp tables are cleaned up before use in the next invocation
+				// so just log it and move on
+				logger.info('Error dropping temp tables', dropError);
+			}
 		}
 
 		return true;
 	};
 
-	client.importFact = function (stream, table, ids, callback) {
+	client.importFact = function(stream, table, ids, callback) {
 		const stagingTable = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTable}`;
 		const qualifiedTable = `public.${table}`;
@@ -121,12 +139,42 @@ module.exports = function (config, columnConfig) {
 
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._deleted, true);
 
+		let sortKey;
+		let sortKeyType;
+
 		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
-		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
-		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
-		tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
-		// tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
+		if (config.version !== 'redshift') {
+			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+			tasks.push(done => client.query(`create index ${stagingTable}_id on ${qualifiedStagingTable} (${ids.join(', ')})`, done));
+		} else {
+			// get sortkey for joins
+			tasks.push(done => {
+				client.query(`SELECT sortkey,
+								     sortkeytype
+					 		  FROM   public.v_dist_sort_key
+					 		  WHERE  table_name = '${table}';`, (err, results) => {
+					if (err) {
+						return done(err);
+					} else {
+						if (results[0].sortKey != null) {
+							sortKey = results[0].sortkey;
+							sortKeyType = results[0].sortkeytype;
+						};
+						done();
+					};
+				});
+			});
+			tasks.push(done =>
+				client.query(`CREATE TABLE ${qualifiedStagingTable} 
+							  DISTSTYLE ALL 
+							  SORTKEY (${sortKey != null ? sortKey : ids[0]})
+							  AS SELECT *
+								 FROM   ${qualifiedTable}
+								 LIMIT  0;`, done));
+		};
+
+
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -137,7 +185,7 @@ module.exports = function (config, columnConfig) {
 				} else {
 					done(null, obj);
 				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
+			}), config.version !== 'redshift' ? client.streamToTable(qualifiedStagingTable) : client.streamToTableFromS3(qualifiedStagingTable, config), (err) => {
 				if (err) {
 					return done(err);
 				} else {
@@ -146,7 +194,9 @@ module.exports = function (config, columnConfig) {
 			});
 		});
 
-		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
+		if (config.version !== 'redshift') {
+			tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
+		};
 
 		client.describeTable(table).then(result => {
 			let columns = result.filter(field => !field.column_name.match(/^_/)).map(field => `"${field.column_name}"`);
@@ -159,35 +209,120 @@ module.exports = function (config, columnConfig) {
 
 					let tasks = [];
 					let totalRecords = 0;
-					// The following code relies on the fact that now() will return the same time during all transaction events
-					tasks.push(done => connection.query(`Begin Transaction`, done));
-					tasks.push(done => {
-						connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
-							if (err) {
-								return done(err);
-							}
-							totalRecords = results.length;
-							done();
-						});
-					});
-					tasks.push(done => {
-						connection.query(`Update ${qualifiedTable} prev
-								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
-								FROM ${qualifiedStagingTable} staging
-								where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
-							`, done);
-					});
 
-					// Now insert any we were missing
-					tasks.push(done => {
-						connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
-								SELECT ${columns.map(column => `coalesce(staging.${column}, prev.${column})`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
-								FROM ${qualifiedStagingTable} staging
-								LEFT JOIN ${qualifiedTable} as prev on ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
-								WHERE prev.${ids[0]} is null	
-							`, done);
-					});
-					// tasks.push(done => connection.query(`drop table ${stagingTbl}`, done));
+					// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
+					tasks.push(done => connection.query(`Begin Transaction`, done));
+
+					if (!config.hashedSurrogateKeys) {
+						tasks.push(done => {
+							connection.query(`select 1 as total from ${qualifiedTable} limit 1`, (err, results) => {
+								if (err) {
+									return done(err);
+								}
+								totalRecords = results.length;
+								done();
+							});
+						});
+						tasks.push(done => {
+							connection.query(`Update ${qualifiedTable} prev
+											  SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
+											  FROM ${qualifiedStagingTable} staging
+											  where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}`
+								, done);
+						});
+
+						// Now insert any we were missing
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
+											  SELECT ${columns.map(column => `staging.${column}`)}, false AS ${columnConfig._deleted}, ${dwClient.auditdate} as ${columnConfig._auditdate}
+											  FROM ${qualifiedStagingTable} staging
+											  WHERE NOT EXISTS ( SELECT *
+																 FROM   ${qualifiedTable} as prev
+																 WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')})`, done);
+						});
+					} else {
+						let naturalKeyLowerBound;
+						let naturalKeyFilter;
+
+						// Get lower bound for natural key to avoid unnecessary scanning
+						tasks.push(done => {
+							connection.query(`SELECT MIN(${(sortKey != null) ? sortKey : ids[0]}) AS minid,
+													 CAST(COUNT(*) AS INT) AS cnt
+											  FROM   ${qualifiedStagingTable};`, (err, results) => {
+								if (err) {
+									return done(err);
+								} else {
+									totalRecords = results[0].cnt;
+									naturalKeyLowerBound = results[0].minid;
+									if (naturalKeyLowerBound !== null) {
+										if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+											naturalKeyFilter = `${results[0].minid}`;
+										} else if (sortKeyType === 'varchar') {
+											naturalKeyFilter = `'${results[0].minid}'`;
+										} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+											naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+										};
+									};
+									done();
+								};
+							});
+						});
+
+						const qualifiedStagingTablePrevious = `${qualifiedStagingTable}_previous`;
+						tempTables.push(`${qualifiedStagingTablePrevious}`);
+						tasks.push(done => connection.query(`DROP TABLE IF EXISTS ${qualifiedStagingTablePrevious};`, done));
+						tasks.push(done => {
+							connection.query(`CREATE TABLE ${qualifiedStagingTablePrevious}
+											  DISTSTYLE ALL 
+											  AS SELECT *
+												 FROM   ${qualifiedTable}
+												 LIMIT  0;`, done);
+						});
+
+						// Retreive copy of existing data
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedStagingTablePrevious} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._deleted})
+											  SELECT ${columns.map(column => `${column}`).join(`, `)},
+													 ${columnConfig._deleted}
+											  FROM   ${qualifiedTable} AS base
+											  WHERE  EXISTS ( SELECT *
+															  FROM   ${qualifiedStagingTable} AS staging
+															  WHERE  ${ids.map(id => `base.${id} = staging.${id}`).join(` AND `)}
+															  		 ${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey != null) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``})
+													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey != null) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``};`, done);
+						});
+
+						// Merge exiting data into staged copy
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
+											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)},
+													 ${columnConfig._deleted} = COALESCE(prev.${columnConfig._deleted}, false)
+											  FROM   ${qualifiedStagingTablePrevious} AS prev
+											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
+						});
+
+						// Set auditdate and _deleted for stage data
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+												SET    ${columnConfig._auditdate} = ${dwClient.auditdate},
+													   ${columnConfig._deleted} = COALESCE(${columnConfig._deleted}, false); `, done);
+						});
+
+						// Delete and reinsert data - avoids costly updates on large tables
+						tasks.push(done => {
+							connection.query(`DELETE FROM ${qualifiedTable}
+											  USING  ${qualifiedStagingTable}
+											  WHERE  ${ids.map(id => `${qualifiedTable}.${id} = ${qualifiedStagingTable}.${id}`).join(` AND `)}
+											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey != null ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._auditdate}, ${columnConfig._deleted})
+											  SELECT ${columns.map(column => `${column}`).join(`, `)},
+											  		 ${columnConfig._auditdate},
+													 ${columnConfig._deleted}
+											  FROM   ${qualifiedStagingTable}; `, done);
+						});
+					};
 
 					async.series(tasks, err => {
 						if (!err) {
@@ -200,7 +335,7 @@ module.exports = function (config, columnConfig) {
 						} else {
 							connection.query(`rollback`, (e, d) => {
 								connection.release();
-								callback(e, d);
+								callback(e || err, d);
 							});
 						}
 					});
@@ -209,7 +344,7 @@ module.exports = function (config, columnConfig) {
 		}).catch(callback);
 	};
 
-	client.importDimension = function (stream, table, sk, nk, scds, callback, tableDef = {}) {
+	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef = {}) {
 		const stagingTbl = `${columnConfig.stageTablePrefix}_${table}`;
 		const qualifiedStagingTable = `${columnConfig.stageSchema}.${stagingTbl}`;
 		const qualifiedTable = `public.${table}`;
@@ -227,13 +362,49 @@ module.exports = function (config, columnConfig) {
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
 
+		let sortKey;
+		let sortKeyType;
+
+		// Prepare staging tables
 		tempTables.push(qualifiedStagingTable);
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}`, done));
 		tasks.push(done => client.query(`drop table if exists ${qualifiedStagingTable}_changes`, done));
-		tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
-		tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
-		tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
-		// tasks.push(done => ls.pipe(stream, client.streamToTable(qualifiedStagingTable), done));
+		if (config.version !== 'redshift') {
+			tasks.push(done => client.query(`create table ${qualifiedStagingTable} (like ${qualifiedTable})`, done));
+			tasks.push(done => client.query(`create index ${stagingTbl}_id on ${qualifiedStagingTable} (${nk.join(', ')})`, done));
+		} else {
+			// get sortkey for joins
+			tasks.push(done => {
+				client.query(`SELECT sortkey,
+									 sortkeytype
+					  		  FROM   public.v_dist_sort_key
+					  		  WHERE  table_name = '${table}';`, (err, results) => {
+					if (err) {
+						return done(err);
+					} else {
+						if (results[0].sortkey != null) {
+							sortKey = results[0].sortkey;
+							sortKeyType = results[0].sortkeytype;
+						};
+						done();
+					};
+				});
+			});
+			tasks.push(done =>
+				// Create staging table with DISTSTYLE ALL to prevent cross talk
+				client.query(`CREATE TABLE ${qualifiedStagingTable} 
+							  DISTSTYLE ALL
+							  SORTKEY(${sortKey != null ? sortKey : nk[0]})
+							  AS SELECT *
+							  FROM ${qualifiedTable}
+								LIMIT 0;`, done));
+		};
+
+		// Retain surrogate key column when using hashed keys on redshift // column must be dropped for postgres
+		if (!config.hashedSurrogateKeys && config.version !== 'redshift') {
+			tasks.push(done => client.query(`alter table ${qualifiedStagingTable} drop column ${sk}`, done));
+		};
+
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
 				if (obj.__leo_delete__) {
@@ -244,7 +415,7 @@ module.exports = function (config, columnConfig) {
 				} else {
 					done(null, obj);
 				}
-			}), client.streamToTable(qualifiedStagingTable), (err) => {
+			}), config.version !== 'redshift' ? client.streamToTable(qualifiedStagingTable) : client.streamToTableFromS3(qualifiedStagingTable, config), (err) => {
 				if (err) {
 					return done(err);
 				} else {
@@ -253,7 +424,9 @@ module.exports = function (config, columnConfig) {
 			});
 		});
 
-		tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
+		if (config.version !== 'redshift') {
+			tasks.push(done => client.query(`analyze ${qualifiedStagingTable}`, done));
+		};
 
 		client.describeTable(table).then(result => {
 			client.connect().then(connection => {
@@ -262,7 +435,6 @@ module.exports = function (config, columnConfig) {
 						return callback(err);
 					}
 
-					// let scd0 = scds[0] || []; // Not Used
 					let scd2 = scds[2] || [];
 					let scd3 = scds[3] || [];
 					let scd6 = Object.keys(scds[6] || {});
@@ -278,88 +450,195 @@ module.exports = function (config, columnConfig) {
 
 					let scdSQL = [];
 
-					// if (!scd2.length && !scd3.length && !scd6.length) {
-					//	scdSQL.push(`1 as runSCD1`);
-					// } else
-					if (scd1.length) {
-						scdSQL.push(`CASE WHEN md5(${scd1.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd1.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
-					} else {
-						scdSQL.push(`0 as runSCD1`);
-					}
-					if (scd2.length) {
-						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd2.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
-					} else {
-						scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
-					}
-					if (scd3.length) {
-						scdSQL.push(`CASE WHEN md5(${scd3.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd3.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
-					} else {
-						scdSQL.push(`0 as runSCD3`);
-					}
-					if (scd6.length) {
-						scdSQL.push(`CASE WHEN md5(${scd6.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd6.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
-					} else {
-						scdSQL.push(`0 as runSCD6`);
-					}
-
-					// let's figure out which SCDs needs to happen
-					tempTables.push(`${qualifiedStagingTable}_changes`);
-					connection.query(`create table ${qualifiedStagingTable}_changes as 
-				select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
-					${scdSQL.join(',\n')}
-					FROM ${qualifiedStagingTable} s
-					LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
-						if (err) {
-							logger.error(err);
-							process.exit();
+					if (!config.bypassSlowlyChangingDimensions) {
+						if (scd1.length) {
+							scdSQL.push(`CASE WHEN md5(${scd1.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd1.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD1`);
+						} else {
+							scdSQL.push(`0 as runSCD1`);
 						}
-						let tasks = [];
-						let rowId = null;
-						let totalRecords = 0;
-						tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
+						if (scd2.length) {
+							scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 WHEN md5(${scd2.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd2.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 ELSE 1 END as runSCD2`);
+						} else {
+							scdSQL.push(`CASE WHEN d.${nk[0]} is null then 1 ELSE 0 END as runSCD2`);
+						}
+						if (scd3.length) {
+							scdSQL.push(`CASE WHEN md5(${scd3.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd3.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD3`);
+						} else {
+							scdSQL.push(`0 as runSCD3`);
+						}
+						if (scd6.length) {
+							scdSQL.push(`CASE WHEN md5(${scd6.map(f => 'md5(coalesce(s.' + f + '::text,\'\'))').join(' || ')}) = md5(${scd6.map(f => 'md5(coalesce(d.' + f + '::text,\'\'))').join(' || ')}) THEN 0 WHEN d.${nk[0]} is null then 0 ELSE 1 END as runSCD6`);
+						} else {
+							scdSQL.push(`0 as runSCD6`);
+						}
+					};
+
+					let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
+					let tasks = [];
+					let totalRecords = 0;
+
+					if (!config.hashedSurrogateKeys && !config.bypassSlowlyChangingDimensions) {
+						tempTables.push(`${qualifiedStagingTable}_changes`);
+						connection.query(`create table ${qualifiedStagingTable}_changes as
+										  select ${nk.map(id => `s.${id}`).join(', ')}, d.${nk[0]} is null as isNew,
+												 ${scdSQL.join(',\n')}
+										  FROM ${qualifiedStagingTable} s
+										  LEFT JOIN ${qualifiedTable} d on ${nk.map(id => `d.${id} = s.${id}`).join(' and ')} and d.${columnConfig._current}`, (err) => {
+							if (err) {
+								logger.error(err);
+								process.exit();
+							}
+
+							let rowId = null;
+
+							tasks.push(done => connection.query(`analyze ${qualifiedStagingTable}_changes`, done));
+							tasks.push(done => {
+								connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
+									if (err) {
+										return done(err);
+									}
+									rowId = results[0].maxid || 10000;
+									totalRecords = (rowId - 10000);
+									done();
+								});
+							});
+
+							// The following code relies on the fact that now()/sysdate will return the same time during all transaction events
+							tasks.push(done => connection.query(`Begin Transaction`, done));
+							tasks.push(done => {
+								connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
+												  SELECT row_number() over() + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, 
+														 case when changes.isNew then '1900-01-01 00:00:00' else ${config.version === 'redshift' ? 'sysdate' : 'now()'} END as ${columnConfig._startdate},
+														 '9999-01-01 00:00:00' as ${columnConfig._enddate},
+														 true as ${columnConfig._current}
+												  FROM ${qualifiedStagingTable}_changes changes  
+												  JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+												  LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
+												  WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
+									`, done);
+							});
+
+							// This needs to be done last
+							tasks.push(done => {
+								// RUN SCD1 / SCD6 columns  (where we update the old records)
+								let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
+								columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then ${config.version === 'redshift' ? 'sysdate' : 'now()'} else prev."${columnConfig._enddate}" END`);
+								columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
+								columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
+								connection.query(`update ${qualifiedTable} as prev
+												  set  ${columns.join(', ')}
+												  FROM ${qualifiedStagingTable}_changes changes
+												  JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
+												  where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != ${config.version === 'redshift' ? 'sysdate' : 'now()'} and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
+												  and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
+											`, done);
+							});
+
+							async.series(tasks, err => {
+								if (!err) {
+									connection.query(`commit`, e => {
+										connection.release();
+										callback(e || err, {
+											count: totalRecords,
+										});
+									});
+								} else {
+									connection.query(`rollback`, (e, d) => {
+										connection.release();
+										callback(e || err, d);
+									});
+								}
+							});
+						});
+					} else {
+						let naturalKeyLowerBound;
+						let naturalKeyFilter;
+
+						// Get lower bound for natural key to avoid unnecessary scanning
 						tasks.push(done => {
-							connection.query(`select max(${sk}) as maxid from ${qualifiedTable}`, (err, results) => {
+							connection.query(`SELECT MIN(${(sortKey != null) ? sortKey : nk[0]}) AS minid,
+													 CAST(COUNT(*) AS INT) AS cnt
+											  FROM   ${qualifiedStagingTable};`, (err, results) => {
 								if (err) {
 									return done(err);
-								}
-								rowId = results[0].maxid || 10000;
-								totalRecords = (rowId - 10000);
-								done();
+								} else {
+									totalRecords = results[0].cnt;
+									naturalKeyLowerBound = results[0].minid;
+									if (naturalKeyLowerBound !== null) {
+										if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+											naturalKeyFilter = `${results[0].minid}`;
+										} else if (sortKeyType === 'varchar') {
+											naturalKeyFilter = `'${results[0].minid}'`;
+										} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+											naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+										};
+									};
+									done();
+								};
 							});
 						});
 
-						// The following code relies on the fact that now() will return the same time during all transaction events
-						tasks.push(done => connection.query(`Begin Transaction`, done));
-
+						const qualifiedStagingTablePrevious = `${qualifiedStagingTable}_previous`;
+						tempTables.push(`${qualifiedStagingTablePrevious}`);
+						tasks.push(done => connection.query(`DROP TABLE IF EXISTS ${qualifiedStagingTablePrevious};`, done));
 						tasks.push(done => {
-							let fields = [sk].concat(allColumns).concat([columnConfig._auditdate, columnConfig._startdate, columnConfig._enddate, columnConfig._current]);
-							connection.query(`INSERT INTO ${qualifiedTable} (${fields.join(',')})
-								SELECT row_number() over () + ${rowId}, ${allColumns.map(column => `coalesce(staging.${column}, prev.${column})`)}, ${dwClient.auditdate} as ${columnConfig._auditdate}, case when changes.isNew then '1900-01-01 00:00:00' else now() END as ${columnConfig._startdate}, '9999-01-01 00:00:00' as ${columnConfig._enddate}, true as ${columnConfig._current}
-								FROM ${qualifiedStagingTable}_changes changes  
-								JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-								LEFT JOIN ${qualifiedTable} as prev on ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._current}
-								WHERE (changes.runSCD2 =1 OR changes.runSCD6=1)		
-								`, done);
+							connection.query(`CREATE TABLE ${qualifiedStagingTablePrevious}
+											  DISTSTYLE ALL
+											  AS SELECT *
+											  FROM ${qualifiedTable}
+											  LIMIT 0;`, done);
 						});
 
-						// This needs to be done last
+						// Set auditdate and surrogate key for stage data (not sure if the sk is actually necessary)
 						tasks.push(done => {
-							// RUN SCD1 / SCD6 columns  (where we update the old records)
-							let columns = scd1.map(column => `"${column}" = coalesce(staging."${column}", prev."${column}")`).concat(scd6.map(column => `"current_${column}" = coalesce(staging."${column}", prev."${column}")`));
-							columns.push(`"${columnConfig._enddate}" = case when changes.runSCD2 =1 then now() else prev."${columnConfig._enddate}" END`);
-							columns.push(`"${columnConfig._current}" = case when changes.runSCD2 =1 then false else prev."${columnConfig._current}" END`);
-							columns.push(`"${columnConfig._auditdate}" = ${dwClient.auditdate}`);
-							connection.query(`update ${qualifiedTable} as prev
-										set  ${columns.join(', ')}
-										FROM ${qualifiedStagingTable}_changes changes
-										JOIN ${qualifiedStagingTable} staging on ${nk.map(id => `staging.${id} = changes.${id}`).join(' and ')}
-										where ${nk.map(id => `prev.${id} = changes.${id}`).join(' and ')} and prev.${columnConfig._startdate} != now() and changes.isNew = false /*Need to make sure we are only updating the ones not just inserted through SCD2 otherwise we run into issues with multiple rows having .${columnConfig._current}*/
-											and (changes.runSCD1=1 OR  changes.runSCD6=1 OR changes.runSCD2=1)
-										`, done);
+							connection.query(`UPDATE ${qualifiedStagingTable}
+											  SET    ${columnConfig._auditdate} = ${dwClient.auditdate},
+											  		 ${sk} = farmFingerPrint64(${nk.map(id => `${id}`).join(`|| '-' ||`)}); `, done);
 						});
 
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}_changes`, done));
-						// tasks.push(done => connection.query(`drop table ${qualifiedStagingTable}`, done));
+						tasks.push(done => connection.query(`BEGIN TRANSACTION;`, done));
+
+						// Retreive copy of existing data
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedStagingTablePrevious}(${fields.map(column => `${column}`).join(`, `)})
+											  SELECT ${fields.map(column => `${column}`).join(`, `)}
+											  FROM   ${qualifiedTable} AS base
+											  WHERE  EXISTS(SELECT *
+											  FROM   ${qualifiedStagingTable} AS staging
+															 WHERE  base.${sk} = staging.${sk}
+																	${(naturalKeyFilter !== undefined) ? `AND staging.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``})
+													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+						});
+
+						// Merge exiting data into staged copy
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
+											  SET    ${fields.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`, `)}
+											  FROM   ${qualifiedStagingTablePrevious} AS prev
+											  WHERE  staging.${sk} = prev.${sk}`, done);
+						});
+
+						// Set default SCD values
+						tasks.push(done => {
+							connection.query(`UPDATE ${qualifiedStagingTable}
+											  SET    ${columnConfig._startdate} = COALESCE(${columnConfig._startdate},'1900-01-01 00:00:00'),
+													 ${columnConfig._enddate} = COALESCE(${columnConfig._enddate},'9999-01-01 00:00:00'),
+													 ${columnConfig._current} = COALESCE(${columnConfig._current},true);`, done);
+						});
+
+						// Delete and reinsert data - avoids costly updates on large tables
+						tasks.push(done => {
+							connection.query(`DELETE FROM ${qualifiedTable}
+											  USING  ${qualifiedStagingTable}
+											  WHERE  ${qualifiedTable}.${sk} = ${qualifiedStagingTable}.${sk}
+											  		 ${(naturalKeyFilter !== undefined) ? `AND ${qualifiedTable}.${sortKey != null ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}; `, done);
+						});
+						tasks.push(done => {
+							connection.query(`INSERT INTO ${qualifiedTable} (${fields.map(column => `${column}`).join(`, `)})
+											  SELECT ${fields.map(column => `${column}`).join(`, `)}
+											  FROM   ${qualifiedStagingTable}; `, done);
+						});
+
 						async.series(tasks, err => {
 							if (!err) {
 								connection.query(`commit`, e => {
@@ -371,116 +650,173 @@ module.exports = function (config, columnConfig) {
 							} else {
 								connection.query(`rollback`, (e, d) => {
 									connection.release();
-									callback(e, d);
+									callback(e || err, d);
 								});
 							}
 						});
-					});
+					};
 				});
 			}).catch(callback);
 		}).catch(callback);
 	};
 
-	client.insertMissingDimensions = function (usedTables, tableConfig, tableSks, tableNks, callback) {
-		let unions = {};
-		let isDate = {
-			d_date: true,
-			d_datetime: true,
-			d_time: true,
-			date: true,
-			datetime: true,
-			dim_date: true,
-			dim_datetime: true,
-			dim_time: true,
-			time: true,
-		};
-		Object.keys(usedTables).map(table => {
-			Object.keys(tableConfig[table].structure).map(column => {
-				let field = tableConfig[table].structure[column];
-				if (field.dimension && !isDate[field.dimension]) {
-					if (!(unions[field.dimension])) {
-						unions[field.dimension] = [];
-					}
-					if (typeof tableNks[field.dimension] === 'undefined') {
-						throw new Error(`${field.dimension} not found in tableNks`);
-					}
-					let dimTableNk = tableNks[field.dimension][0];
-					unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
-				}
-			});
-		});
-		let missingDimTasks = Object.keys(unions).map(table => {
-			let sk = tableSks[table];
-			let nk = tableNks[table][0];
-			return (callback) => {
-				let done = (err, data) => {
-					trx && trx.release();
-					callback(err, data);
-				};
-				let trx;
-				client.connect().then(transaction => {
-					trx = transaction;
-					transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
-						if (err) {
-							return done(err);
-						}
-						let rowId = results[0].maxid || 10000;
-						let _auditdate = dwClient.auditdate; // results[0]._auditdate ? `'${results[0]._auditdate.replace(/^\d* */,"")}'` : "now()";
-						let unionQuery = unions[table].join('\nUNION\n');
-						transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over () + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from (${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
-							done(err);
-						});
-					});
-				}).catch(done);
+	client.insertMissingDimensions = function(usedTables, tableConfig, tableSks, tableNks, callback) {
+		if (config.hashedSurrogateKeys) {
+			callback(null);
+		} else {
+			let unions = {};
+			let isDate = {
+				d_date: true,
+				d_datetime: true,
+				d_time: true,
+				date: true,
+				datetime: true,
+				dim_date: true,
+				dim_datetime: true,
+				dim_time: true,
+				time: true,
 			};
-		});
-		async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
-			logger.info(`Missing Dimensions ${!missingDimError && 'Inserted'} ----------------------------`, missingDimError || '');
-			callback(missingDimError);
-		});
+			Object.keys(usedTables).map(table => {
+				Object.keys(tableConfig[table].structure).map(column => {
+					let field = tableConfig[table].structure[column];
+					if (field.dimension && !isDate[field.dimension]) {
+						if (!(unions[field.dimension])) {
+							unions[field.dimension] = [];
+						}
+						if (typeof tableNks[field.dimension] === 'undefined') {
+							throw new Error(`${field.dimension} not found in tableNks`);
+						}
+						let dimTableNk = tableNks[field.dimension][0];
+						unions[field.dimension].push(`select ${table}.${column} as id from ${table} left join ${field.dimension} on ${field.dimension}.${dimTableNk} = ${table}.${column} where ${field.dimension}.${dimTableNk} is null and ${table}.${columnConfig._auditdate} = ${dwClient.auditdate}`);
+					}
+				});
+			});
+			let missingDimTasks = Object.keys(unions).map(table => {
+				let sk = tableSks[table];
+				let nk = tableNks[table][0];
+				return (callback) => {
+					let done = (err, data) => {
+						trx && trx.release();
+						callback(err, data);
+					};
+					let trx;
+					client.connect().then(transaction => {
+						trx = transaction;
+						transaction.query(`select max(${sk}) as maxid from ${table}`, (err, results) => {
+							if (err) {
+								return done(err);
+							}
+							let rowId = results[0].maxid || 10000;
+							let _auditdate = dwClient.auditdate;
+							let unionQuery = unions[table].join('\nUNION\n');
+							transaction.query(`insert into ${table} (${sk}, ${nk}, ${columnConfig._auditdate}, ${columnConfig._startdate}, ${columnConfig._enddate}, ${columnConfig._current}) select row_number() over() + ${rowId}, sub.id, max(${_auditdate})::timestamp, '1900-01-01 00:00:00', '9999-01-01 00:00:00', true from(${unionQuery}) as sub where sub.id is not null group by sub.id`, (err) => {
+								done(err);
+							});
+						});
+					}).catch(done);
+				};
+			});
+			async.parallelLimit(missingDimTasks, 10, (missingDimError) => {
+				logger.info(`Missing Dimensions ${!missingDimError && 'Inserted'} ----------------------------`, missingDimError || '');
+				callback(missingDimError);
+			});
+		};
 	};
 
-	client.linkDimensions = function (table, links, nk, callback, tableStatus) {
+	client.linkDimensions = function(table, links, nk, callback, tableStatus) {
 		client.describeTable(table).then(() => {
 			let tasks = [];
 			let sets = [];
 
+			const qualifiedTable = `public.${table}`;
 			const linkAuditdate = client.escapeValueNoToLower(new Date().toISOString().replace(/\.\d*Z/, 'Z'));
 
 			// Only run analyze on the table if this is the first load
-			if (tableStatus === 'First Load') {
-				tasks.push(done => client.query(`analyze ${table}`, done));
+			if (tableStatus === 'First Load' && config.version !== 'redshift') {
+				tasks.push(done => client.query(`ANALYZE ${table}`, done));
 			}
+
+			const qualifiedStagingTable = `${columnConfig.stageSchema}.${columnConfig.stageTablePrefix}_${table}`;
+			let naturalKeyLowerBound;
+			let naturalKeyFilter;
+			let sortKey;
+			let sortKeyType;
+			// Get lower bound for natural key to avoid unnecessary scanning
+			if (config.version === 'redshift') {
+				tasks.push(done => {
+					client.query(`SELECT sortkey,
+										 sortkeytype
+								  FROM   public.v_dist_sort_key
+								  WHERE  table_name = '${table}';`, (err, results) => {
+						if (err) {
+							return done(err);
+						} else {
+							if (results[0].sortKey != null) {
+								sortKey = results[0].sortkey;
+								sortKeyType = results[0].sortkeytype;
+							};
+							done();
+						};
+					});
+				});
+				tasks.push(done => {
+					client.query(`SELECT MIN(${(sortKey != null) ? sortKey : nk[0]}) AS minid
+							  	  FROM   ${qualifiedStagingTable}; `, (err, results) => {
+						if (err) {
+							return done(err);
+						} else {
+							naturalKeyLowerBound = results[0].minid;
+							if (naturalKeyLowerBound !== null) {
+								if (sortKeyType === 'int4' || sortKeyType === 'int8') {
+									naturalKeyFilter = `${results[0].minid}`;
+								} else if (sortKeyType === 'varchar') {
+									naturalKeyFilter = `'${results[0].minid}'`;
+								} else if (sortKeyType === 'timestamp' && Date.parse(results[0].minid.split('  ')[1])) {
+									naturalKeyFilter = `'${results[0].minid.split('  ')[1]}'`;
+								};
+							};
+							done();
+						};
+					});
+				});
+			};
+
 			tasks.push(done => {
 				let joinTables = links.map(link => {
 					if (columnConfig.useSurrogateDateKeys && (link.table === 'd_datetime' || link.table === 'datetime' || link.table === 'dim_datetime')) {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH FROM ${(config.version !== 'redshift') ? `` : `'1970-01-01'::date +`} t.${link.source}::time) + 10000, 1)`);
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_date' || link.table === 'date' || link.table === 'dim_date')) {
 						sets.push(`${link.destination}_date = coalesce(t.${link.source}::date - '1400-01-01'::date + 10000, 1)`);
 					} else if (columnConfig.useSurrogateDateKeys && (link.table === 'd_time' || link.table === 'time' || link.table === 'dim_time')) {
-						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH from t.${link.source}::time) + 10000, 1)`);
+						sets.push(`${link.destination}_time = coalesce(EXTRACT(EPOCH FROM ${(config.version !== 'redshift') ? `` : `'1970-01-01'::date +`} t.${link.source}::time) + 10000, 1)`);
 					} else {
-						sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
-						var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source}`;
-						if (Array.isArray(link.source)) {
-							joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
-						}
-						return `LEFT JOIN ${link.table} ${link.join_id}_join_table
-                            on ${joinOn} 
-                                and t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
-                                and (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+						if (config.hashedSurrogateKeys) {
+							sets.push(`${link.destination} = coalesce(farmFingerPrint64(t.${link.source}), 1)`);
+							return ``;
+						} else {
+							sets.push(`${link.destination} = coalesce(${link.join_id}_join_table.${link.sk}, 1)`);
+							var joinOn = `${link.join_id}_join_table.${link.on} = t.${link.source} `;
+
+							if (Array.isArray(link.source)) {
+								joinOn = link.source.map((v, i) => `${link.join_id}_join_table.${link.on[i]} = t.${v}`).join(' AND ');
+							}
+							return `LEFT JOIN ${link.table} ${link.join_id}_join_table
+									ON ${joinOn} 
+									AND t.${link.link_date} >= ${link.join_id}_join_table.${columnConfig._startdate}
+									AND (t.${link.link_date} <= ${link.join_id}_join_table.${columnConfig._enddate} or ${link.join_id}_join_table.${columnConfig._current})`;
+						};
 					}
 				});
 
 				if (sets.length) {
-					client.query(`Update ${table} dm
-                        SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
-                        FROM ${table} t
-                        ${joinTables.join('\n')}
-                        where ${nk.map(id => `dm.${id} = t.${id}`).join(' and ')}
-							AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
-                    `, done);
+					client.query(`UPDATE ${table} dm
+                       			  SET  ${sets.join(', ')}, ${columnConfig._auditdate} = ${linkAuditdate}
+                        		  FROM ${table} t
+								  ${config.hashedSurrogateKeys ? '' : joinTables.join('\n')}
+                        		  WHERE ${nk.map(id => `dm.${id} = t.${id}`).join(' AND ')}
+								  AND dm.${columnConfig._auditdate} = ${dwClient.auditdate} AND t.${columnConfig._auditdate} = ${dwClient.auditdate}
+								  ${(naturalKeyFilter !== undefined) ? `AND t.${(sortKey != null) ? sortKey : nk[0]} >= ${naturalKeyFilter}` : ``}`, done);
 				} else {
 					done();
 				}
@@ -493,7 +829,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.changeTableStructure = async function (structures) {
+	client.changeTableStructure = async function(structures) {
 		let tasks = [];
 		let tableResults = {};
 
@@ -518,7 +854,7 @@ module.exports = function (config, columnConfig) {
 								} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 									let missingDim = columnConfig.dimColumnTransform(f, field);
 									missingFields[missingDim] = {
-										type: 'integer',
+										type: (config.hashedSurrogateKeys) ? 'bigint' : 'integer',
 									};
 								}
 							});
@@ -560,7 +896,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.createTable = async function (table, definition) {
+	client.createTable = async function(table, definition) {
 		let fields = [];
 		let defaults = [];
 		let dbType = (config.type || '').toLowerCase();
@@ -576,7 +912,7 @@ module.exports = function (config, columnConfig) {
 			if (field === 'sk') {
 				field = {
 					sk: true,
-					type: 'integer primary key',
+					type: `${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'} primary key`,
 				};
 			} else if (typeof field === 'string') {
 				field = {
@@ -625,7 +961,7 @@ module.exports = function (config, columnConfig) {
 					});
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(key, field)} ${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'}`);
 				defaults.push({
 					column: columnConfig.dimColumnTransform(key, field),
 					value: 1,
@@ -639,7 +975,7 @@ module.exports = function (config, columnConfig) {
 		});
 
 		let sql = `create table ${table} (
-				${fields.join(',\n')}
+		${fields.join(',\n')}
 			)`;
 
 		/*
@@ -663,7 +999,7 @@ module.exports = function (config, columnConfig) {
 			// Add empty row to new dim
 			defaults = defaults.concat([{
 				column: columnConfig._auditdate,
-				value: 'now()',
+				value: config.version === 'redshift' ? 'sysdate' : 'now()',
 			}, {
 				column: columnConfig._startdate,
 				value: client.escapeValueNoToLower('1900-01-01 00:00:00'),
@@ -698,14 +1034,14 @@ module.exports = function (config, columnConfig) {
 			});
 		});
 	};
-	client.updateTable = async function (table, definition) {
+	client.updateTable = async function(table, definition) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
 			let field = definition[key];
 			if (field === 'sk') {
 				field = {
-					type: 'integer primary key',
+					type: `${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'} primary key`,
 				};
 			} else if (typeof field === 'string') {
 				field = {
@@ -741,7 +1077,7 @@ module.exports = function (config, columnConfig) {
 		});
 		let sqls = [`alter table  ${table} 
 				add column ${fields.join(',\n add column ')}
-			`];
+	`];
 
 		// redshift doesn't support multi 'add column' in one query
 		if (config.version === 'redshift') {
@@ -753,7 +1089,7 @@ module.exports = function (config, columnConfig) {
 		});
 
 		return new Promise(resolve => {
-			async.eachSeries(sqls, function (sql, done) {
+			async.eachSeries(sqls, function(sql, done) {
 				client.query(sql, err => done(err));
 			}, err => {
 				if (err) {
@@ -765,7 +1101,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.findAuditDate = function (table, callback) {
+	client.findAuditDate = function(table, callback) {
 		client.query(`select to_char(max(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as max FROM ${client.escapeId(table)}`, (err, auditdate) => {
 			if (err) {
 				callback(err);
@@ -782,7 +1118,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.exportChanges = function (table, fields, remoteAuditdate, opts, callback) {
+	client.exportChanges = function(table, fields, remoteAuditdate, opts, callback) {
 		let auditdateCompare = remoteAuditdate.auditdate != null ? `${columnConfig._auditdate} >= ${client.escapeValue(remoteAuditdate.auditdate)}` : `${columnConfig._auditdate} is null`;
 		client.query(`select count(*) as count FROM ${client.escapeId(table)} WHERE ${auditdateCompare}`, (err, result) => {
 			if (err) {
@@ -801,7 +1137,7 @@ module.exports = function (config, columnConfig) {
 			client.query(`select to_char(min(${columnConfig._auditdate}), 'YYYY-MM-DD HH24:MI:SS') as oldest, count(*) as count
         FROM ${client.escapeId(table)}
         ${where}
-        `, (err, result) => {
+	`, (err, result) => {
 				if (err) {
 					callback(err);
 				}
@@ -850,7 +1186,7 @@ module.exports = function (config, columnConfig) {
 		});
 	};
 
-	client.importChanges = function (file, table, fields, opts, callback) {
+	client.importChanges = function(file, table, fields, opts, callback) {
 		if (typeof opts === 'function') {
 			callback = opts;
 			opts = {};
@@ -911,16 +1247,16 @@ module.exports = function (config, columnConfig) {
 				}
 			});
 		}
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`insert into ${tableName} select * from ${qualifiedStagingTable}`, done);
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`select count(*) from ${qualifiedStagingTable}`, (err, result) => {
 				loadCount = result && parseInt(result[0].count);
 				done(err);
 			});
 		});
-		tasks.push(function (done) {
+		tasks.push(function(done) {
 			client.query(`drop table if exists ${qualifiedStagingTable}`, done);
 		});
 		async.series(tasks, (err) => {

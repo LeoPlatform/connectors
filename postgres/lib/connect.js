@@ -11,13 +11,15 @@ var copyFrom = require('pg-copy-streams').from;
 var copyTo = require('pg-copy-streams').to;
 let csv = require('fast-csv');
 
+// need to confirm there is no issue adding these dependencies
+const leo = require('leo-sdk');
+const ls = leo.streams;
+
 require('pg').types.setTypeParser(1114, (val) => {
 	val += 'Z';
 	logger.debug(val);
 	return moment(val).unix() + '  ' + moment(val).utc().format();
 });
-
-const ls = require('leo-sdk').streams;
 
 let queryCount = 0;
 module.exports = function (config) {
@@ -571,8 +573,176 @@ function create (pool, parentCache) {
 				records: opts.records,
 			});
 		},
-		streamToTableFromS3: () => {
-			// opts = Object.assign({}, opts || {});
+		streamToTableFromS3: (table, config) => {
+			const ts = table.split('.');
+			let schema = 'public';
+			let shortTable = table;
+			if (ts.length > 1) {
+				schema = ts[0];
+				shortTable = ts[1];
+			}
+
+			let columns = [];
+			let stream;
+			let myClient = null;
+			let pending = null;
+			let ended = false;
+			let csvopts = { delimiter: '|' };
+			let keepS3Files = config.keepS3Files != null ? config.keepS3Files : false;
+
+			// Get prefix for S3 file path
+			let s3prefix =
+					config.s3prefix ||
+					process.env.AWS_LAMBDA_FUNCTION_NAME ||
+					'dw_redshift_ingest';
+			s3prefix = s3prefix.replace(/^\/*(.*?)\/*$/, '$1'); // Remove leading and trailing '/'
+
+			// clean audit date to use in S3 file path
+			let cleanAuditDate = client.auditdate
+				.replace(/'/g, '')
+				.replace(/:/g, '-');
+			let s3FileName = `files/${s3prefix}/${cleanAuditDate}/${table}.csv`;
+
+			client.connect().then(
+				c => {
+					client
+						.describeTable(shortTable, schema)
+						.then(result => {
+							if (ended) {
+								c.release(true);
+								return;
+							}
+							columns = result.map(f => f.column_name);
+							myClient = c;
+
+							stream = ls.toS3(leo.configuration.resources.LeoS3, s3FileName);
+							// copyFrom uses `end` but s3 `finish` so pipe finish to end
+							stream.on('finish', () => stream.emit('end'));
+
+							stream.on('error', function(err) {
+								logger.error(`COPY error: ${err.where}`, err);
+								process.exit();
+							});
+							if (pending) {
+								pending();
+							}
+						})
+						.catch(err => {
+							logger.error(err);
+						});
+				},
+				err => {
+					logger.error(err);
+				}
+			);
+
+			let count = 0;
+
+			function nonNull(v) {
+				if (v === '' || v === null || v === undefined) {
+					return '\\N';
+				} else if (typeof v === 'string' && (v.search(/\r/) !== -1 || v.search(/\n/) !== -1)) {
+					if (config.version !== 'redshift') {
+						return v.replace(/\r\n?/g, '\n');
+					} else {
+						return v.replace(/\r\n?/g, '\n').replace(/\n/g, `\\n`);
+					}
+				} else {
+					return v;
+				}
+			}
+
+			
+			return ls.pipeline(
+				csv.createWriteStream({
+					...csvopts,
+					headers: false,
+					transform: (row, done) => {
+						if (!myClient) {
+							pending = () => {
+								done(
+									null,
+									columns.map(f => nonNull(row[f]))
+								);
+							};
+						} else {
+							done(
+								null,
+								columns.map(f => nonNull(row[f]))
+							);
+						}
+					},
+				}),
+				ls.write(
+					(r, done) => {
+						count++;
+						if (count % 10000 === 0) {
+							logger.info(table + ': ' + count);
+						}
+						if (!stream.write(r)) {
+							stream.once('drain', done);
+						} else {
+							done(null);
+						}
+					},
+					done => {
+						ended = true;
+						logger.debug(table + ': stream done');
+						if (stream) {
+							stream.on('end', err => {
+								logger.debug(table + ': stream ended', err || '');
+
+								// wrap done callback to release the connection
+								function innerDone(err) {
+									myClient.release(true);
+									logger.debug(table + ': stream client released', err || '');
+									done(err);
+								}
+
+								if (err) {
+									innerDone(err);
+								} else {
+									// Once the S3 file is complete run copy to load the staging table
+									let f = columns.map(f => `"${f}"`);
+									let file = `s3://${leo.configuration.s3}/${s3FileName}`;
+									let manifest = '';
+									let role = config.loaderRole;
+									myClient.query(
+										`copy ${table} (${f}) from '${file}' ${manifest} ${role ? `credentials 'aws_iam_role=${role}'` : ''
+										} NULL AS '\\\\N' format csv DELIMITER '|' ACCEPTINVCHARS TRUNCATECOLUMNS ACCEPTANYDATE TIMEFORMAT 'auto' COMPUPDATE OFF`,
+										copyErr => {
+											if (keepS3Files) {
+												innerDone(copyErr);
+											} else {
+												// Delete the S3 files when done
+												ls.s3.deleteObject(
+													{
+														Bucket: leo.configuration.s3,
+														Key: s3FileName,
+													},
+													deleteError => {
+														if (deleteError) {
+															logger.info(
+																'file failed to delete:',
+																s3FileName,
+																deleteError
+															);
+														}
+														innerDone(copyErr);
+													}
+												);
+											}
+										}
+									);
+								} 
+							});
+							stream.end();
+						} else {
+							done();
+						}
+					}
+				)
+			);
 		},
 	};
 
