@@ -20,8 +20,8 @@
 	"dependencies": {
 		"fast-csv": "2.4.1",
 		"leo-connector-common": "^5.0.0-awsv3",
-		"pg": "7.8.2",
-		"pg-copy-streams": "1.2.0",
+		"pg": "^8.1.5",
+    "pg-copy-streams": "1.2.0",
 		"pg-native": "3.0.0",
 		"pg-format": "1.0.4"
 	},
