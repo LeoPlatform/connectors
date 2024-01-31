@@ -1,19 +1,34 @@
 'use strict';
+const { callbackify } = require("util");
 
 const async = require('async');
-const elasticsearch = require('elasticsearch');
+//const elasticsearch = require('elasticsearch');
+const elasticsearch = require('@elastic/elasticsearch');
+const { createConnector } = require('aws-elasticsearch-js');
+const createAwsElasticsearchConnector = require("../lib/aws-es-connector");
+
+const { defaultProvider } = require('@aws-sdk/credential-provider-node'); // V3 SDK.
+const { Client } = require('@opensearch-project/opensearch');
+const { AwsSigv4Signer } = require('@opensearch-project/opensearch/aws');
+
+
+const { fromNodeProviderChain } = require("@aws-sdk/credential-providers");
+
 const https = require('https');
 const logger = require('leo-logger')('leo.connector.elasticsearch');
 const moment = require('moment');
 const refUtil = require('leo-sdk/lib/reference.js');
 const leo = require('leo-sdk');
-const ls = require('leo-streams');
+//const ls = require('leo-streams');
+const ls = leo.streams;
+
+const { NodeHttpHandler } = require('@aws-sdk/node-http-handler');
 const s3 = require('leo-aws/factory')('S3', {
-	httpOptions: {
-		agent: new https.Agent({
-			keepAlive: true,
-		}),
-	},
+	requestHandler: new NodeHttpHandler({
+		httpsAgent: new https.Agent({
+			keepAlive: true
+		})
+	}),
 })._service;
 
 /**
@@ -22,7 +37,7 @@ const s3 = require('leo-aws/factory')('S3', {
  * @param region
  * @returns {({search} & {disconnect: m.disconnect, streamToTableFromS3: m.streamToTableFromS3, queryWithScroll: (function(*, *=): Promise<unknown>), describeTable: m.describeTable, stream: (function(*=)), streamToTableBatch: (function(*=): *), query: m.query, getIds: m.getIds, describeTables: m.describeTables, streamParallel: (function(*=)), streamToTable: (function(*=): *)}) | any}
  */
-module.exports = function (clientConfigHost, region) {
+module.exports = function(clientConfigHost, region) {
 	// elasticsearch client
 	let m;
 	let config;
@@ -38,18 +53,54 @@ module.exports = function (clientConfigHost, region) {
 		}
 
 		if (region) {
-			const aws = require('aws-sdk');
-			config.awsConfig = new aws.Config({
+			config.awsConfig = {
 				region,
-			});
+			};
 		}
 
-		m = elasticsearch.Client(Object.assign({
-			apiVersion: '7.0',
-			connectionClass: require('http-aws-es'),
-			timeout: '1000000m',
-		}, config));
+		config.awsConfig = config.awsConfig || {}
+		if (config.host && !config.node) {
+			config.node = config.host;
+		}
+
+		// m = new elasticsearch.Client({
+		// 	...createAwsElasticsearchConnector({
+		// 		...config.awsConfig,
+		// 		esVersion: "7"
+		// 	}),
+		// 	...config
+		// });
+
+		m = new Client({
+			...AwsSigv4Signer({
+				region: config.awsConfig.region || 'us-east-1',
+				service: 'es', // 'aoss' for OpenSearch Serverless
+				// Must return a Promise that resolve to an AWS.Credentials object.
+				// This function is used to acquire the credentials when the client start and
+				// when the credentials are expired.
+				// The Client will treat the Credentials as expired if within
+				// `requestTimeout` ms of expiration (default is 30000 ms).
+
+				// Example with AWS SDK V3:
+				getCredentials: () => {
+					// Any other method to acquire a new Credentials object can be used.
+					const credentialsProvider = defaultProvider();
+					return credentialsProvider();
+				},
+			}),
+			...config
+		});
 	}
+
+	Object.getOwnPropertyNames(m).forEach(n => {
+		console.log("client attr:", n, typeof m[n]);
+	})
+
+	["search", "bulk", "scroll"].forEach(fnName => {
+		let fn = m[fnName].bind(m);
+		m[fnName] = (...args) => fn(...args).then(r => r.body || r)
+		m[`${fnName}Cb`] = callbackify(m[fnName]).bind(m);
+	});
 
 	let queryCount = 0;
 	let client = Object.assign(m, {
@@ -80,7 +131,7 @@ module.exports = function (clientConfigHost, region) {
 				}
 			});
 		},
-		query: function (query, params, callback) {
+		query: function(query, params, callback) {
 			if (!callback) {
 				callback = params;
 				params = null;
@@ -89,7 +140,7 @@ module.exports = function (clientConfigHost, region) {
 			let log = logger.sub('query');
 			log.info(`Elasticsearch query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
-			m.search(query, function (err, result) {
+			m.searchCb(query, function(err, result) {
 				let fields = {};
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
@@ -122,7 +173,7 @@ module.exports = function (clientConfigHost, region) {
 			let scroll = data.scroll;
 
 			return new Promise((resolve, reject) => {
-				function getUntilDone (err, data) {
+				function getUntilDone(err, data) {
 					if (err) {
 						logger.error(err);
 						if (callback) {
@@ -155,7 +206,7 @@ module.exports = function (clientConfigHost, region) {
 					}
 
 					if (scroll && info.total !== results.qty && max > results.qty && results.scrollid) {
-						client.scroll({
+						client.scrollCb({
 							scroll,
 							scrollId: data._scroll_id,
 						}, getUntilDone);
@@ -171,7 +222,7 @@ module.exports = function (clientConfigHost, region) {
 
 				if (data.scrollid) {
 					logger.debug('Starting As Scroll');
-					client.scroll({
+					client.scrollCb({
 						scroll,
 						scrollId: data.scrollid,
 					}, getUntilDone);
@@ -192,16 +243,16 @@ module.exports = function (clientConfigHost, region) {
 						type: data.type,
 					};
 					logger.debug(JSON.stringify(searchObj, null, 2));
-					client.search(searchObj, getUntilDone);
+					client.searchCb(searchObj, getUntilDone);
 				}
 			});
 		},
 		disconnect: () => {
 		},
-		describeTable: function (table, callback) {
+		describeTable: function(table, callback) {
 			throw new Error('Not Implemented');
 		},
-		describeTables: function (callback) {
+		describeTables: function(callback) {
 			throw new Error('Not Implemented');
 		},
 		stream: (settings) => {
@@ -210,7 +261,7 @@ module.exports = function (clientConfigHost, region) {
 			let fileCount = 0;
 			let format = ls.through({
 				highWaterMark: 16,
-			}, function (event, done) {
+			}, function(event, done) {
 				let data = event.payload || event;
 
 				if (!data || !data.index || (requireType && !data.type) || !data.id) {
@@ -219,13 +270,13 @@ module.exports = function (clientConfigHost, region) {
 					return;
 				}
 				deleteByQuery(this, client, event, data, done);
-			}, function flush (callback) {
+			}, function flush(callback) {
 				logger.debug('Transform: On Flush');
 				callback();
 			});
 
-			format.push = (function (self, push) {
-				return function (meta, command, data) {
+			format.push = (function(self, push) {
+				return function(meta, command, data) {
 					if (meta == null) {
 						push.call(self, null);
 						return;
@@ -264,11 +315,11 @@ module.exports = function (clientConfigHost, region) {
 						}));
 						return;
 					}
-					client.bulk({
+					client.bulkCb({
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
-					}, function (err, data) {
+					}, function(err, data) {
 						if (err || data.errors) {
 							if (data && data.Message) {
 								err = data.Message;
@@ -315,7 +366,7 @@ module.exports = function (clientConfigHost, region) {
 				} else {
 					done();
 				}
-			}, function flush (callback) {
+			}, function flush(callback) {
 				logger.debug('Elasticsearch Upload: On Flush');
 				callback();
 			});
@@ -341,7 +392,7 @@ module.exports = function (clientConfigHost, region) {
 			let fileCount = 0;
 			let format = ls.through({
 				highWaterMark: 16,
-			}, function (event, done) {
+			}, function(event, done) {
 				let data = event.payload || event;
 
 				if (!data || !data.index || (requireType && !data.type) || data.id == undefined) {
@@ -350,13 +401,13 @@ module.exports = function (clientConfigHost, region) {
 					return;
 				}
 				deleteByQuery(this, client, event, data, done);
-			}, function flush (callback) {
+			}, function flush(callback) {
 				logger.debug('Transform: On Flush');
 				callback();
 			});
 
-			format.push = (function (self, push) {
-				return function (meta, command, data) {
+			format.push = (function(self, push) {
+				return function(meta, command, data) {
 					if (meta == null) {
 						push.call(self, null);
 						return;
@@ -378,7 +429,7 @@ module.exports = function (clientConfigHost, region) {
 			let toSend = [];
 			let firstStart = Date.now();
 
-			let sendFunc = function (done) {
+			let sendFunc = function(done) {
 				let cnt = 0;
 				let batchCnt = 0;
 				lastDuration = 0;
@@ -407,11 +458,11 @@ module.exports = function (clientConfigHost, region) {
 					}
 					logger.time(index + 'es_emit');
 					logger.time(index + 'es_bulk');
-					client.bulk({
+					client.bulkCb({
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
-					}, function (err, data) {
+					}, function(err, data) {
 						logger.timeEnd(index + 'es_bulk');
 						logger.info(index, !err && data.took);
 
@@ -486,7 +537,7 @@ module.exports = function (clientConfigHost, region) {
 			};
 			let send = ls.through({
 				highWaterMark: 16,
-			}, function (input, done) {
+			}, function(input, done) {
 				if (input.payload && input.payload.length) {
 					toSend.push(input);
 					if (toSend.length >= parallelLimit) {
@@ -496,14 +547,14 @@ module.exports = function (clientConfigHost, region) {
 				}
 				done();
 			},
-			function flush (callback) {
-				logger.debug('Elasticsearch Upload: On Flush');
-				if (toSend.length) {
-					sendFunc.call(this, callback);
-				} else {
-					callback();
-				}
-			});
+				function flush(callback) {
+					logger.debug('Elasticsearch Upload: On Flush');
+					if (toSend.length) {
+						sendFunc.call(this, callback);
+					} else {
+						callback();
+					}
+				});
 
 			const bufferOpts = (typeof (settings.buffer) === 'object') ? settings.buffer : {
 				records: settings.buffer,
@@ -519,10 +570,10 @@ module.exports = function (clientConfigHost, region) {
 			});
 			return ls.pipeline(format, batchStream, send);
 		},
-		streamToTableFromS3: function (table, opts) {
+		streamToTableFromS3: function(table, opts) {
 			throw new Error('Not Implemented');
 		},
-		streamToTableBatch: function (opts) {
+		streamToTableBatch: function(opts) {
 			opts = Object.assign({
 				records: 1000
 			}, opts || {});
@@ -547,11 +598,11 @@ module.exports = function (clientConfigHost, region) {
 					return cmd + doc;
 				}).join('');
 
-				client.bulk({
+				client.bulkCb({
 					body: body,
 					fields: false,
 					_source: false
-				}, function (err, data) {
+				}, function(err, data) {
 					if (err || data.errors) {
 						if (data && data.Message) {
 							err = data.Message;
@@ -573,7 +624,7 @@ module.exports = function (clientConfigHost, region) {
 				records: opts.records
 			});
 		},
-		streamToTable: function (opts) {
+		streamToTable: function(opts) {
 			opts = Object.assign({
 				records: 1000
 			}, opts || {});
@@ -583,7 +634,7 @@ module.exports = function (clientConfigHost, region) {
 	return client;
 };
 
-function deleteByQuery (context, client, event, data, callback) {
+function deleteByQuery(context, client, event, data, callback) {
 	let meta = Object.assign({}, event);
 	delete meta.payload;
 	const deleteByQuery = [];
