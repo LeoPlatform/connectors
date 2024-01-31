@@ -19,7 +19,7 @@
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
 		"fast-csv": "2.4.1",
-		"leo-connector-common": "^^5.0.0-awsv3",
+		"leo-connector-common": "^5.0.0-awsv3",
 		"pg": "^8.11.3",
 		"pg-copy-streams": "2.2.2",
 		"pg-format": "1.0.4",
