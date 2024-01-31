@@ -2,17 +2,10 @@
 const { callbackify } = require("util");
 
 const async = require('async');
-//const elasticsearch = require('elasticsearch');
-const elasticsearch = require('@elastic/elasticsearch');
-const { createConnector } = require('aws-elasticsearch-js');
-const createAwsElasticsearchConnector = require("../lib/aws-es-connector");
 
 const { defaultProvider } = require('@aws-sdk/credential-provider-node'); // V3 SDK.
 const { Client } = require('@opensearch-project/opensearch');
 const { AwsSigv4Signer } = require('@opensearch-project/opensearch/aws');
-
-
-const { fromNodeProviderChain } = require("@aws-sdk/credential-providers");
 
 const https = require('https');
 const logger = require('leo-logger')('leo.connector.elasticsearch');

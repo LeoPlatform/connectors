@@ -21,7 +21,7 @@
 		"async": "2.6.3",
 		"backoff": "2.5.0",
 		"js-beautify": "1.10.2",
-		"leo-aws": "^4.0.0-awsv4",
+		"leo-aws": "^4.0.0-awsv3",
 		"leo-logger": "1.0.1"
 	},
 	"devDependencies": {
