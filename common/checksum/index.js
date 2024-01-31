@@ -1,5 +1,5 @@
 let leo = require("leo-sdk");
-const { Lambda } = require("@aws-sdk/client-lambda");
+const aws = require("aws-sdk");
 const checksum = require("./lib/checksumNibbler.js");
 const leoaws = require('leo-aws');
 let cron = leo.bot;
@@ -271,18 +271,17 @@ module.exports = {
 									lastUpdate: moment.now(),
 									status: status,
 									statusReason: err ? err.toString() : stopReason
-								}))
-								.then(result => {
-									async.parallel(tasks, (err, data) => {
-										if (err) {
-											reject(err);
-										} else {
-											resolve(session);
-										}
-									});
-								}, err => {
-									reject(err);
+								})).then(result => {
+								async.parallel(tasks, (err, data) => {
+									if (err) {
+										reject(err);
+									} else {
+										resolve(session);
+									}
 								});
+							}, err => {
+								reject(err);
+							});
 						});
 					});
 				}, logError);
@@ -291,7 +290,7 @@ module.exports = {
 	},
 	lambdaConnector: function(id, lambdaName, settings) {
 		let region = (lambdaName.match(/arn:aws:lambda:(.*?):/) || [])[1];
-		const lambdaInvoker = new Lambda({
+		const lambdaInvoker = new aws.Lambda({
 			region: region || this.configuration._meta.region,
 			credentials: this.configuration ? this.configuration.credentials : null
 		});
@@ -568,7 +567,7 @@ module.exports = {
 		let session = null;
 
 		function invoke(method, func) {
-			func = func || ((d) => { });
+			func = func || ((d) => {});
 			return (data) => {
 				return new Promise((resolve, reject) => {
 					//logger.log(method, data)

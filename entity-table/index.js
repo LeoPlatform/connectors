@@ -6,7 +6,7 @@ let refUtil = require("leo-sdk/lib/reference.js");
 let merge = require("lodash.merge");
 var backoff = require("backoff");
 var async = require("async");
-const { unmarshall } = require("@aws-sdk/util-dynamodb");
+let aws = require("aws-sdk");
 const zlib = require('zlib');
 
 const GZIP_MIN = 5000;
@@ -183,7 +183,7 @@ module.exports = {
 		});
 	},
 	tableOldNewProcessor: function(optionsIn) {
-		let options = Object.assign({ kinesisBatchLimit: 200 }, optionsIn);
+		let options = Object.assign({ kinesisBatchLimit: 200}, optionsIn);
 		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
@@ -202,7 +202,7 @@ module.exports = {
 				logger.info(`using Kinesis for batchSize of ${batchSize}`);
 				localReadOpts.useS3 = false;
 			}
-
+			
 			let index = 0;
 			let defaultQueue = options.defaultQueue || "Unknown";
 			let resourcePrefix = sanitizePrefix(options.resourcePrefix);
@@ -218,7 +218,7 @@ module.exports = {
 				return streams[key];
 			};
 			async.doWhilst(
-				function(done) {
+				function (done) {
 					let record = event.Records[index];
 					let data = {
 						correlation_id: {
@@ -236,7 +236,7 @@ module.exports = {
 					};
 					let eventPrefix = resourcePrefix;
 					if ("OldImage" in record.dynamodb) {
-						let image = unmarshall(record.dynamodb.OldImage);
+						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.OldImage);
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
@@ -251,7 +251,7 @@ module.exports = {
 						}
 					}
 					if ("NewImage" in record.dynamodb) {
-						let image = unmarshall(record.dynamodb.NewImage);
+						let image = aws.DynamoDB.Converter.unmarshall(record.dynamodb.NewImage);
 
 						if (image.compressedData) {
 							// compressedData contains everything including hash/range
@@ -445,7 +445,8 @@ function toDynamoDB(table, opts) {
 							[table]: myRecords
 						},
 						"ReturnConsumedCapacity": 'TOTAL'
-					}, function(err, data) {
+					},
+					function(err, data) {
 						if (err) {
 							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
 							logger.error(myRecords);
