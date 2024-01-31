@@ -1,6 +1,4 @@
 'use strict';
-const { callbackify } = require("util");
-
 const async = require('async');
 
 const { defaultProvider } = require('@aws-sdk/credential-provider-node'); // V3 SDK.
@@ -12,7 +10,6 @@ const logger = require('leo-logger')('leo.connector.elasticsearch');
 const moment = require('moment');
 const refUtil = require('leo-sdk/lib/reference.js');
 const leo = require('leo-sdk');
-//const ls = require('leo-streams');
 const ls = leo.streams;
 
 const { NodeHttpHandler } = require('@aws-sdk/node-http-handler');
@@ -56,44 +53,44 @@ module.exports = function(clientConfigHost, region) {
 			config.node = config.host;
 		}
 
-		// m = new elasticsearch.Client({
-		// 	...createAwsElasticsearchConnector({
-		// 		...config.awsConfig,
-		// 		esVersion: "7"
-		// 	}),
-		// 	...config
-		// });
+		let awsSigner = AwsSigv4Signer({
+			region: config.awsConfig.region || 'us-east-1',
+			service: 'es', // 'aoss' for OpenSearch Serverless
+			// Must return a Promise that resolve to an AWS.Credentials object.
+			// This function is used to acquire the credentials when the client start and
+			// when the credentials are expired.
+			// The Client will treat the Credentials as expired if within
+			// `requestTimeout` ms of expiration (default is 30000 ms).
+
+			// Example with AWS SDK V3:
+			getCredentials: () => {
+				// Any other method to acquire a new Credentials object can be used.
+				const credentialsProvider = defaultProvider();
+				return credentialsProvider();
+			},
+		});
+
+
+		// Inject a wrapper that returns response.body instead of response
+		// This is how the previous sdk worked so we want to preserve it
+		if (!config.returnFullResponse) {
+			let req = awsSigner.Transport.prototype.request;
+			awsSigner.Transport.prototype.request = function(params, options = {}, callback = undefined) {
+				if (callback) {
+					return req.call(this, params, options, (err, response) => {
+						callback(err, response ? (response.body || response) : response);
+					});
+				} else {
+					return req.call(this, params, options).then(response => response.body || response)
+				}
+			};
+		}
 
 		m = new Client({
-			...AwsSigv4Signer({
-				region: config.awsConfig.region || 'us-east-1',
-				service: 'es', // 'aoss' for OpenSearch Serverless
-				// Must return a Promise that resolve to an AWS.Credentials object.
-				// This function is used to acquire the credentials when the client start and
-				// when the credentials are expired.
-				// The Client will treat the Credentials as expired if within
-				// `requestTimeout` ms of expiration (default is 30000 ms).
-
-				// Example with AWS SDK V3:
-				getCredentials: () => {
-					// Any other method to acquire a new Credentials object can be used.
-					const credentialsProvider = defaultProvider();
-					return credentialsProvider();
-				},
-			}),
-			...config
+			...awsSigner,
+			...config,
 		});
 	}
-
-	Object.getOwnPropertyNames(m).forEach(n => {
-		console.log("client attr:", n, typeof m[n]);
-	})
-
-	["search", "bulk", "scroll"].forEach(fnName => {
-		let fn = m[fnName].bind(m);
-		m[fnName] = (...args) => fn(...args).then(r => r.body || r)
-		m[`${fnName}Cb`] = callbackify(m[fnName]).bind(m);
-	});
 
 	let queryCount = 0;
 	let client = Object.assign(m, {
@@ -133,7 +130,7 @@ module.exports = function(clientConfigHost, region) {
 			let log = logger.sub('query');
 			log.info(`Elasticsearch query #${queryId} is `, query);
 			log.time(`Ran Query #${queryId}`);
-			m.searchCb(query, function(err, result) {
+			m.search(query, function(err, result) {
 				let fields = {};
 				log.timeEnd(`Ran Query #${queryId}`);
 				if (err) {
@@ -199,7 +196,7 @@ module.exports = function(clientConfigHost, region) {
 					}
 
 					if (scroll && info.total !== results.qty && max > results.qty && results.scrollid) {
-						client.scrollCb({
+						client.scroll({
 							scroll,
 							scrollId: data._scroll_id,
 						}, getUntilDone);
@@ -215,7 +212,7 @@ module.exports = function(clientConfigHost, region) {
 
 				if (data.scrollid) {
 					logger.debug('Starting As Scroll');
-					client.scrollCb({
+					client.scroll({
 						scroll,
 						scrollId: data.scrollid,
 					}, getUntilDone);
@@ -236,7 +233,7 @@ module.exports = function(clientConfigHost, region) {
 						type: data.type,
 					};
 					logger.debug(JSON.stringify(searchObj, null, 2));
-					client.searchCb(searchObj, getUntilDone);
+					client.search(searchObj, getUntilDone);
 				}
 			});
 		},
@@ -308,7 +305,7 @@ module.exports = function(clientConfigHost, region) {
 						}));
 						return;
 					}
-					client.bulkCb({
+					client.bulk({
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
@@ -451,7 +448,7 @@ module.exports = function(clientConfigHost, region) {
 					}
 					logger.time(index + 'es_emit');
 					logger.time(index + 'es_bulk');
-					client.bulkCb({
+					client.bulk({
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
@@ -591,7 +588,7 @@ module.exports = function(clientConfigHost, region) {
 					return cmd + doc;
 				}).join('');
 
-				client.bulkCb({
+				client.bulk({
 					body: body,
 					fields: false,
 					_source: false
