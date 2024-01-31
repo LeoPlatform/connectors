@@ -11,10 +11,7 @@
 	"dependencies": {
 		"@aws-sdk/credential-provider-node": "^3.490.0",
 		"@aws-sdk/credential-providers": "^3.490.0",
-		"@elastic/elasticsearch": "^8.11.0",
 		"@opensearch-project/opensearch": "^2.5.0",
-		"aws-elasticsearch-connector": "^9.2.0",
-		"aws-elasticsearch-js": "^1.0.3",
 		"leo-aws": "^4.0.0-awsv3",
 		"leo-connector-common": "^5.0.0-awsv3",
 		"leo-sdk": "^7.1.0-awsv3"
