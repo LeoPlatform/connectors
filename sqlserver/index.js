@@ -1,20 +1,13 @@
 "use strict";
 const connect = require("./lib/connect.js");
-const checksum = require("./lib/checksum.js");
 const logger = require("leo-logger")("sqlserver");
 const PassThrough = require("stream").PassThrough;
-const parent = require('leo-connector-common/base');
+const checksum = require('./lib/checksum');
 
-class connector extends parent {
-	constructor() {
-		super({
-			connect: connect,
-			checksum: checksum,
-		});
-	}
-
-	streamChanges(config, opts = {}) {
-		let client = this.connect(config);
+let modules = {
+    checksum,
+	streamChanges: async (config, opts = {}) => {
+		let client = await connect(config);
 
 		let stream = new PassThrough({
 			objectMode: true
@@ -71,48 +64,45 @@ class connector extends parent {
 		});
 
 		let changeQuery = sqlTables.join(" UNION ") + ` order by SYS_CHANGE_VERSION asc, ${order}`;
-		client.query(changeQuery, (err, result) => {
-			logger.log(changeQuery);
-			if (!err) {
-				result.forEach(r => {
-					let tableName = r.tableName;
-					let sys_change_version = r.__SYS_CHANGE_VERSION;
-					delete r.tableName;
-					delete r.__SYS_CHANGE_VERSION;
+		let result = await client.query(changeQuery);
 
-					if (!obj.payload[tableName]) {
-						obj.payload[tableName] = [];
-					}
+		logger.debug('Query Result', result);
 
-					let eid = `${sys_change_version}.`;
-					let payload;
-					if (Object.keys(r).length > 1) {
-						eid += opts.tables[tableName].map(field => r[field]).join('.');
-						payload = r;
-					} else {
-						eid += r[opts.tables[tableName]];
-						payload = r[opts.tables[tableName]];
-					}
+        result && result.recordset && result.recordset.length && result.recordset.forEach(r => {
+            let tableName = r.tableName;
+            let sys_change_version = r.__SYS_CHANGE_VERSION;
+            delete r.tableName;
+            delete r.__SYS_CHANGE_VERSION;
 
-					obj.correlation_id.units++;
-					obj.correlation_id.start = obj.correlation_id.start || eid;
-					obj.correlation_id.end = eid;
-					obj.eid = eid;
-					obj.payload[tableName].push(payload);
-				});
+            if (!obj.payload[tableName]) {
+                obj.payload[tableName] = [];
+            }
 
-				if (obj.correlation_id.units > 0) {
-					stream.write(obj);
-				}
-			} else {
-				console.log(err);
-			}
+            let eid = `${sys_change_version}.`;
+            let payload;
+            if (Object.keys(r).length > 1) {
+                eid += opts.tables[tableName].map(field => r[field]).join('.');
+                payload = r;
+            } else {
+                eid += r[opts.tables[tableName]];
+                payload = r[opts.tables[tableName]];
+            }
 
-			stream.end();
-		}, {inRowMode: false});
+            obj.correlation_id.units++;
+            obj.correlation_id.start = obj.correlation_id.start || eid;
+            obj.correlation_id.end = eid;
+            obj.eid = eid;
+            obj.payload[tableName].push(payload);
+        });
+
+        if (obj.correlation_id.units > 0) {
+            stream.write(obj);
+        }
+
+        stream.end();
 
 		return stream;
 	}
-}
+};
 
-module.exports = new connector;
+module.exports = modules;
