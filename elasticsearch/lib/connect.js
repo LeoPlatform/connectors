@@ -54,7 +54,7 @@ module.exports = function(clientConfigHost, region) {
 		}
 
 		let awsSigner = AwsSigv4Signer({
-			region: config.awsConfig.region || 'us-east-1',
+			region: config.awsConfig.region || process.env.AWS_REGION || 'us-east-1',
 			service: 'es', // 'aoss' for OpenSearch Serverless
 			// Must return a Promise that resolve to an AWS.Credentials object.
 			// This function is used to acquire the credentials when the client start and
