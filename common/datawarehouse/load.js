@@ -360,6 +360,7 @@ function handleFailedValidation (ID, source, eventObj, error) {
 	logger.debug('Adding failed event', eventObj);
 	// write the error to the payload so it gets passed on
 	eventObj.payload.error = error;
+	eventObj.payload.source_id = eventObj.id;
 	errorStream.write(eventObj);
 
 	return true;
