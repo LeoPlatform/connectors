@@ -17,7 +17,7 @@
 	},
 	"homepage": "https://github.com/LeoPlatform/connectors#readme",
 	"dependencies": {
-		"leo-connector-common": "3.0.5",
+		"leo-connector-common": "4.0.6",
 		"oracledb": "2.3.0"
 	},
 	"config": {
