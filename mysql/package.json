@@ -19,7 +19,7 @@
   "dependencies": {
     "chai": "4.2.0",
     "leo-connector-common": "4.0.6",
-    "mysql2": "1.6.5",
+    "mysql2": "1.7.0",
     "zongji": "0.4.7"
   },
   "config": {
