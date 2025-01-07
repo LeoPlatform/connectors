@@ -399,7 +399,7 @@ module.exports = {
 									await ls.s3.deleteObject({
 										Bucket: file.bucket,
 										Key: file.key,
-									}).promise();
+									});
 								} catch (e) {
 									logger.error(e);
 								}
