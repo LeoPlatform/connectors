@@ -137,13 +137,14 @@ module.exports = {
 			ls.through((payload, done) => {
 				// check size
 				const origPayload = payload;
-				let size = Buffer.byteLength(JSON.stringify(payload));
+				const origPayloadStr = JSON.stringify(payload);
+				let size = Buffer.byteLength(origPayloadStr);
 
 				if (size > GZIP_MIN) {
 					let compressedObj = {
 						[opts.range]: origPayload[opts.range],
 						[opts.hash]: origPayload[opts.hash],
-						compressedData: self.deflate(JSON.stringify(origPayload)),
+						compressedData: self.deflate(origPayloadStr),
 					};
 					payload = compressedObj;
 					if (payload.compressedData.length > DYNAMODB_MAX_SIZE) {
@@ -157,7 +158,7 @@ module.exports = {
 								file,
 							},
 						};
-						return ls.pipe(stream.Readable.from(JSON.stringify(origPayload)), ls.toS3(s3Object.s3.bucket, file), (err) => {
+						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object.s3.bucket, file), (err) => {
 							if (err) {
 								return done(err);
 							}
