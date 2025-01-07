@@ -397,24 +397,32 @@ module.exports = {
 						if (err) {
 							callback(err);
 						} else {
-							await new Promise((resolve, reject) => {
-								async.parallelLimit(oldS3Files.map(async (file) => {
-									try {
-										await ls.s3.deleteObject({
-											Bucket: file.bucket,
-											Key: file.key,
-										}).promise();
-									} catch (e) {
-										logger.error(e);
-									}
-								}), 10, (err, results) => {
-									if (err) {
-										reject(err);
-									} else {
-										resolve(results);
-									}
+							try {
+
+								await new Promise((resolve, reject) => {
+									async.parallelLimit(oldS3Files.map((file) => {
+										return async function() {
+											try {
+												await ls.s3.deleteObject({
+													Bucket: file.bucket,
+													Key: file.key,
+												}).promise();
+											} catch (e) {
+												logger.error(e);
+											}
+										};
+									}), 10, (err, results) => {
+										if (err) {
+											reject(err);
+										} else {
+											resolve(results);
+										}
+									});
 								});
-							});
+							} catch (e) {
+								logger.info('not all S3 files could be removed');
+								logger.info(e);
+							}
 							callback(null, results);
 						}
 					});
