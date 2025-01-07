@@ -61,6 +61,12 @@ async function fetchFromS3(image) {
 	});
 }
 
+async function drain(stream) {
+	return new Promise((resolve) => {
+		stream.once("drain", () => resolve());
+	});
+}
+
 module.exports = {
 	/**
 	 * Expects a string, deflates it, and converts it to base64
@@ -141,7 +147,7 @@ module.exports = {
 					};
 					payload = compressedObj;
 					if (payload.compressedData.length > DYNAMODB_MAX_SIZE) {
-						const file = `files/dynamodb/account/${origPayload[opts.hash]}/${uuid.v1()}`;
+						const file = `files/dynamodb/${table}/${origPayload[opts.hash]}-${origPayload[opts.range] || ''}/${uuid.v1()}.json`;
 						logger.info(`DynamoDB size limit exceeded (item size is ${payload.compressedData.length}), saving to S3 instead, bucket: ${leo.configuration.s3}, file: ${file}`);	
 						let s3Object = {
 							[opts.range]: origPayload[opts.range],
@@ -232,9 +238,11 @@ module.exports = {
 	},
 	tableOldNewProcessor: function(optionsIn) {
 		let options = Object.assign({ kinesisBatchLimit: 200}, optionsIn);
+		let transform = options.transform || ((e) => e);
 		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
+			const oldS3Files = [];
 			let batchSize = event.Records.length;
 			let filePrefix = event.Records[0].eventID;
 			logger.info(`batchSize=${batchSize}`);
@@ -297,6 +305,7 @@ module.exports = {
 								try {
 									data.payload.old = await fetchFromS3(image);
 									needsComparison = true;
+									oldS3Files.push(image._s3);
 								} catch (e) {
 									return reject(e);
 								}
@@ -342,10 +351,25 @@ module.exports = {
 
 						resolve(data);
 	
-					}).then((data) => {
+					}).then(async (data) => {
 						if (data) {
-							let stream = getStream(data.id, data.event);
-							stream.write(data) ? done() : stream.once("drain", () => done());
+							data = transform(data);
+							if (data) {
+								if (Array.isArray(data)) {
+									for (const each of data) {
+										let stream = getStream(each.id, each.event);
+										if (!stream.write(each)) {
+											await drain(stream);
+										}
+									}
+									done();
+								} else {
+									let stream = getStream(data.id, data.event);
+									stream.write(data) ? done() : stream.once("drain", () => done());	
+								}
+							} else {
+								done();
+							}
 						} else {
 							done();
 						}
@@ -368,7 +392,31 @@ module.exports = {
 								done(err);
 							});
 						};
-					}), callback);
+					}), async (err, results) => {
+						await new Promise((resolve, reject) => {
+							async.parallelLimit(oldS3Files.map(async (file) => {
+								try {
+									await ls.s3.deleteObject({
+										Bucket: file.bucket,
+										Key: file.key,
+									}).promise();
+								} catch (e) {
+									logger.error(e);
+								}
+							}), 10, (err, results) => {
+								if (err) {
+									reject(err);
+								} else {
+									resolve(results);
+								}
+							});
+						});
+						if (err) {
+							callback(err);
+						} else {
+							callback(null, results);
+						}
+					});
 				}
 			);
 		};
