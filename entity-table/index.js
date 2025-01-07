@@ -393,27 +393,27 @@ module.exports = {
 							});
 						};
 					}), async (err, results) => {
-						await new Promise((resolve, reject) => {
-							async.parallelLimit(oldS3Files.map(async (file) => {
-								try {
-									await ls.s3.deleteObject({
-										Bucket: file.bucket,
-										Key: file.key,
-									});
-								} catch (e) {
-									logger.error(e);
-								}
-							}), 10, (err, results) => {
-								if (err) {
-									reject(err);
-								} else {
-									resolve(results);
-								}
-							});
-						});
 						if (err) {
 							callback(err);
 						} else {
+							await new Promise((resolve, reject) => {
+								async.parallelLimit(oldS3Files.map(async (file) => {
+									try {
+										await ls.s3.deleteObject({
+											Bucket: file.bucket,
+											Key: file.key,
+										});
+									} catch (e) {
+										logger.error(e);
+									}
+								}), 10, (err, results) => {
+									if (err) {
+										reject(err);
+									} else {
+										resolve(results);
+									}
+								});
+							});
 							callback(null, results);
 						}
 					});
