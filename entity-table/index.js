@@ -137,13 +137,14 @@ module.exports = {
 			ls.through((payload, done) => {
 				// check size
 				const origPayload = payload;
-				let size = Buffer.byteLength(JSON.stringify(payload));
+				const origPayloadStr = JSON.stringify(payload);
+				let size = Buffer.byteLength(origPayloadStr);
 
 				if (size > GZIP_MIN) {
 					let compressedObj = {
 						[opts.range]: origPayload[opts.range],
 						[opts.hash]: origPayload[opts.hash],
-						compressedData: self.deflate(JSON.stringify(origPayload)),
+						compressedData: self.deflate(origPayloadStr),
 					};
 					payload = compressedObj;
 					if (payload.compressedData.length > DYNAMODB_MAX_SIZE) {
@@ -157,7 +158,7 @@ module.exports = {
 								file,
 							},
 						};
-						return ls.pipe(stream.Readable.from(JSON.stringify(origPayload)), ls.toS3(s3Object.s3.bucket, file), (err) => {
+						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object.s3.bucket, file), (err) => {
 							if (err) {
 								return done(err);
 							}
@@ -396,24 +397,32 @@ module.exports = {
 						if (err) {
 							callback(err);
 						} else {
-							await new Promise((resolve, reject) => {
-								async.parallelLimit(oldS3Files.map(async (file) => {
-									try {
-										await ls.s3.deleteObject({
-											Bucket: file.bucket,
-											Key: file.key,
-										});
-									} catch (e) {
-										logger.error(e);
-									}
-								}), 10, (err, results) => {
-									if (err) {
-										reject(err);
-									} else {
-										resolve(results);
-									}
+							try {
+
+								await new Promise((resolve, reject) => {
+									async.parallelLimit(oldS3Files.map((file) => {
+										return async function() {
+											try {
+												await ls.s3.deleteObject({
+													Bucket: file.bucket,
+													Key: file.key,
+												});
+											} catch (e) {
+												logger.error(e);
+											}
+										};
+									}), 10, (err, results) => {
+										if (err) {
+											reject(err);
+										} else {
+											resolve(results);
+										}
+									});
 								});
-							});
+							} catch (e) {
+								logger.info('not all S3 files could be removed');
+								logger.info(e);
+							}
 							callback(null, results);
 						}
 					});
