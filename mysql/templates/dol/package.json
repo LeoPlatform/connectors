@@ -17,13 +17,15 @@
 			"role": "ApiRole",
 			"env": {},
 			"cron": {
-				"triggers": ["mysql_changes"]
+				"triggers": [
+					"mysql_changes"
+				]
 			}
 		}
 	},
 	"dependencies": {
 		"leo-streams": ">=1.0.1",
-		"leo-sdk": ">=2.0.1",
+		"leo-sdk": ">=7.1.0-awsv3",
 		"leo-config": ">=1.0.7",
 		"leo-connector-mysql": ">=1.6.0"
 	}
