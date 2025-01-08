@@ -38,6 +38,7 @@ function hashCode(str) {
 async function fetchFromS3(image) {
 	return await new Promise((resolve, reject) => {
 		let data = '';
+		logger.info(`Fetching image from S3: ${JSON.stringify(image._s3)}`);
 		ls.pipe(
 			ls.fromS3(image._s3),
 			new stream.Writable({
@@ -155,7 +156,7 @@ module.exports = {
 							[opts.hash]: origPayload[opts.hash],
 							_s3: {
 								bucket: leo.configuration.s3,
-								file,
+								key: file,
 							},
 						};
 						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object._s3.bucket, file), (err) => {
