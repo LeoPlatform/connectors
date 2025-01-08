@@ -39,6 +39,11 @@ async function fetchFromS3(image) {
 	return await new Promise((resolve, reject) => {
 		let data = '';
 		logger.info(`Fetching image from S3: ${JSON.stringify(image._s3)}`);
+		// this is only here to get some bad data through from the first version
+		if (image._s3.file) {
+			image._s3.key = image._s3.file;
+			delete image._s3.file;
+		}
 		ls.pipe(
 			ls.fromS3(image._s3),
 			new stream.Writable({
