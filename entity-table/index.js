@@ -158,7 +158,7 @@ module.exports = {
 								file,
 							},
 						};
-						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object.s3.bucket, file), (err) => {
+						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object._s3.bucket, file), (err) => {
 							if (err) {
 								return done(err);
 							}
