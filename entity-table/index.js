@@ -39,6 +39,11 @@ async function fetchFromS3(image) {
 	return await new Promise((resolve, reject) => {
 		let data = '';
 		logger.info(`Fetching image from S3: ${JSON.stringify(image._s3)}`);
+		// this is only here to get some bad data through from the first version
+		if (image._s3.file) {
+			image._s3.key = image._s3.file;
+			delete image._s3.file;
+		}
 		ls.pipe(
 			ls.fromS3(image._s3),
 			new stream.Writable({
@@ -157,14 +162,10 @@ module.exports = {
 							_s3: {
 								bucket: leo.configuration.s3,
 								key: file,
+								origPayload: origPayloadStr,
 							},
 						};
-						return ls.pipe(stream.Readable.from(origPayloadStr), ls.toS3(s3Object._s3.bucket, file), (err) => {
-							if (err) {
-								return done(err);
-							}
-							done(null, s3Object);
-						});
+						return done(null, s3Object);
 					}
 				}
 
@@ -558,51 +559,82 @@ function toDynamoDB(table, opts) {
 			let tasks = [];
 			for (let ndx = 0; ndx < all.length; ndx += 25) {
 				let myRecords = all.slice(ndx, ndx + 25);
-				tasks.push(function(done) {
+				tasks.push(async function() {
 					let retry = {
 						backoff: (err) => {
-							done(null, {
+							return {
 								backoff: err || "error",
 								records: myRecords
-							});
+							};
 						},
 						fail: (err) => {
-							done(null, {
+							return {
 								fail: err || "error",
 								records: myRecords
-							});
+							};
 						},
 						success: () => {
-							done(null, {
+							return {
 								success: true,
 								//records: myRecords
-							});
+							};
 						}
 					};
-					leo.aws.dynamodb.docClient.batchWrite({
-						RequestItems: {
-							[table]: myRecords
-						},
-						"ReturnConsumedCapacity": 'TOTAL'
-					}, function(err, data) {
-						if (err) {
-							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
-							logger.error(myRecords);
-							if (err.retryable) {
-								retry.backoff(err);
-							} else {
-								retry.fail(err);
+					// gather all the records that are to be stored in S3 (aka, anything with a '_s3' AND '_s3.origPayload')
+					const s3Updates = myRecords.map(r => {
+						if (r.PutRequest.Item._s3 && r.PutRequest.Item._s3.origPayload) {
+							return r;
+						}
+						return null;
+					}).filter(r => !!r);
+
+					try {
+						await async.parallelLimit(s3Updates.map((r) => {
+							return async function() {
+								let s3Object = r.PutRequest.Item._s3;
+								try {
+									await new Promise((resolve, reject) => {
+										ls.pipe(stream.Readable.from(s3Object.origPayload), ls.toS3(s3Object.bucket, s3Object.key), (err) => {
+											if (err) {
+												reject(err);
+											} else {
+												delete s3Object.origPayload;
+												resolve();
+											}
+										});
+									});
+								} catch (e) {
+									logger.error(`error writing to S3 for ${s3Object.bucket}/${s3Object.key}`, e);
+									throw e;
+								}
+							};
+						}), 10);
+
+						const data = await leo.aws.dynamodb.docClient.batchWrite(
+							{
+								RequestItems: {
+									[table]: myRecords
+								},
+								"ReturnConsumedCapacity": 'TOTAL'
 							}
-						} else if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
-							//reset();
-							//data.UnprocessedItems[table].map(m => records.push(m.PutRequest.Item));
+						);
+						if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
 							myRecords = data.UnprocessedItems[table];
-							retry.backoff();
+							return retry.backoff();
 						} else {
 							logger.info(table, "saved");
-							retry.success();
+							return retry.success();
 						}
-					});
+					} catch (err) {
+						logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
+						logger.error(JSON.stringify(myRecords));
+						if (err.retryable) {
+							return retry.backoff(err);
+						} else {
+							return retry.fail(err);
+						}
+
+					}
 				});
 			}
 			getExisting((err, existing) => {
