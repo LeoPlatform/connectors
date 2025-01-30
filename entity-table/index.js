@@ -580,6 +580,7 @@ function toDynamoDB(table, opts) {
 							};
 						}
 					};
+					
 					// gather all the records that are to be stored in S3 (aka, anything with a '_s3' AND '_s3.origPayload')
 					const s3Updates = myRecords.map(r => {
 						if (r.PutRequest.Item._s3 && r.PutRequest.Item._s3.origPayload) {
@@ -589,15 +590,20 @@ function toDynamoDB(table, opts) {
 					}).filter(r => !!r);
 
 					try {
+						if (s3Updates.length > 0) {
+							logger.info(`writing ${s3Updates.length} records to S3`);
+						}
 						await async.parallelLimit(s3Updates.map((r) => {
 							return async function() {
 								let s3Object = r.PutRequest.Item._s3;
 								try {
 									await new Promise((resolve, reject) => {
+										logger.info(`writing ${s3Object.bucket}/${s3Object.key} to S3`);
 										ls.pipe(stream.Readable.from(s3Object.origPayload), ls.toS3(s3Object.bucket, s3Object.key), (err) => {
 											if (err) {
 												reject(err);
 											} else {
+												logger.info(`wrote ${s3Object.bucket}/${s3Object.key} to S3`);
 												delete s3Object.origPayload;
 												resolve();
 											}
@@ -609,6 +615,10 @@ function toDynamoDB(table, opts) {
 								}
 							};
 						}), 10);
+
+						if (s3Updates.length > 0) {
+							logger.info(`finished writing ${s3Updates.length} records to DynamoDB`);
+						}
 
 						const data = await leo.aws.dynamodb.docClient.batchWrite(
 							{
