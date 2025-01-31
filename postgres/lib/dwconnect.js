@@ -27,6 +27,8 @@ module.exports = function(config, columnConfig) {
 		useSurrogateDateKeys: true,
 	}, columnConfig || {});
 
+	console.log(`has delete_fix in-place`);
+
 
 	// Control flow for both of these configurations set to true has not been added. An error will be thrown until that is supported.
 	if (
@@ -305,7 +307,7 @@ module.exports = function(config, columnConfig) {
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable}
 												SET    ${columnConfig._auditdate} = ${dwClient.auditdate},
-													   ${columnConfig._deleted} = COALESCE(${columnConfig._deleted}, false); `, done);
+													   ${columnConfig._deleted} = false; `, done);
 						});
 
 						// Delete and reinsert data - avoids costly updates on large tables
