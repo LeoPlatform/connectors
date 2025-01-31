@@ -593,11 +593,24 @@ function toDynamoDB(table, opts) {
 						if (s3Updates.length > 0) {
 							logger.info(`writing ${s3Updates.length} records to S3`);
 						}
-						await async.parallelLimit(s3Updates.map((r) => {
-							return function(done) {
-								uploadToS3(r).then(() => done()).catch((e) => done(e));
-							};
-						}), 10);
+						await new Promise((resolve, reject) => {
+							async.parallelLimit(s3Updates.map((r) => {
+								return function(done) {
+									uploadToS3(r).then(() => {
+										logger.info(`in done function, wrote ${JSON.stringify(r.PutRequest.Item._s3)} to S3`);
+										done();
+									}).catch((e) => {
+										done(e);
+									});
+								};
+							}), 10, (err, results) => {
+								if (err) {
+									reject(err);
+								} else {
+									resolve(results);
+								}
+							});
+						});
 
 						if (s3Updates.length > 0) {
 							logger.info(`finished writing ${s3Updates.length} records to DynamoDB`);
