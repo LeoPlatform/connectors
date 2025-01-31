@@ -594,25 +594,8 @@ function toDynamoDB(table, opts) {
 							logger.info(`writing ${s3Updates.length} records to S3`);
 						}
 						await async.parallelLimit(s3Updates.map((r) => {
-							return async function() {
-								let s3Object = r.PutRequest.Item._s3;
-								try {
-									await new Promise((resolve, reject) => {
-										logger.info(`writing ${s3Object.bucket}/${s3Object.key} to S3`);
-										ls.pipe(stream.Readable.from(s3Object.origPayload), ls.toS3(s3Object.bucket, s3Object.key), (err) => {
-											if (err) {
-												reject(err);
-											} else {
-												logger.info(`wrote ${s3Object.bucket}/${s3Object.key} to S3`);
-												delete s3Object.origPayload;
-												resolve();
-											}
-										});
-									});
-								} catch (e) {
-									logger.error(`error writing to S3 for ${s3Object.bucket}/${s3Object.key}`, e);
-									throw e;
-								}
+							return function(done) {
+								uploadToS3(r).then(() => done()).catch((e) => done(e));
 							};
 						}), 10);
 
@@ -703,4 +686,25 @@ function toDynamoDB(table, opts) {
 		logger.info("toDynamoDB On Flush");
 		done();
 	});
+}
+
+async function uploadToS3(record) {
+	let s3Object = record.PutRequest.Item._s3;
+	try {
+		await new Promise((resolve, reject) => {
+			logger.info(`writing ${s3Object.bucket}/${s3Object.key} to S3`);
+			ls.pipe(stream.Readable.from(s3Object.origPayload), ls.toS3(s3Object.bucket, s3Object.key), (err) => {
+				if (err) {
+					reject(err);
+				} else {
+					logger.info(`wrote ${s3Object.bucket}/${s3Object.key} to S3`);
+					delete s3Object.origPayload;
+					resolve();
+				}
+			});
+		});
+	} catch (e) {
+		logger.error(`error writing to S3 for ${s3Object.bucket}/${s3Object.key}`, e);
+		throw e;
+	}
 }
