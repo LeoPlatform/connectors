@@ -225,10 +225,10 @@ module.exports = function(config, columnConfig) {
 						});
 						tasks.push(done => {
 							connection.query(`Update ${qualifiedTable} prev
-											  SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
+											  SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = false, ${columnConfig._auditdate} = ${dwClient.auditdate}
 											  FROM ${qualifiedStagingTable} staging
 											  where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}`
-								, done);
+							, done);
 						});
 
 						// Now insert any we were missing
@@ -292,11 +292,11 @@ module.exports = function(config, columnConfig) {
 													 ${(naturalKeyFilter !== undefined) ? `AND base.${(sortKey != null) ? sortKey : ids[0]} >= ${naturalKeyFilter}` : ``};`, done);
 						});
 
-						// Merge exiting data into staged copy
+						// Merge existing data into staged copy
 						tasks.push(done => {
 							connection.query(`UPDATE ${qualifiedStagingTable} AS staging
 											  SET    ${columns.map(column => `${column} = COALESCE(staging.${column}, prev.${column})`).join(`,`)},
-													 ${columnConfig._deleted} = COALESCE(prev.${columnConfig._deleted}, false)
+													 ${columnConfig._deleted} = false
 											  FROM   ${qualifiedStagingTablePrevious} AS prev
 											  WHERE  ${ids.map(id => `prev.${id} = staging.${id}`).join(` AND `)}`, done);
 						});
@@ -319,10 +319,10 @@ module.exports = function(config, columnConfig) {
 							connection.query(`INSERT INTO ${qualifiedTable} (${columns.map(column => `${column}`).join(`, `)}, ${columnConfig._auditdate}, ${columnConfig._deleted})
 											  SELECT ${columns.map(column => `${column}`).join(`, `)},
 											  		 ${columnConfig._auditdate},
-													 ${columnConfig._deleted}
+													 false as ${columnConfig._deleted}
 											  FROM   ${qualifiedStagingTable}; `, done);
 						});
-					};
+					}
 
 					async.series(tasks, err => {
 						if (!err) {
