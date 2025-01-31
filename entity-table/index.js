@@ -10,6 +10,7 @@ const { unmarshall } = require("@aws-sdk/util-dynamodb");
 const zlib = require('zlib');
 const uuid = require('uuid');
 const stream = require("stream");
+const { error } = require('console');
 
 const GZIP_MIN = 5000;
 const DYNAMODB_MAX_SIZE = 400000;
@@ -403,15 +404,16 @@ module.exports = {
 
 								await new Promise((resolve, reject) => {
 									async.parallelLimit(oldS3Files.map((file) => {
-										return async function() {
-											try {
-												await ls.s3.deleteObject({
-													Bucket: file.bucket,
-													Key: file.key,
-												});
-											} catch (e) {
-												logger.error(e);
-											}
+										return function(done) {
+											ls.s3.deleteObject({
+												Bucket: file.bucket,
+												Key: file.key,
+											}).then(() => {
+												done();
+											}).catch((err) => {
+												logger.error(err);
+												done(err);
+											});
 										};
 									}), 10, (err, results) => {
 										if (err) {
