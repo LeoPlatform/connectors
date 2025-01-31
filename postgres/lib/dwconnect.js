@@ -172,7 +172,7 @@ module.exports = function (config, columnConfig) {
 					});
 					tasks.push(done => {
 						connection.query(`Update ${qualifiedTable} prev
-								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = coalesce(prev.${columnConfig._deleted}, false), ${columnConfig._auditdate} = ${dwClient.auditdate}
+								SET  ${columns.map(column => `${column} = coalesce(staging.${column}, prev.${column})`)}, ${columnConfig._deleted} = false, ${columnConfig._auditdate} = ${dwClient.auditdate}
 								FROM ${qualifiedStagingTable} staging
 								where ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
 							`, done);
@@ -181,7 +181,7 @@ module.exports = function (config, columnConfig) {
 					// Now insert any we were missing
 					tasks.push(done => {
 						connection.query(`INSERT INTO ${qualifiedTable} (${columns.join(',')},${columnConfig._deleted},${columnConfig._auditdate})
-								SELECT ${columns.map(column => `coalesce(staging.${column}, prev.${column})`)}, coalesce(prev.${columnConfig._deleted}, false), ${dwClient.auditdate} as ${columnConfig._auditdate}
+								SELECT ${columns.map(column => `coalesce(staging.${column}, prev.${column})`)}, false, ${dwClient.auditdate} as ${columnConfig._auditdate}
 								FROM ${qualifiedStagingTable} staging
 								LEFT JOIN ${qualifiedTable} as prev on ${ids.map(id => `prev.${id} = staging.${id}`).join(' and ')}
 								WHERE prev.${ids[0]} is null	
