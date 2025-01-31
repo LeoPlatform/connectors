@@ -8,8 +8,12 @@ var backoff = require("backoff");
 var async = require("async");
 const { unmarshall } = require("@aws-sdk/util-dynamodb");
 const zlib = require('zlib');
+const uuid = require('uuid');
+const stream = require("stream");
+const { error } = require('console');
 
 const GZIP_MIN = 5000;
+const DYNAMODB_MAX_SIZE = 400000;
 
 function hashCode(str) {
 	if (typeof str === "number") {
@@ -30,6 +34,44 @@ function hashCode(str) {
 		hash |= 0; // Convert to 32bit integer
 	}
 	return hash;
+}
+
+async function fetchFromS3(image) {
+	return await new Promise((resolve, reject) => {
+		let data = '';
+		logger.info(`Fetching image from S3: ${JSON.stringify(image._s3)}`);
+		// this is only here to get some bad data through from the first version
+		if (image._s3.file) {
+			image._s3.key = image._s3.file;
+			delete image._s3.file;
+		}
+		ls.pipe(
+			ls.fromS3(image._s3),
+			new stream.Writable({
+				write(chunk, _encoding, callback) {
+					data += chunk;
+					callback();
+				}
+			}),
+			(err) => {
+				if (err) {
+					return reject(err);
+				}
+				try {
+					const json = JSON.parse(data);
+					resolve(json);
+				} catch (e) {
+					reject(e);
+				}
+			}
+		);
+	});
+}
+
+async function drain(stream) {
+	return new Promise((resolve) => {
+		stream.once("drain", () => resolve());
+	});
 }
 
 module.exports = {
@@ -101,15 +143,31 @@ module.exports = {
 			}),
 			ls.through((payload, done) => {
 				// check size
-				let size = Buffer.byteLength(JSON.stringify(payload));
+				const origPayload = payload;
+				const origPayloadStr = JSON.stringify(payload);
+				let size = Buffer.byteLength(origPayloadStr);
 
 				if (size > GZIP_MIN) {
 					let compressedObj = {
-						[opts.range]: payload[opts.range],
-						[opts.hash]: payload[opts.hash],
-						compressedData: self.deflate(JSON.stringify(payload)),
+						[opts.range]: origPayload[opts.range],
+						[opts.hash]: origPayload[opts.hash],
+						compressedData: self.deflate(origPayloadStr),
 					};
 					payload = compressedObj;
+					if (payload.compressedData.length > DYNAMODB_MAX_SIZE) {
+						const file = `files/dynamodb/${table}/${origPayload[opts.hash]}-${origPayload[opts.range] || ''}/${uuid.v1()}.json`;
+						logger.info(`DynamoDB size limit exceeded (item size is ${payload.compressedData.length}), saving to S3 instead, bucket: ${leo.configuration.s3}, file: ${file}`);	
+						let s3Object = {
+							[opts.range]: origPayload[opts.range],
+							[opts.hash]: origPayload[opts.hash],
+							_s3: {
+								bucket: leo.configuration.s3,
+								key: file,
+								origPayload: origPayloadStr,
+							},
+						};
+						return done(null, s3Object);
+					}
 				}
 
 				done(null, payload);
@@ -183,10 +241,12 @@ module.exports = {
 		});
 	},
 	tableOldNewProcessor: function(optionsIn) {
-		let options = Object.assign({ kinesisBatchLimit: 200 }, optionsIn);
+		let options = Object.assign({ kinesisBatchLimit: 200}, optionsIn);
+		let transform = options.transform || ((e) => e);
 		let self = this;
 		return function(event, context, callback) {
 			let streams = {};
+			const oldS3Files = [];
 			let batchSize = event.Records.length;
 			let filePrefix = event.Records[0].eventID;
 			logger.info(`batchSize=${batchSize}`);
@@ -218,60 +278,109 @@ module.exports = {
 				return streams[key];
 			};
 			async.doWhilst(
-				function(done) {
-					let record = event.Records[index];
-					let data = {
-						correlation_id: {
-							start: record.eventID,
-							source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
-						},
-						event: defaultQueue,
-						event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
-						id: context.botId,
-						payload: {
-							new: null,
-							old: null
-						},
-						timestamp: Date.now(),
-					};
-					let eventPrefix = resourcePrefix;
-					if ("OldImage" in record.dynamodb) {
-						let image = unmarshall(record.dynamodb.OldImage);
+				function (done) {
+					new Promise(async (resolve, reject) => {
+						let record = event.Records[index];
+						let data = {
+							correlation_id: {
+								start: record.eventID,
+								source: record.eventSourceARN.match(/:table\/(.*?)\/stream/)[1]
+							},
+							event: defaultQueue,
+							event_source_timestamp: record.dynamodb.ApproximateCreationDateTime * 1000,
+							id: context.botId,
+							payload: {
+								new: null,
+								old: null
+							},
+							timestamp: Date.now(),
+						};
+						let eventPrefix = resourcePrefix;
+						let needsComparison = false;
+						if ("OldImage" in record.dynamodb) {
+							let image = unmarshall(record.dynamodb.OldImage);
+	
+							if (image.compressedData) {
+								// compressedData contains everything including hash/range
+								let inflated = self.inflate(image.compressedData);
+								data.payload.old = JSON.parse(inflated);
+							} else if (image._s3) {
+								// fetch the old data from S3
+								try {
+									data.payload.old = await fetchFromS3(image);
+									needsComparison = true;
+									oldS3Files.push(image._s3);
+								} catch (e) {
+									return reject(e);
+								}
+							} else {
+								data.payload.old = image;
+							}
+	
+							if (resourcePrefix.length === 0) {
+								eventPrefix = image.partition.split(/-/)[0];
+							}
+						}
+						if ("NewImage" in record.dynamodb) {
+							let image = unmarshall(record.dynamodb.NewImage);
+	
+							if (image.compressedData) {
+								// compressedData contains everything including hash/range
+								let inflated = self.inflate(image.compressedData);
+								data.payload.new = JSON.parse(inflated);
+							} else if (image._s3) {
+								try {
+									data.payload.new = await fetchFromS3(image);
+									needsComparison = true;
+								} catch (e) {
+									return reject(e);
+								}
+							} else {
+								data.payload.new = image;
+							}
+	
+							if (resourcePrefix.length === 0) {
+								eventPrefix = image.partition.split(/-/)[0];
+							}
+						}
+						if (needsComparison) {
+							if (JSON.stringify(data.payload.old || {}) === JSON.stringify(data.payload.new || {})) {
+								return resolve(null);
+							}
+						}
+						data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
+						data.event = `${eventPrefix}${resourceSuffix}`;
+						let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
+						data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
 
-						if (image.compressedData) {
-							// compressedData contains everything including hash/range
-							let inflated = self.inflate(image.compressedData);
-							data.payload.old = JSON.parse(inflated);
+						resolve(data);
+	
+					}).then(async (data) => {
+						if (data) {
+							data = transform(data);
+							if (data) {
+								if (Array.isArray(data)) {
+									for (const each of data) {
+										let stream = getStream(each.id, each.event);
+										if (!stream.write(each)) {
+											await drain(stream);
+										}
+									}
+									done();
+								} else {
+									let stream = getStream(data.id, data.event);
+									stream.write(data) ? done() : stream.once("drain", () => done());	
+								}
+							} else {
+								done();
+							}
 						} else {
-							data.payload.old = image;
+							done();
 						}
+					}).catch((err) => {
+						done(err);
+					});
 
-						if (resourcePrefix.length === 0) {
-							eventPrefix = image.partition.split(/-/)[0];
-						}
-					}
-					if ("NewImage" in record.dynamodb) {
-						let image = unmarshall(record.dynamodb.NewImage);
-
-						if (image.compressedData) {
-							// compressedData contains everything including hash/range
-							let inflated = self.inflate(image.compressedData);
-							data.payload.new = JSON.parse(inflated);
-						} else {
-							data.payload.new = image;
-						}
-
-						if (resourcePrefix.length === 0) {
-							eventPrefix = image.partition.split(/-/)[0];
-						}
-					}
-					data.id = `${options.botPrefix || ""}${resourcePrefix}${options.botSuffix || ""}`;
-					data.event = `${eventPrefix}${resourceSuffix}`;
-					let sanitizedSrc = data.correlation_id.source.replace(/-[A-Z0-9]{12,}$/, "");
-					data.correlation_id.source = options.system || `system:dynamodb.${sanitizedSrc}.${eventPrefix}`;
-
-					let stream = getStream(data.id, data.event);
-					stream.write(data) ? done() : stream.once("drain", () => done());
 				},
 				function() {
 					index++;
@@ -287,7 +396,40 @@ module.exports = {
 								done(err);
 							});
 						};
-					}), callback);
+					}), async (err, results) => {
+						if (err) {
+							callback(err);
+						} else {
+							try {
+
+								await new Promise((resolve, reject) => {
+									async.parallelLimit(oldS3Files.map((file) => {
+										return function(done) {
+											ls.s3.deleteObject({
+												Bucket: file.bucket,
+												Key: file.key,
+											}).then(() => {
+												done();
+											}).catch((err) => {
+												logger.error(err);
+												done(err);
+											});
+										};
+									}), 10, (err, results) => {
+										if (err) {
+											reject(err);
+										} else {
+											resolve(results);
+										}
+									});
+								});
+							} catch (e) {
+								logger.info('not all S3 files could be removed');
+								logger.info(e);
+							}
+							callback(null, results);
+						}
+					});
 				}
 			);
 		};
@@ -419,51 +561,88 @@ function toDynamoDB(table, opts) {
 			let tasks = [];
 			for (let ndx = 0; ndx < all.length; ndx += 25) {
 				let myRecords = all.slice(ndx, ndx + 25);
-				tasks.push(function(done) {
+				tasks.push(async function() {
 					let retry = {
 						backoff: (err) => {
-							done(null, {
+							return {
 								backoff: err || "error",
 								records: myRecords
-							});
+							};
 						},
 						fail: (err) => {
-							done(null, {
+							return {
 								fail: err || "error",
 								records: myRecords
-							});
+							};
 						},
 						success: () => {
-							done(null, {
+							return {
 								success: true,
 								//records: myRecords
-							});
+							};
 						}
 					};
-					leo.aws.dynamodb.docClient.batchWrite({
-						RequestItems: {
-							[table]: myRecords
-						},
-						"ReturnConsumedCapacity": 'TOTAL'
-					}, function(err, data) {
-						if (err) {
-							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
-							logger.error(myRecords);
-							if (err.retryable) {
-								retry.backoff(err);
-							} else {
-								retry.fail(err);
+					
+					// gather all the records that are to be stored in S3 (aka, anything with a '_s3' AND '_s3.origPayload')
+					const s3Updates = myRecords.map(r => {
+						if (r.PutRequest.Item._s3 && r.PutRequest.Item._s3.origPayload) {
+							return r;
+						}
+						return null;
+					}).filter(r => !!r);
+
+					try {
+						if (s3Updates.length > 0) {
+							logger.info(`writing ${s3Updates.length} records to S3`);
+						}
+						await new Promise((resolve, reject) => {
+							async.parallelLimit(s3Updates.map((r) => {
+								return function(done) {
+									uploadToS3(r).then(() => {
+										logger.info(`in done function, wrote ${JSON.stringify(r.PutRequest.Item._s3)} to S3`);
+										done();
+									}).catch((e) => {
+										done(e);
+									});
+								};
+							}), 10, (err, results) => {
+								if (err) {
+									reject(err);
+								} else {
+									resolve(results);
+								}
+							});
+						});
+
+						if (s3Updates.length > 0) {
+							logger.info(`finished writing ${s3Updates.length} records to DynamoDB`);
+						}
+
+						const data = await leo.aws.dynamodb.docClient.batchWrite(
+							{
+								RequestItems: {
+									[table]: myRecords
+								},
+								"ReturnConsumedCapacity": 'TOTAL'
 							}
-						} else if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
-							//reset();
-							//data.UnprocessedItems[table].map(m => records.push(m.PutRequest.Item));
+						);
+						if (table in data.UnprocessedItems && Object.keys(data.UnprocessedItems[table]).length !== 0) {
 							myRecords = data.UnprocessedItems[table];
-							retry.backoff();
+							return retry.backoff();
 						} else {
 							logger.info(table, "saved");
-							retry.success();
+							return retry.success();
 						}
-					});
+					} catch (err) {
+						logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
+						logger.error(JSON.stringify(myRecords));
+						if (err.retryable) {
+							return retry.backoff(err);
+						} else {
+							return retry.fail(err);
+						}
+
+					}
 				});
 			}
 			getExisting((err, existing) => {
@@ -522,4 +701,25 @@ function toDynamoDB(table, opts) {
 		logger.info("toDynamoDB On Flush");
 		done();
 	});
+}
+
+async function uploadToS3(record) {
+	let s3Object = record.PutRequest.Item._s3;
+	try {
+		await new Promise((resolve, reject) => {
+			logger.info(`writing ${s3Object.bucket}/${s3Object.key} to S3`);
+			ls.pipe(stream.Readable.from(s3Object.origPayload), ls.toS3(s3Object.bucket, s3Object.key), (err) => {
+				if (err) {
+					reject(err);
+				} else {
+					logger.info(`wrote ${s3Object.bucket}/${s3Object.key} to S3`);
+					delete s3Object.origPayload;
+					resolve();
+				}
+			});
+		});
+	} catch (e) {
+		logger.error(`error writing to S3 for ${s3Object.bucket}/${s3Object.key}`, e);
+		throw e;
+	}
 }
