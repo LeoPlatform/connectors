@@ -403,15 +403,15 @@ module.exports = {
 
 								await new Promise((resolve, reject) => {
 									async.parallelLimit(oldS3Files.map((file) => {
-										return async function() {
-											try {
-												await ls.s3.deleteObject({
-													Bucket: file.bucket,
-													Key: file.key,
-												}).promise();
-											} catch (e) {
-												logger.error(e);
-											}
+										return function(done) {
+											ls.s3.deleteObject({
+												Bucket: file.bucket,
+												Key: file.key,
+											}).promise().then(() => {
+												done();
+											}).catch((err) => {
+												done(err);
+											});
 										};
 									}), 10, (err, results) => {
 										if (err) {
