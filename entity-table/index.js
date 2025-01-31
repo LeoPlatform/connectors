@@ -410,6 +410,7 @@ module.exports = {
 											}).promise().then(() => {
 												done();
 											}).catch((err) => {
+												logger.error(err);
 												done(err);
 											});
 										};
