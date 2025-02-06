@@ -179,10 +179,24 @@ module.exports = function(config, columnConfig) {
 
 		tasks.push(done => {
 			ls.pipe(stream, ls.through((obj, done, push) => {
+				if (push) {
+					// do nothing, just getting rid of un-used error
+				}
 				if (obj.__leo_delete__) {
-					if (obj.__leo_delete__ === 'id') {
-						push(obj);
-					}
+					/**
+					 * The code that merges/combines all the updates already favors a DELETE over any other type of operation,
+					 * and it will throw away any other updates to the thing that is about to be deleted.
+					 * 
+					 * If we push this delete onto the next pipeline step, it will get loaded into the staging table.
+					 * This will prevent us from being able to tell what has NOT been deleted and what has been, as we are now
+					 * mixing the deletes with the inserts/updates. Because of this, I am commenting this out so that we can un-delete
+					 * facts in tables that are essentially lookup tables for transient relationships, like a connection between accounts or other
+					 * types of transient relationships. Adding it to the delete handler ensures that it will be deleted, and we
+					 * flush the deletes BEFORE we do any of the other operations on the staging tables.
+					 */
+					// if (obj.__leo_delete__ === 'id') {
+					// 	push(obj);
+					// }
 					deleteHandler.add(obj, done);
 				} else {
 					done(null, obj);
