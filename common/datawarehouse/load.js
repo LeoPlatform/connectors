@@ -9,7 +9,7 @@ const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
 
-module.exports = function (ID, source, client, tableConfig, stream, callback) {
+module.exports = function(ID, source, client, tableConfig, stream, callback) {
 
 	// adding backwards compatibility for ID and source
 	if (!callback) {
@@ -39,7 +39,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 		});
 	});
 
-	let checkforDelete = ls.through(function (obj, done) {
+	let checkforDelete = ls.through(function(obj, done) {
 		if (obj.payload.type === 'delete') {
 			let data = obj.payload.data || {};
 			let ids = data.in || [];
@@ -68,7 +68,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
 		}
 	});
 
-	let validateData = ls.through(function (obj, done) {
+	let validateData = ls.through(function(obj, done) {
 		let eventObj = obj.payload.data;
 		let invalid = false;
 
@@ -336,7 +336,7 @@ module.exports = function (ID, source, client, tableConfig, stream, callback) {
  * @param eventObj {Object}
  * @param error {string}
  */
-function handleFailedValidation (ID, source, eventObj, error) {
+function handleFailedValidation(ID, source, eventObj, error) {
 	if (!errorStream || !errorStream.Writable) {
 		errorStream = streams.passthrough({
 			objectMode: true
@@ -345,11 +345,11 @@ function handleFailedValidation (ID, source, eventObj, error) {
 		streams.pipe(
 			errorStream,
 
-			ls.process(ID, obj => {
+			ls.process(ID, function(obj) {
 				return obj;
-			}),
-
-			leo.load(ID, `${source}_error`),
+			}, `${source}_error`),
+			ls.toLeo(ID),
+			ls.devnull(),
 
 			(err) => {
 				err && logger.error('GOT ERROR', err);

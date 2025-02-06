@@ -118,7 +118,10 @@ function combine(file) {
 				process.exit();
 			}
 			if (lastObj && id === lastId) {
-				if (data.__leo_delete__) {
+				if (data.__leo_delete__ || lastObj.__leo_delete__) {
+					// if our current row is a delete, then we throw away the previous updates
+					// if our previous row was a delete, but the current one is not, we throw away the delete, because it was updated
+					// after the delete, so it should NOT be deleted.
 					lastObj = data;
 				} else {
 					lastObj = merge(lastObj, data);
