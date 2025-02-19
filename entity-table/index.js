@@ -10,7 +10,6 @@ const { unmarshall } = require("@aws-sdk/util-dynamodb");
 const zlib = require('zlib');
 const uuid = require('uuid');
 const stream = require("stream");
-const { error } = require('console');
 
 const GZIP_MIN = 5000;
 const DYNAMODB_MAX_SIZE = 400000;
