@@ -36,6 +36,11 @@ module.exports = function(clientConfigHost, region) {
 		m = clientConfigHost;
 	} else {
 		if (typeof clientConfigHost === 'string') {
+			if (!clientConfigHost.startsWith('https://') && !clientConfigHost.startsWith('http://')) {
+				// default host to https://
+				clientConfigHost = 'https://' + clientConfigHost;
+				logger.info(`host did not start with a valid prefix, will use https://, new host value is ${clientConfigHost}`);
+			}
 			config = {
 				host: clientConfigHost,
 			};
