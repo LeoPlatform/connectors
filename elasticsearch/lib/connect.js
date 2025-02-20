@@ -13,6 +13,7 @@ const leo = require('leo-sdk');
 const ls = leo.streams;
 
 const { NodeHttpHandler } = require('@aws-sdk/node-http-handler');
+const { Upload } = require("@aws-sdk/lib-storage");
 const s3 = require('leo-aws/factory')('S3', {
 	requestHandler: new NodeHttpHandler({
 		httpsAgent: new https.Agent({
@@ -333,18 +334,28 @@ module.exports = function(clientConfigHost, region) {
 
 						if (!settings.dontSaveResults) {
 							logger.debug(leo.configuration.bus.s3, key);
-							s3.upload({
-								Body: JSON.stringify({
-									body,
-									response: data,
-								}),
-								Bucket: leo.configuration.bus.s3,
-								Key: key,
-							}, (uploaderr, data) => {
-								done(err, Object.assign(meta, {
+							const upload = new Upload({
+								client: s3,
+								params: {
+									Bucket: leo.configuration.bus.s3,
+									Key: key,
+									Body: JSON.stringify({
+										body,
+										response: data,
+									})
+								}
+							});
+							upload.done().then((data) => {
+								done (null, Object.assign(meta, {
 									payload: {
 										error: err,
 										file: data && data.Location,
+									},
+								}));
+							}).catch((uploaderr) => {
+								done(err, Object.assign(meta, {
+									payload: {
+										error: err,
 										uploadError: uploaderr,
 									},
 								}));
@@ -483,23 +494,34 @@ module.exports = function(clientConfigHost, region) {
 						if (!settings.dontSaveResults) {
 							logger.time(index + 'es_save');
 							logger.debug(leo.configuration.bus.s3, key);
-							s3.upload({
-								Body: JSON.stringify({
-									body,
-									response: data,
-								}),
-								Bucket: leo.configuration.bus.s3,
-								Key: key,
-							}, (uploaderr, data) => {
-								logger.timeEnd(index + 'es_save');
-								logger.timeEnd(index + 'es_emit');
+							const upload = new Upload({
+								client: s3,
+								params: {
+									Bucket: leo.configuration.bus.s3,
+									Key: key,
+									Body: JSON.stringify({
+										body,
+										response: data,
+									})
+								}
+							});
+							upload.done().then((data) => {
 								done(err, Object.assign(meta, {
 									payload: {
 										error: err,
 										file: data && data.Location,
+									},
+								}));
+							}).catch((uploaderr) => {
+								done(err, Object.assign(meta, {
+									payload: {
+										error: err,
 										uploadError: uploaderr,
 									},
 								}));
+							}).finally(() => {
+								logger.timeEnd(index + 'es_save');
+								logger.timeEnd(index + 'es_emit');
 							});
 						} else {
 							logger.timeEnd(index + 'es_emit');
