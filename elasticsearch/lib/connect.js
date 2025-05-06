@@ -366,7 +366,7 @@ module.exports = function(clientConfigHost, region) {
 								}));
 							});
 						} else {
-							done(err);
+							done(err, meta);
 						}
 					});
 				} else {

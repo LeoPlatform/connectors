@@ -202,6 +202,15 @@ module.exports = {
 			if (opts.loops) {
 				readOpts.loops = opts.loops;
 			}
+			if (opts.autoConfigure) {
+				readOpts.autoConfigure = opts.autoConfigure;
+			}
+			if (opts.parser) {
+				readOpts.parser = opts.parser;
+			}
+			if (opts.parserOpts) {
+				readOpts.parserOpts = opts.parserOpts;
+			}
 			ls.pipe(
 				leo.read(botId, queue, readOpts),
 				stats,
