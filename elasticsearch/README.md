@@ -292,6 +292,37 @@ interface ElasticsearchClientConfig {
 }
 ```
 
+#### **returnFullResponse Configuration**
+
+The `returnFullResponse` option is a critical configuration that affects **every single method** in the OpenSearch client:
+
+- **`false` or `undefined` (default)**: All methods return `response.body` directly
+  - Simpler API, direct access to data
+  - Matches behavior of most Elasticsearch libraries
+  - Recommended for most use cases
+
+- **`true`**: All methods return the full `ApiResponse` object
+  - Access to response metadata (status codes, headers, timing)
+  - Useful for debugging, monitoring, and advanced error handling
+  - Required when you need response metadata
+
+```typescript
+// Default behavior - cleaner API
+const client = connector.connect({ host: 'https://cluster.com' });
+const hits = await client.search({ index: 'test' });
+console.log(hits.hits.hits); // Direct access
+
+// Full response - access to metadata
+const fullClient = connector.connect({ 
+  host: 'https://cluster.com',
+  returnFullResponse: true 
+});
+const response = await fullClient.search({ index: 'test' });
+console.log('Status:', response.statusCode);
+console.log('Took:', response.body.took);
+console.log('Hits:', response.body.hits.hits);
+```
+
 ### StreamSettings
 
 ```typescript
@@ -326,7 +357,13 @@ interface ParallelStreamSettings extends StreamSettings {
 
 ## TypeScript Support
 
-This package provides comprehensive TypeScript definitions based on the official OpenSearch API types:
+This package provides **advanced TypeScript support** with comprehensive type definitions based on the official OpenSearch API types. The connector features an intelligent type system that automatically adjusts return types based on the `returnFullResponse` configuration.
+
+### Advanced Type System Features
+
+#### **Automatic Return Type Transformation**
+
+The connector wraps the OpenSearch client transport layer to modify response handling. When `returnFullResponse` is `false` (default), **ALL** client methods return `response.body` instead of the full `ApiResponse` object. The TypeScript types automatically reflect this behavior:
 
 ```typescript
 import { 
@@ -336,27 +373,193 @@ import {
   ChecksumHandler 
 } from 'leo-connector-elasticsearch';
 
-// Fully typed queries
-const query: ElasticsearchQuery = {
-  index: 'my-index',
-  body: {
-    query: { match: { field: 'value' } },
-    aggs: { count: { value_count: { field: 'id' } } }
-  }
-};
+// Default behavior: All methods return response.body
+const client = connector.connect('https://my-cluster.es.amazonaws.com');
 
-// Generic document typing
+// Type: Promise<SearchResponse<TDocument>>
+const searchResult = await client.search({ 
+  index: 'my-index',
+  body: { query: { match_all: {} } }
+});
+console.log('Total hits:', searchResult.hits.total); // Direct access to response.body
+
+// Type: Promise<BulkResponse>
+const bulkResult = await client.bulk({
+  body: [/* bulk operations */]
+});
+console.log('Errors:', bulkResult.errors); // Direct access to response.body
+```
+
+#### **Full Response Mode**
+
+When `returnFullResponse` is `true`, all methods return the complete `ApiResponse` object with metadata:
+
+```typescript
+// Full response mode: All methods return ApiResponse objects
+const fullClient = connector.connect({
+  host: 'https://my-cluster.es.amazonaws.com',
+  returnFullResponse: true
+});
+
+// Type: Promise<ApiResponse<SearchResponse<TDocument>, Context>>
+const fullResult = await fullClient.search({ 
+  index: 'my-index',
+  body: { query: { match_all: {} } }
+});
+
+// Access response metadata
+console.log('Status Code:', fullResult.statusCode);
+console.log('Response Headers:', fullResult.headers);
+console.log('Request Meta:', fullResult.meta);
+console.log('Search Results:', fullResult.body.hits.hits);
+```
+
+#### **Automatic Type Inference**
+
+TypeScript automatically infers the correct client type based on your configuration:
+
+```typescript
+// TypeScript infers ElasticsearchClient<false> - returns response.body
+const defaultClient = connector.connect('https://cluster.com');
+
+// TypeScript infers ElasticsearchClient<true> - returns full ApiResponse
+const fullResponseClient = connector.connect({
+  host: 'https://cluster.com',
+  returnFullResponse: true
+});
+
+// TypeScript infers ElasticsearchClient<undefined> - returns response.body
+const configClient = connector.connect({
+  host: 'https://cluster.com'
+  // returnFullResponse is undefined, defaults to false behavior
+});
+```
+
+#### **Comprehensive Method Coverage**
+
+The type transformation applies to **every single method** in the OpenSearch client, including nested objects:
+
+```typescript
+// All these methods have correct return types based on returnFullResponse:
+client.search()                    // SearchResponse or ApiResponse<SearchResponse>
+client.bulk()                      // BulkResponse or ApiResponse<BulkResponse>
+client.scroll()                    // ScrollResponse or ApiResponse<ScrollResponse>
+client.indices.create()            // IndicesCreateResponse or ApiResponse<...>
+client.indices.delete()            // IndicesDeleteResponse or ApiResponse<...>
+client.cat.health()               // CatHealthResponse or ApiResponse<...>
+client.cat.indices()              // CatIndicesResponse or ApiResponse<...>
+client.cluster.health()           // ClusterHealthResponse or ApiResponse<...>
+client.cluster.stats()            // ClusterStatsResponse or ApiResponse<...>
+client.snapshot.create()          // SnapshotCreateResponse or ApiResponse<...>
+// ... and hundreds more methods
+```
+
+#### **Callback Support**
+
+Both callback and Promise-based usage have correct typing:
+
+```typescript
+// Default mode: callback receives response.body
+client.search({ index: 'my-index' }, (err, result) => {
+  // result is SearchResponse<TDocument>, not ApiResponse
+  if (err) console.error(err);
+  else console.log('Hits:', result.hits.hits);
+});
+
+// Full response mode: callback receives ApiResponse
+fullClient.search({ index: 'my-index' }, (err, result) => {
+  // result is ApiResponse<SearchResponse<TDocument>, Context>
+  if (err) console.error(err);
+  else {
+    console.log('Status:', result.statusCode);
+    console.log('Hits:', result.body.hits.hits);
+  }
+});
+```
+
+### Document Type Safety
+
+Generic document typing provides end-to-end type safety:
+
+```typescript
+// Define your document structure
 interface MyDocument {
   id: string;
   name: string;
   timestamp: Date;
+  tags: string[];
 }
 
+// Fully typed queries with OpenSearch API types
+const query: ElasticsearchQuery = {
+  index: 'my-index',
+  body: {
+    query: { 
+      bool: {
+        must: [{ match: { name: 'search term' } }],
+        filter: [{ range: { timestamp: { gte: '2023-01-01' } } }]
+      }
+    },
+    aggs: { 
+      tag_counts: { 
+        terms: { field: 'tags.keyword' } 
+      } 
+    }
+  }
+};
+
+// Type-safe results
 const results = await client.queryWithScroll<MyDocument>({
   index: 'documents',
   body: { query: { match_all: {} } }
 });
+
 // results.items is MyDocument[]
+results.items.forEach(doc => {
+  console.log(`Document: ${doc.name} (${doc.id})`);
+  console.log(`Tags: ${doc.tags.join(', ')}`);
+});
+```
+
+### Advanced Usage Examples
+
+#### **Conditional Client Types**
+
+```typescript
+function createClient<T extends boolean>(useFullResponse: T) {
+  return connector.connect({
+    host: 'https://cluster.com',
+    returnFullResponse: useFullResponse
+  });
+}
+
+const bodyClient = createClient(false);  // ElasticsearchClient<false>
+const fullClient = createClient(true);   // ElasticsearchClient<true>
+
+// TypeScript knows the return types at compile time
+const bodyResult = await bodyClient.search({ index: 'test' });  // SearchResponse
+const fullResult = await fullClient.search({ index: 'test' });  // ApiResponse<SearchResponse>
+```
+
+#### **Type Guards and Utilities**
+
+```typescript
+import { ApiResponse } from '@opensearch-project/opensearch';
+
+function isFullResponse<T>(result: T | ApiResponse<T>): result is ApiResponse<T> {
+  return result && typeof result === 'object' && 'statusCode' in result;
+}
+
+// Use with dynamic client configuration
+const client = connector.connect(config); // config.returnFullResponse may be true or false
+const result = await client.search({ index: 'test' });
+
+if (isFullResponse(result)) {
+  console.log('Status:', result.statusCode);
+  console.log('Data:', result.body);
+} else {
+  console.log('Data:', result);
+}
 ```
 
 ## Error Handling

@@ -1,8 +1,105 @@
 import { 
   Client as OpenSearchClient,
+  ApiResponse,
+  TransportRequestPromise,
+  TransportRequestCallback
 } from '@opensearch-project/opensearch';
 import * as OpenSearchTypes from '@opensearch-project/opensearch/api/types';
 import { WritableStream, TransformStream } from 'stream';
+
+/**
+ * Advanced TypeScript type system for handling returnFullResponse behavior
+ * 
+ * The Leo Elasticsearch connector wraps the OpenSearch client transport layer to modify
+ * response handling. When returnFullResponse is false (default), ALL client methods
+ * return response.body instead of the full ApiResponse object. This type system
+ * ensures TypeScript types accurately reflect this runtime behavior.
+ */
+
+/**
+ * Transforms Promise-based method return types based on returnFullResponse configuration
+ * 
+ * @template T - The original method return type
+ * @template TReturnFullResponse - Whether to return full response or just response.body
+ * 
+ * @example
+ * ```typescript
+ * // When returnFullResponse is false (default):
+ * // search() returns Promise<SearchResponse> instead of Promise<ApiResponse<SearchResponse>>
+ * 
+ * // When returnFullResponse is true:
+ * // search() returns Promise<ApiResponse<SearchResponse>> (original behavior)
+ * ```
+ */
+type TransformReturnType<T, TReturnFullResponse extends boolean | undefined> = 
+  T extends TransportRequestPromise<ApiResponse<infer TResponse, infer TContext>>
+    ? TReturnFullResponse extends true
+      ? TransportRequestPromise<ApiResponse<TResponse, TContext>>  // Return full ApiResponse
+      : Promise<TResponse>                                        // Return response.body only
+    : T extends TransportRequestCallback
+      ? TransportRequestCallback
+      : T;
+
+/**
+ * Transforms callback-based method signatures to match returnFullResponse behavior
+ * 
+ * @template T - The original callback method signature
+ * @template TReturnFullResponse - Whether to return full response or just response.body
+ * 
+ * @example
+ * ```typescript
+ * // When returnFullResponse is false (default):
+ * // search(params, (err, result) => {}) - result is SearchResponse
+ * 
+ * // When returnFullResponse is true:
+ * // search(params, (err, result) => {}) - result is ApiResponse<SearchResponse>
+ * ```
+ */
+type TransformCallbackType<T, TReturnFullResponse extends boolean | undefined> = 
+  T extends (callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
+    ? TReturnFullResponse extends true
+      ? T  // Keep original callback signature
+      : (callback: (err: any, result: TResponse) => void) => TransportRequestCallback
+    : T extends (params: infer P, callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
+      ? TReturnFullResponse extends true
+        ? T  // Keep original callback signature
+        : (params: P, callback: (err: any, result: TResponse) => void) => TransportRequestCallback
+      : T extends (params: infer P, options: infer O, callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
+        ? TReturnFullResponse extends true
+          ? T  // Keep original callback signature
+          : (params: P, options: O, callback: (err: any, result: TResponse) => void) => TransportRequestCallback
+        : T;
+
+/**
+ * Recursively transforms ALL methods of the OpenSearch client to handle returnFullResponse behavior
+ * 
+ * This type performs a deep transformation of the entire OpenSearch client interface,
+ * including nested objects like client.indices, client.cat, client.cluster, etc.
+ * Every method call will have the correct TypeScript types that match runtime behavior.
+ * 
+ * @template TClient - The OpenSearch client type to transform
+ * @template TReturnFullResponse - Whether to return full response or just response.body
+ * 
+ * @example
+ * ```typescript
+ * // All these methods are properly typed based on returnFullResponse:
+ * client.search()           // Promise<SearchResponse> or Promise<ApiResponse<SearchResponse>>
+ * client.bulk()             // Promise<BulkResponse> or Promise<ApiResponse<BulkResponse>>
+ * client.indices.create()   // Promise<IndicesCreateResponse> or Promise<ApiResponse<...>>
+ * client.cat.health()       // Promise<CatHealthResponse> or Promise<ApiResponse<...>>
+ * client.cluster.health()   // Promise<ClusterHealthResponse> or Promise<ApiResponse<...>>
+ * ```
+ */
+type TransformOpenSearchClient<
+  TClient extends OpenSearchClient,
+  TReturnFullResponse extends boolean | undefined
+> = {
+  [K in keyof TClient]: TClient[K] extends (...args: any[]) => any
+    ? TransformReturnType<TransformCallbackType<TClient[K], TReturnFullResponse>, TReturnFullResponse>
+    : TClient[K] extends object
+      ? TransformOpenSearchClient<TClient[K], TReturnFullResponse>  // Recursively transform nested objects
+      : TClient[K];
+};
 
 /**
  * Configuration options for the Elasticsearch/OpenSearch client
@@ -178,9 +275,9 @@ export interface StreamEvent<TDocument = unknown> {
 export type Callback<T = any> = (error?: Error | string | null, result?: T) => void;
 
 /**
- * Elasticsearch client interface with all available methods
+ * Base interface for Elasticsearch client methods that are not part of the standard OpenSearch client
  */
-export interface ElasticsearchClient extends OpenSearchClient {
+interface ElasticsearchClientExtensions {
   /**
    * Retrieve document IDs matching the specified queries
    * 
@@ -393,6 +490,40 @@ export interface ElasticsearchClient extends OpenSearchClient {
 }
 
 /**
+ * Elasticsearch client interface that combines OpenSearch client with custom extensions
+ * and handles returnFullResponse behavior for ALL methods
+ * 
+ * This type automatically transforms every single method in the OpenSearch client to return
+ * either response.body (default) or the full ApiResponse object based on configuration.
+ * 
+ * @template TReturnFullResponse - Controls return type behavior for all methods
+ *   - `false` or `undefined` (default): All methods return response.body
+ *   - `true`: All methods return full ApiResponse objects
+ * 
+ * @example
+ * ```typescript
+ * // Default behavior - all methods return response.body
+ * const client: ElasticsearchClient = connect('https://cluster.com');
+ * const searchResult = await client.search({ index: 'test' });
+ * // searchResult is SearchResponse, not ApiResponse<SearchResponse>
+ * 
+ * // Full response mode - all methods return ApiResponse
+ * const fullClient: ElasticsearchClient<true> = connect({ 
+ *   host: 'https://cluster.com', 
+ *   returnFullResponse: true 
+ * });
+ * const fullResult = await fullClient.search({ index: 'test' });
+ * // fullResult is ApiResponse<SearchResponse> with statusCode, headers, etc.
+ * 
+ * // Type inference from configuration
+ * const autoClient = connect({ returnFullResponse: true });
+ * // TypeScript automatically infers ElasticsearchClient<true>
+ * ```
+ */
+export type ElasticsearchClient<TReturnFullResponse extends boolean | undefined = false> = 
+  TransformOpenSearchClient<OpenSearchClient, TReturnFullResponse> & ElasticsearchClientExtensions;
+
+/**
  * Factory function that creates an Elasticsearch client
  * 
  * This function can accept either a pre-configured client object or configuration
@@ -419,9 +550,9 @@ export interface ElasticsearchClient extends OpenSearchClient {
  * const client = createElasticsearchClient(existingClient);
  * ```
  */
-declare function createElasticsearchClient(
-  clientConfigHost?: ElasticsearchClient | string | ElasticsearchClientConfig,
+declare function createElasticsearchClient<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
+  clientConfigHost?: ElasticsearchClient | string | TConfig,
   region?: string
-): ElasticsearchClient;
+): ElasticsearchClient<TConfig['returnFullResponse']>;
 
 export default createElasticsearchClient;

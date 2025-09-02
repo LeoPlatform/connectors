@@ -306,22 +306,32 @@ export interface ElasticsearchConnector {
    * Create a direct connection to Elasticsearch/OpenSearch
    * 
    * Returns a client instance with all the search, indexing, and streaming capabilities.
+   * The return type is automatically inferred based on the returnFullResponse configuration.
    * 
    * @param config Configuration for the Elasticsearch client
-   * @returns Configured Elasticsearch client
+   * @returns Configured Elasticsearch client with proper return types
    * @example
    * ```typescript
+   * // Returns response.body for all methods (default behavior)
    * const client = connector.connect('https://my-cluster.es.amazonaws.com');
    * 
-   * // Or with full configuration
-   * const client = connector.connect({
+   * // Returns full ApiResponse objects for all methods
+   * const fullResponseClient = connector.connect({
    *   host: 'https://my-cluster.es.amazonaws.com',
    *   awsConfig: { region: 'us-east-1' },
-   *   returnFullResponse: false
+   *   returnFullResponse: true
    * });
+   * 
+   * // Type-safe: search returns SearchResponse<TDocument> (response.body)
+   * const searchResult = await client.search({ index: 'my-index' });
+   * 
+   * // Type-safe: search returns ApiResponse<SearchResponse<TDocument>>
+   * const fullResult = await fullResponseClient.search({ index: 'my-index' });
    * ```
    */
-  connect(config?: ElasticsearchClient | string | ElasticsearchClientConfig): ElasticsearchClient;
+  connect<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
+    config?: ElasticsearchClient | string | TConfig
+  ): ElasticsearchClient<TConfig['returnFullResponse']>;
 
   /**
    * Create a checksum handler for data integrity operations
@@ -350,7 +360,9 @@ export interface ElasticsearchConnector {
    * });
    * ```
    */
-  checksum(config?: ElasticsearchClient | string | ElasticsearchClientConfig): ChecksumHandler;
+  checksum<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
+    config?: ElasticsearchClient | string | TConfig
+  ): ChecksumHandler;
 }
 
 /**
