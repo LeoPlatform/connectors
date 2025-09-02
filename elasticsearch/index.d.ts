@@ -1,5 +1,5 @@
 import { ElasticsearchClient, ElasticsearchClientConfig } from './lib/connect';
-import * as OpenSearchTypes from '@opensearch-project/opensearch/api/types';
+import * as OpenSearchTypes from '@opensearch-project/opensearch/api/_types';
 
 /**
  * Configuration for checksum operations
@@ -16,7 +16,7 @@ export interface ChecksumSettings {
   /** Array of field names to include in checksum calculations */
   fields: string[];
   /** Optional additional query to filter documents */
-  query?: OpenSearchTypes.QueryDslQueryContainer;
+  query?: OpenSearchTypes.Common_QueryDsl.QueryContainer;
   /** Whether to track total hits accurately */
   track_total_hits?: boolean;
 }
@@ -330,8 +330,8 @@ export interface ElasticsearchConnector {
    * ```
    */
   connect<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
-    config?: ElasticsearchClient | string | TConfig
-  ): ElasticsearchClient<TConfig['returnFullResponse']>;
+    config?: ElasticsearchClient<TConfig> | string | TConfig
+  ): ElasticsearchClient<TConfig>;
 
   /**
    * Create a checksum handler for data integrity operations
@@ -360,9 +360,7 @@ export interface ElasticsearchConnector {
    * });
    * ```
    */
-  checksum<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
-    config?: ElasticsearchClient | string | TConfig
-  ): ChecksumHandler;
+  checksum(config?: ElasticsearchClient | string | ElasticsearchClientConfig): ChecksumHandler;
 }
 
 /**

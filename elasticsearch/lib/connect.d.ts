@@ -1,11 +1,11 @@
 import { 
-  Client as OpenSearchClient,
-  ApiResponse,
-  TransportRequestPromise,
-  TransportRequestCallback
+	Client as OpenSearchClient,
+	ApiResponse
 } from '@opensearch-project/opensearch';
-import * as OpenSearchTypes from '@opensearch-project/opensearch/api/types';
-import { WritableStream, TransformStream } from 'stream';
+import { TransportRequestCallback, TransportRequestPromise } from '@opensearch-project/opensearch/lib/Transport';
+import * as OpenSearchAPI from '@opensearch-project/opensearch/api';
+import * as OpenSearchTypes from '@opensearch-project/opensearch/api/_types';
+import { Writable, Transform } from 'stream';
 
 /**
  * Advanced TypeScript type system for handling returnFullResponse behavior
@@ -19,23 +19,28 @@ import { WritableStream, TransformStream } from 'stream';
 /**
  * Transforms Promise-based method return types based on returnFullResponse configuration
  * 
+ * In OpenSearch 3.5.1, methods return TransportRequestPromise<SpecificResponse> where
+ * SpecificResponse extends ApiResponse and has a body property with the actual data.
+ * 
  * @template T - The original method return type
  * @template TReturnFullResponse - Whether to return full response or just response.body
  * 
  * @example
  * ```typescript
  * // When returnFullResponse is false (default):
- * // search() returns Promise<SearchResponse> instead of Promise<ApiResponse<SearchResponse>>
+ * // search() returns Promise<SearchResponseBody> instead of Promise<SearchResponse>
  * 
  * // When returnFullResponse is true:
- * // search() returns Promise<ApiResponse<SearchResponse>> (original behavior)
+ * // search() returns Promise<SearchResponse> (original behavior)
  * ```
  */
 type TransformReturnType<T, TReturnFullResponse extends boolean | undefined> = 
-  T extends TransportRequestPromise<ApiResponse<infer TResponse, infer TContext>>
-    ? TReturnFullResponse extends true
-      ? TransportRequestPromise<ApiResponse<TResponse, TContext>>  // Return full ApiResponse
-      : Promise<TResponse>                                        // Return response.body only
+  T extends TransportRequestPromise<infer TResponse>
+    ? TResponse extends { body: infer TBody }
+      ? TReturnFullResponse extends true
+        ? TransportRequestPromise<TResponse>  // Return full response (SearchResponse, BulkResponse, etc.)
+        : Promise<TBody>                      // Return response.body only (SearchResponseBody, BulkResponseBody, etc.)
+      : T  // If response doesn't have body property, return as-is
     : T extends TransportRequestCallback
       ? TransportRequestCallback
       : T;
@@ -43,31 +48,39 @@ type TransformReturnType<T, TReturnFullResponse extends boolean | undefined> =
 /**
  * Transforms callback-based method signatures to match returnFullResponse behavior
  * 
+ * In OpenSearch 3.5.1, callback functions receive SpecificResponse objects that extend ApiResponse.
+ * 
  * @template T - The original callback method signature
  * @template TReturnFullResponse - Whether to return full response or just response.body
  * 
  * @example
  * ```typescript
  * // When returnFullResponse is false (default):
- * // search(params, (err, result) => {}) - result is SearchResponse
+ * // search(params, (err, result) => {}) - result is SearchResponseBody
  * 
  * // When returnFullResponse is true:
- * // search(params, (err, result) => {}) - result is ApiResponse<SearchResponse>
+ * // search(params, (err, result) => {}) - result is SearchResponse
  * ```
  */
 type TransformCallbackType<T, TReturnFullResponse extends boolean | undefined> = 
-  T extends (callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
-    ? TReturnFullResponse extends true
-      ? T  // Keep original callback signature
-      : (callback: (err: any, result: TResponse) => void) => TransportRequestCallback
-    : T extends (params: infer P, callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
+  T extends (callback: (err: any, result: infer TResponse) => void) => any
+    ? TResponse extends { body: infer TBody }
       ? TReturnFullResponse extends true
         ? T  // Keep original callback signature
-        : (params: P, callback: (err: any, result: TResponse) => void) => TransportRequestCallback
-      : T extends (params: infer P, options: infer O, callback: (err: any, result: ApiResponse<infer TResponse, any>) => void) => any
+        : (callback: (err: any, result: TBody) => void) => TransportRequestCallback
+      : T  // If response doesn't have body property, return as-is
+    : T extends (params: infer P, callback: (err: any, result: infer TResponse) => void) => any
+      ? TResponse extends { body: infer TBody }
         ? TReturnFullResponse extends true
           ? T  // Keep original callback signature
-          : (params: P, options: O, callback: (err: any, result: TResponse) => void) => TransportRequestCallback
+          : (params: P, callback: (err: any, result: TBody) => void) => TransportRequestCallback
+        : T  // If response doesn't have body property, return as-is
+      : T extends (params: infer P, options: infer O, callback: (err: any, result: infer TResponse) => void) => any
+        ? TResponse extends { body: infer TBody }
+          ? TReturnFullResponse extends true
+            ? T  // Keep original callback signature
+            : (params: P, options: O, callback: (err: any, result: TBody) => void) => TransportRequestCallback
+          : T  // If response doesn't have body property, return as-is
         : T;
 
 /**
@@ -91,12 +104,12 @@ type TransformCallbackType<T, TReturnFullResponse extends boolean | undefined> =
  * ```
  */
 type TransformOpenSearchClient<
-  TClient extends OpenSearchClient,
+  TClient extends Record<string, any>,
   TReturnFullResponse extends boolean | undefined
 > = {
   [K in keyof TClient]: TClient[K] extends (...args: any[]) => any
     ? TransformReturnType<TransformCallbackType<TClient[K], TReturnFullResponse>, TReturnFullResponse>
-    : TClient[K] extends object
+    : TClient[K] extends Record<string, any>
       ? TransformOpenSearchClient<TClient[K], TReturnFullResponse>  // Recursively transform nested objects
       : TClient[K];
 };
@@ -127,7 +140,7 @@ export interface ElasticsearchClientConfig {
  * Query parameters for Elasticsearch search operations
  * Based on OpenSearch SearchRequest interface for type safety
  */
-export interface ElasticsearchQuery extends Omit<OpenSearchTypes.SearchRequest, 'index'> {
+export interface ElasticsearchQuery extends Omit<OpenSearchAPI.Search_Request, 'index'> {
   /** The index or indices to search */
   index?: string | string[];
   /** The document type (deprecated in newer ES versions but still supported) */
@@ -138,17 +151,17 @@ export interface ElasticsearchQuery extends Omit<OpenSearchTypes.SearchRequest, 
  * Configuration for scroll-based queries
  * Combines OpenSearch SearchRequest and ScrollRequest interfaces with custom extensions
  */
-export interface ScrollQueryData extends Omit<OpenSearchTypes.SearchRequest, 'index'> {
+export interface ScrollQueryData extends Omit<OpenSearchAPI.Search_Request, 'index' | 'source'> {
   /** The index or indices to search */
   index?: string | string[];
   /** The document type (deprecated in newer ES versions but still supported) */
   type?: string;
   /** Fields to include in the response (alias for _source) */
-  source?: OpenSearchTypes.Fields | boolean;
+  source?: OpenSearchTypes.Common.Fields | boolean;
   /** Maximum number of results to return (default: 100000) */
   max?: number;
   /** Transform function or predefined transform type */
-  return?: 'full' | 'source' | ((item: OpenSearchTypes.SearchHit) => any);
+  return?: 'full' | 'source' | ((item: OpenSearchTypes.Core_Search.Hit) => any);
   /** Existing scroll ID to continue from */
   scrollid?: string;
 }
@@ -165,14 +178,14 @@ export interface ScrollQueryResults<TDocument = unknown> {
   /** Information about each scroll batch */
   scrolls: Array<{
     qty: number;
-    total: OpenSearchTypes.SearchHitsMetadata['total'];
+    total: OpenSearchTypes.Core_Search.TotalHits;
   }>;
   /** Total time taken for all scroll operations */
   took: number;
   /** Total number of matching documents */
-  total?: OpenSearchTypes.SearchHitsMetadata<TDocument>['total'];
+  total?: OpenSearchTypes.Core_Search.TotalHits;
   /** Aggregation results if requested */
-  aggregations?: Record<string, OpenSearchTypes.AggregationsAggregate>;
+  aggregations?: Record<string, OpenSearchTypes.Common_Aggregations.Aggregate>;
   /** Current scroll ID for continuation */
   scrollid?: string;
 }
@@ -187,7 +200,7 @@ export interface GetIdsQuery {
   /** The document type */
   type?: string;
   /** The query DSL object */
-  query: OpenSearchTypes.QueryDslQueryContainer;
+  query: OpenSearchTypes.Common_QueryDsl.QueryContainer;
 }
 
 /**
@@ -275,9 +288,65 @@ export interface StreamEvent<TDocument = unknown> {
 export type Callback<T = any> = (error?: Error | string | null, result?: T) => void;
 
 /**
+ * Conditional response type helper - returns body-only or full response based on config
+ */
+type ConditionalResponse<
+  TBody, 
+  TFull = ApiResponse, 
+  TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig
+> = TConfig['returnFullResponse'] extends true ? TFull : TBody;
+
+/**
+ * Core OpenSearch method overrides with conditional response types
+ */
+interface ElasticsearchCoreMethodOverrides<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig> {
+  search<TDocument = unknown>(
+    params?: ElasticsearchQuery,
+    options?: any
+  ): Promise<ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Search_Response, TConfig>>;
+  
+  search<TDocument = unknown>(
+    params: ElasticsearchQuery,
+    callback: (err: any, result: ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Search_Response, TConfig>) => void
+  ): void;
+  
+  search<TDocument = unknown>(
+    params: ElasticsearchQuery,
+    options: any,
+    callback: (err: any, result: ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Search_Response, TConfig>) => void
+  ): void;
+  
+  bulk(
+    params: { body: any[] },
+    options?: any
+  ): Promise<ConditionalResponse<OpenSearchAPI.Bulk_ResponseBody, OpenSearchAPI.Bulk_Response, TConfig>>;
+  
+  bulk(
+    params: { body: any[] },
+    callback: (err: any, result: ConditionalResponse<OpenSearchAPI.Bulk_ResponseBody, OpenSearchAPI.Bulk_Response, TConfig>) => void
+  ): void;
+  
+  bulk(
+    params: { body: any[] },
+    options: any,
+    callback: (err: any, result: ConditionalResponse<OpenSearchAPI.Bulk_ResponseBody, OpenSearchAPI.Bulk_Response, TConfig>) => void
+  ): void;
+  
+  scroll(
+    params?: { scroll_id?: string; scroll?: string },
+    options?: any
+  ): Promise<ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Scroll_Response, TConfig>>;
+  
+  scroll(
+    params: { scroll_id?: string; scroll?: string },
+    callback: (err: any, result: ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Scroll_Response, TConfig>) => void
+  ): void;
+}
+
+/**
  * Base interface for Elasticsearch client methods that are not part of the standard OpenSearch client
  */
-interface ElasticsearchClientExtensions {
+interface ElasticsearchClientExtensions<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig> {
   /**
    * Retrieve document IDs matching the specified queries
    * 
@@ -327,12 +396,12 @@ interface ElasticsearchClientExtensions {
    */
   query<TDocument = unknown>(
     query: ElasticsearchQuery, 
-    callback: Callback<OpenSearchTypes.SearchResponse<TDocument>>
+    callback: (err: any, result: ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Search_Response, TConfig>, fields?: any) => void
   ): void;
   query<TDocument = unknown>(
     query: ElasticsearchQuery, 
     params: any, 
-    callback: Callback<OpenSearchTypes.SearchResponse<TDocument>>
+    callback: (err: any, result: ConditionalResponse<OpenSearchTypes.Core_Search.ResponseBody, OpenSearchAPI.Search_Response, TConfig>, fields?: any) => void
   ): void;
 
   /**
@@ -420,7 +489,7 @@ interface ElasticsearchClientExtensions {
    *   .pipe(destinationStream);
    * ```
    */
-  stream(settings: StreamSettings): TransformStream;
+  stream(settings: StreamSettings): Transform;
 
   /**
    * Create a parallel processing stream for high-throughput Elasticsearch operations
@@ -443,7 +512,7 @@ interface ElasticsearchClientExtensions {
    * });
    * ```
    */
-  streamParallel(settings: ParallelStreamSettings): TransformStream;
+  streamParallel(settings: ParallelStreamSettings): Transform;
 
   /**
    * Stream data to a table from S3
@@ -476,7 +545,7 @@ interface ElasticsearchClientExtensions {
    * });
    * ```
    */
-  streamToTableBatch<TDocument = unknown>(opts?: BatchOptions): WritableStream;
+  streamToTableBatch<TDocument = unknown>(opts?: BatchOptions): Writable;
 
   /**
    * Create a stream for table operations
@@ -486,42 +555,64 @@ interface ElasticsearchClientExtensions {
    * @param opts Configuration options
    * @returns A writable stream for table operations
    */
-  streamToTable<TDocument = unknown>(opts?: BatchOptions): WritableStream;
+  streamToTable<TDocument = unknown>(opts?: BatchOptions): Writable;
 }
 
 /**
  * Elasticsearch client interface that combines OpenSearch client with custom extensions
  * and handles returnFullResponse behavior for ALL methods
  * 
- * This type automatically transforms every single method in the OpenSearch client to return
- * either response.body (default) or the full ApiResponse object based on configuration.
+ * This type uses a hybrid approach: explicit method overrides for core methods combined with
+ * generic transformation for all other OpenSearch client methods to ensure comprehensive coverage.
  * 
  * @template TReturnFullResponse - Controls return type behavior for all methods
  *   - `false` or `undefined` (default): All methods return response.body
- *   - `true`: All methods return full ApiResponse objects
+ *   - `true`: All methods return full response objects
  * 
  * @example
  * ```typescript
  * // Default behavior - all methods return response.body
  * const client: ElasticsearchClient = connect('https://cluster.com');
  * const searchResult = await client.search({ index: 'test' });
- * // searchResult is SearchResponse, not ApiResponse<SearchResponse>
+ * // searchResult is SearchResponseBody, not SearchResponse
  * 
- * // Full response mode - all methods return ApiResponse
+ * // Full response mode - all methods return full response
  * const fullClient: ElasticsearchClient<true> = connect({ 
  *   host: 'https://cluster.com', 
  *   returnFullResponse: true 
  * });
  * const fullResult = await fullClient.search({ index: 'test' });
- * // fullResult is ApiResponse<SearchResponse> with statusCode, headers, etc.
- * 
- * // Type inference from configuration
- * const autoClient = connect({ returnFullResponse: true });
- * // TypeScript automatically infers ElasticsearchClient<true>
+ * // fullResult is SearchResponse with statusCode, headers, body, etc.
  * ```
  */
-export type ElasticsearchClient<TReturnFullResponse extends boolean | undefined = false> = 
-  TransformOpenSearchClient<OpenSearchClient, TReturnFullResponse> & ElasticsearchClientExtensions;
+/**
+ * Main Elasticsearch client type with conditional response behavior
+ * 
+ * This client extends the OpenSearch client with custom methods and conditional
+ * response types based on the `returnFullResponse` configuration.
+ * 
+ * @template TConfig - The configuration type that determines response behavior
+ * 
+ * @example
+ * ```typescript
+ * // Default behavior - returns response.body only
+ * const client = createElasticsearchClient('https://localhost:9200');
+ * const result = await client.search({ index: 'test' });
+ * // result is SearchResponseBody with hits, took, etc.
+ * 
+ * // Full response behavior - returns complete response
+ * const fullClient = createElasticsearchClient({
+ *   host: 'https://localhost:9200',
+ *   returnFullResponse: true
+ * });
+ * const fullResult = await fullClient.search({ index: 'test' });
+ * // fullResult is SearchResponse with statusCode, headers, body, etc.
+ * ```
+ */
+export type ElasticsearchClient<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig> = 
+  Omit<OpenSearchClient, 'search' | 'bulk' | 'scroll'>
+  & ElasticsearchCoreMethodOverrides<TConfig>
+  & ElasticsearchClientExtensions<TConfig>;
 
 /**
  * Factory function that creates an Elasticsearch client
@@ -551,8 +642,8 @@ export type ElasticsearchClient<TReturnFullResponse extends boolean | undefined 
  * ```
  */
 declare function createElasticsearchClient<TConfig extends ElasticsearchClientConfig = ElasticsearchClientConfig>(
-  clientConfigHost?: ElasticsearchClient | string | TConfig,
+  clientConfigHost?: ElasticsearchClient<TConfig> | string | TConfig,
   region?: string
-): ElasticsearchClient<TConfig['returnFullResponse']>;
+): ElasticsearchClient<TConfig>;
 
 export default createElasticsearchClient;

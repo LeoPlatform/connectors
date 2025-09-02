@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-elasticsearch",
-	"version": "3.0.5",
+	"version": "3.0.6",
 	"description": "",
 	"main": "index.js",
 	"scripts": {
@@ -11,7 +11,7 @@
 	"dependencies": {
 		"@aws-sdk/credential-provider-node": "^3.490.0",
 		"@aws-sdk/credential-providers": "^3.490.0",
-		"@opensearch-project/opensearch": "^2.5.0",
+		"@opensearch-project/opensearch": "^3.5.1",
 		"leo-aws": "^4.0.0",
 		"leo-connector-common": "^5.0.0",
 		"leo-sdk": "^7.1.0"
