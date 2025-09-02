@@ -43,9 +43,15 @@ module.exports = function(clientConfigHost, region) {
 			}
 			config = {
 				host: clientConfigHost,
+				suggestCompression: true,
 			};
 		} else {
-			config = clientConfigHost;
+			config = Object.assign(
+				{
+					suggestCompression: true,
+				},
+				clientConfigHost
+			);
 		}
 
 		if (region) {
