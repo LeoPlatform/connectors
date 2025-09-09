@@ -105,7 +105,7 @@ module.exports = function(clientConfigHost, region) {
 	}
 
 	let queryCount = 0;
-	let client = Object.assign(m, {
+	let client = Object.assign({}, m, {
 		getIds: (queries, done) => {
 			// Run any deletes and finish
 			let allIds = [];
