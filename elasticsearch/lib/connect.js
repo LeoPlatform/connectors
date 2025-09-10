@@ -26,7 +26,7 @@ const s3 = require('leo-aws/factory')('S3', {
  *
  * @param clientConfigHost
  * @param region
- * @returns {({search} & {disconnect: m.disconnect, streamToTableFromS3: m.streamToTableFromS3, queryWithScroll: (function(*, *=): Promise<unknown>), describeTable: m.describeTable, stream: (function(*=)), streamToTableBatch: (function(*=): *), query: m.query, getIds: m.getIds, describeTables: m.describeTables, streamParallel: (function(*=)), streamToTable: (function(*=): *)}) | any}
+ * @returns {({search} & {disconnect: m.disconnect, streamToTableFromS3: m.streamToTableFromS3, queryWithScroll: (function(*, *=): Promise<unknown>), describeTable: m.describeTable, stream: (function(*=)), streamToTableBatch: (function(*=): *), query: m.query, getIds: m.getIds, describeTables: m.describeTables, streamParallel: (function(*=)), streamToTable: (function(*=): *), getOriginalClient: (function(): *)}) | any}
  */
 module.exports = function(clientConfigHost, region) {
 	// elasticsearch client
@@ -105,7 +105,9 @@ module.exports = function(clientConfigHost, region) {
 	}
 
 	let queryCount = 0;
-	let client = Object.assign({}, m, {
+	
+	// Define the custom methods object for the Proxy
+	const customMethods = {
 		getIds: (queries, done) => {
 			// Run any deletes and finish
 			let allIds = [];
@@ -652,8 +654,60 @@ module.exports = function(clientConfigHost, region) {
 				records: 1000
 			}, opts || {});
 			return this.streamToTableBatch(opts);
+		},
+		getOriginalClient: function() {
+			return m;
+		}
+	};
+
+	// Use Proxy instead of Object.assign to preserve all OpenSearch client functionality
+	// while allowing method overrides (including the problematic 'query' method)
+	let client = new Proxy(m, {
+		get(target, prop, receiver) {
+			// If we have a custom method, use it
+			if (prop in customMethods) {
+				const customMethod = customMethods[prop];
+				// Bind the custom method to the proxied client so 'this' works correctly
+				if (typeof customMethod === 'function') {
+					return customMethod.bind(client);
+				}
+				return customMethod;
+			}
+			
+			// Otherwise, get the property from the original client
+			const value = Reflect.get(target, prop, receiver);
+			
+			// If it's a function, bind it to the original client to preserve context
+			if (typeof value === 'function') {
+				return value.bind(target);
+			}
+			
+			return value;
+		},
+
+		has(target, prop) {
+			return prop in customMethods || Reflect.has(target, prop);
+		},
+
+		ownKeys(target) {
+			const customKeys = Object.keys(customMethods);
+			const originalKeys = Reflect.ownKeys(target);
+			return [...new Set([...customKeys, ...originalKeys])];
+		},
+
+		getOwnPropertyDescriptor(target, prop) {
+			if (prop in customMethods) {
+				return {
+					configurable: true,
+					enumerable: true,
+					value: customMethods[prop],
+					writable: true
+				};
+			}
+			return Reflect.getOwnPropertyDescriptor(target, prop);
 		}
 	});
+
 	return client;
 };
 
