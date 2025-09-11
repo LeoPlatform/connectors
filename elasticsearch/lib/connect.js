@@ -359,7 +359,7 @@ module.exports = function(clientConfigHost, region) {
 								}
 							});
 							upload.done().then((data) => {
-								done (null, Object.assign(meta, {
+								done (err, Object.assign(meta, {
 									payload: {
 										error: err,
 										file: data && data.Location,
