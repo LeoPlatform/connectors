@@ -212,7 +212,7 @@ module.exports = function(clientConfigHost, region) {
 					if (scroll && info.total !== results.qty && max > results.qty && results.scrollid) {
 						client.scroll({
 							scroll,
-							scrollId: data._scroll_id,
+							scroll_id: data._scroll_id,
 						}, getUntilDone);
 					} else {
 						if (callback) {
@@ -228,7 +228,7 @@ module.exports = function(clientConfigHost, region) {
 					logger.debug('Starting As Scroll');
 					client.scroll({
 						scroll,
-						scrollId: data.scrollid,
+						scroll_id: data.scrollid,
 					}, getUntilDone);
 				} else {
 					logger.debug('Starting As Query');
