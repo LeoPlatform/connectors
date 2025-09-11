@@ -177,7 +177,7 @@ module.exports = function(client) {
 
 			if (scroll && ((typeof result.hits.total === 'object') ? result.hits.total.value : result.hits.total) !== results.qty) {
 				es.scroll({
-					scrollId: result._scroll_id,
+					scroll_id: result._scroll_id,
 					scroll: scroll
 				}, getUntilDone)
 			} else {
