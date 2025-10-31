@@ -387,6 +387,10 @@ module.exports = {
 					}).then(async (data) => {
 						if (data) {
 							data = transform(data);
+							// If transform returns a Promise, await it
+							if (data && typeof data.then === 'function') {
+								data = await data;
+							}
 							if (data) {
 								if (Array.isArray(data)) {
 									for (const each of data) {
