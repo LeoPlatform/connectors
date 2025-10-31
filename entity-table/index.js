@@ -1,5 +1,6 @@
 const leoaws = require('leo-aws');
 let leo = require("leo-sdk");
+const { ParserName } = require("leo-sdk/lib/stream/helper/parser-util");
 const logger = require('leo-logger')('leo-connector-entity-table');
 let ls = leo.streams;
 let refUtil = require("leo-sdk/lib/reference.js");
@@ -211,9 +212,29 @@ module.exports = {
 			if (opts.parserOpts) {
 				readOpts.parserOpts = opts.parserOpts;
 			}
+			// eslint-disable-next-line no-unused-vars
+			const filter = opts.filter ? opts.filter : function (_obj) { return true; };
+			let recordsProcessed = 0;
 			ls.pipe(
 				leo.read(botId, queue, readOpts),
 				stats,
+				leo.streams.through((event, done) => {
+					try {
+						const result = filter(event);
+						if (result) {
+							recordsProcessed++;
+							if (readOpts.parser == ParserName.FastJson && event.__unparsed_value__) {
+								event.payload = JSON.parse(event.__unparsed_value__).payload;
+								delete event.__unparsed_value__;
+							}
+							done(null, event);
+						} else {
+							done();
+						}
+					} catch (e) {
+						done(e);
+					}
+				}),	
 				ls.through((event, done) => {
 					done(null, event.payload);
 				}),
@@ -233,7 +254,7 @@ module.exports = {
 							leo.bot.checkpoint(botId, system, {
 								type: "write",
 								eid: statsData.eid,
-								records: statsData.units,
+								records: recordsProcessed,
 								started_timestamp: statsData.started_timestamp,
 								ended_timestamp: statsData.ended_timestamp,
 								source_timestamp: statsData.source_timestamp
@@ -366,6 +387,10 @@ module.exports = {
 					}).then(async (data) => {
 						if (data) {
 							data = transform(data);
+							// If transform returns a Promise, await it
+							if (data && typeof data.then === 'function') {
+								data = await data;
+							}
 							if (data) {
 								if (Array.isArray(data)) {
 									for (const each of data) {

@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-entity-table",
-	"version": "4.0.3",
+	"version": "4.0.4",
 	"description": "A Leo entity table connector",
 	"repository": {
 		"type": "git",
