@@ -421,6 +421,8 @@ module.exports = function(clientConfigHost, region) {
 				logger.debug('Transform: On Flush');
 				callback();
 			});
+			let retryOnConflict = settings.retryOnConflict || 3;
+			format.retryOnConflict = retryOnConflict;
 
 			format.push = (function(self, push) {
 				return function(meta, command, data) {
