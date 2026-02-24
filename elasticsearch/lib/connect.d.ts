@@ -219,6 +219,8 @@ export interface StreamSettings {
   fieldsUndefined?: boolean;
   /** Whether to save results to S3 */
   dontSaveResults?: boolean;
+  /** Retry on conflict, default is 3 */
+  retryOnConflict?: number;
 }
 
 /**
