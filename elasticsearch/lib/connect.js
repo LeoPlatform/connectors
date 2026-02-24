@@ -278,7 +278,7 @@ module.exports = function(clientConfigHost, region) {
 				logger.debug('Transform: On Flush');
 				callback();
 			});
-			let retryOnConflict = settings.retryOnConflict || 3;
+			let retryOnConflict = settings.retryOnConflict ?? 3;
 			format.retryOnConflict = retryOnConflict;
 
 			format.push = (function(self, push) {
@@ -421,7 +421,7 @@ module.exports = function(clientConfigHost, region) {
 				logger.debug('Transform: On Flush');
 				callback();
 			});
-			let retryOnConflict = settings.retryOnConflict || 3;
+			let retryOnConflict = settings.retryOnConflict ?? 3;
 			format.retryOnConflict = retryOnConflict;
 
 			format.push = (function(self, push) {
@@ -750,7 +750,7 @@ function deleteByQuery(context, client, event, data, callback) {
 				_id: data.id,
 				_index: data.index,
 				_type: data.type,
-				retry_on_conflict: context.retryOnConflict || 3,
+				retry_on_conflict: context.retryOnConflict ?? 3,
 			},
 		}, {
 			doc: data.doc,
