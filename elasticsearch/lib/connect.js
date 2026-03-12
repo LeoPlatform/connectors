@@ -321,25 +321,23 @@ module.exports = function(clientConfigHost, region) {
 						}));
 						return;
 					}
-					client.bulk({
+					bulkWithRetry(client, {
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
-					}, function(err, data) {
-						if (err || data.errors) {
-							if (data && data.Message) {
+					}, settings.maxBulkRetries).then(data => {
+						let err = null;
+						if (data.errors) {
+							if (data.Message) {
 								err = data.Message;
-							} else if (data && data.items) {
+							} else if (data.items) {
 								logger.error(data.items.filter((r) => {
 									return 'error' in r.update;
 								}).map(e => JSON.stringify(e, null, 2)));
 								err = 'Cannot load';
 							} else {
-								logger.error(err);
 								err = 'Cannot load';
 							}
-						}
-						if (err) {
 							logger.error(err);
 						}
 
@@ -360,11 +358,11 @@ module.exports = function(clientConfigHost, region) {
 									})
 								}
 							});
-							upload.done().then((data) => {
-								done (err, Object.assign(meta, {
+							upload.done().then((uploadResult) => {
+								done(err, Object.assign(meta, {
 									payload: {
 										error: err,
-										file: data && data.Location,
+										file: uploadResult && uploadResult.Location,
 									},
 								}));
 							}).catch((uploaderr) => {
@@ -378,6 +376,9 @@ module.exports = function(clientConfigHost, region) {
 						} else {
 							done(err, meta);
 						}
+					}).catch(err => {
+						logger.error(err);
+						done(err);
 					});
 				} else {
 					done();
@@ -476,31 +477,29 @@ module.exports = function(clientConfigHost, region) {
 					}
 					logger.time(index + 'es_emit');
 					logger.time(index + 'es_bulk');
-					client.bulk({
+					bulkWithRetry(client, {
 						_source: false,
 						body,
 						fields: settings.fieldsUndefined ? undefined : false,
-					}, function(err, data) {
+					}, settings.maxBulkRetries).then(data => {
 						logger.timeEnd(index + 'es_bulk');
-						logger.info(index, !err && data.took);
+						logger.info(index, data.took);
 
-						if (data && data.took) {
+						if (data.took) {
 							lastDuration = Math.max(lastDuration, data.took);
 						}
-						if (err || data.errors) {
-							if (data && data.Message) {
+						let err = null;
+						if (data.errors) {
+							if (data.Message) {
 								err = data.Message;
-							} else if (data && data.items) {
+							} else if (data.items) {
 								logger.error(data.items.filter((r) => {
 									return 'error' in r.update;
 								}).map(e => JSON.stringify(e, null, 2)));
 								err = 'Cannot load';
 							} else {
-								logger.error(err);
 								err = 'Cannot load';
 							}
-						}
-						if (err) {
 							logger.error(err);
 						}
 
@@ -522,11 +521,11 @@ module.exports = function(clientConfigHost, region) {
 									})
 								}
 							});
-							upload.done().then((data) => {
+							upload.done().then((uploadResult) => {
 								done(err, Object.assign(meta, {
 									payload: {
 										error: err,
-										file: data && data.Location,
+										file: uploadResult && uploadResult.Location,
 									},
 								}));
 							}).catch((uploaderr) => {
@@ -548,6 +547,11 @@ module.exports = function(clientConfigHost, region) {
 								},
 							}));
 						}
+					}).catch(err => {
+						logger.timeEnd(index + 'es_bulk');
+						logger.error(err);
+						logger.timeEnd(index + 'es_emit');
+						done(err);
 					});
 				}, (err, results) => {
 					toSend = [];
@@ -776,5 +780,24 @@ function deleteByQuery(context, client, event, data, callback) {
 		});
 	} else {
 		callback();
+	}
+}
+
+async function bulkWithRetry(client, params, maxRetries = 5) {
+	let attempt = 0;
+	while (true) {
+		try {
+			return await client.bulk(params);
+		} catch (err) {
+			const statusCode = err.meta?.statusCode;
+			const isRetryable = statusCode === 429 || (statusCode >= 500 && statusCode < 600);
+			if (!isRetryable || attempt >= maxRetries) {
+				throw err;
+			}
+			const delay = 100 * Math.pow(2, attempt);
+			logger.warn(`ES bulk got ${statusCode}, retrying (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms`);
+			await new Promise(resolve => setTimeout(resolve, delay));
+			attempt++;
+		}
 	}
 }
