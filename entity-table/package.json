@@ -23,7 +23,7 @@
 		"js-beautify": "1.10.2",
 		"leo-aws": "2.0.1",
 		"leo-logger": "1.0.1",
-		"leo-sdk": "5.0.16"
+		"leo-sdk": "6.0.7"
 	},
 	"devDependencies": {
 		"chai": "^4.1.2",
