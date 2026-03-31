@@ -429,7 +429,7 @@ function toDynamoDB(table, opts) {
 					function(err, data) {
 						if (err) {
 							logger.info(`All ${myRecords.length} records failed! Retryable: ${err.retryable}`, err);
-							logger.error(myRecords);
+							logger.error(JSON.stringify(myRecords));
 							if (err.retryable) {
 								retry.backoff(err);
 							} else {
