@@ -27,7 +27,7 @@ module.exports = function(config) {
 	let isConnected = false;
 	let buffer = [];
 
-	if (!(connectionHash in connections)) {
+	if (!connections[connectionHash]) {
 		console.log("CREATING NEW SQLSERVER CONNECTION");
 		pool = connections[connectionHash] = new mssql.ConnectionPool(config);
 
