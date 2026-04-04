@@ -9,7 +9,7 @@
 	"author": "",
 	"license": "MIT",
 	"dependencies": {
-		"elasticsearch": "16.5.0",
+		"elasticsearch": "16.7.3",
 		"http-aws-es": "6.0.0",
 		"leo-connector-common": "4.0.6"
 	},
