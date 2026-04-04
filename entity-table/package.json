@@ -20,7 +20,7 @@
 	"dependencies": {
 		"async": "2.6.3",
 		"backoff": "2.5.0",
-		"js-beautify": "1.10.2",
+		"js-beautify": "1.14.10",
 		"leo-aws": "2.0.1",
 		"leo-logger": "1.0.1",
 		"leo-sdk": "5.0.16"
