@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/LeoPlatform/connectors#readme",
   "dependencies": {
-    "chai": "4.2.0",
+    "chai": "4.4.1",
     "leo-connector-common": "4.0.6",
     "mysql2": "1.6.5",
     "zongji": "0.4.7"
