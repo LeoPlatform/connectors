@@ -28,7 +28,7 @@
 		"leo-logger": "1.0.1",
 		"leo-sdk": "5.0.16",
 		"leo-streams": "2.0.0",
-		"moment": "2.24.0",
+		"moment": "2.29.4",
 		"sqlstring": "2.3.1"
 	}
 }
