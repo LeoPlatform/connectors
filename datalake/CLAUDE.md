@@ -13,7 +13,7 @@ This connector handles ingestion of retailer platform event data from RStreams q
 - **`groups`** — queue routing (e.g., `"dim"`, `"quantity"`); determines which loader group processes this table
 - **`clusterKey`** — optional field for Databricks physical layout hint (`CLUSTER BY`); no effect on Redshift by default (see Coding Rules)
 - **Surrogate keys** — FarmFingerprint64 hashes of the natural key, computed in Node.js via `farmhash-modern` and written into the staging CSV
-- **Three pipeline stages** (each driven by configuration, not SQL): Ingest (event JSON → record), Tabulate (dedup + key prep), Merge (MERGE INTO Delta table)
+- **ETL pattern** (transformation before load): RStreams enrichments (change detection e.g. item-old-new → modified-product, record shaping e.g. modified-product → dimension) feed into offload (staging records to S3, mounting as a relation in Databricks, merging into live tables via DML MERGE)
 
 ## Architecture & Layout
 
@@ -22,13 +22,12 @@ This is a **library package** within the LeoPlatform/connectors monorepo. It is 
 **Projected structure** (code not yet written — matches sibling connector pattern):
 ```
 connectors/datalake/
-├── index.ts           # Main export — connector class extending leo-connector-common/base
-├── package.json       # TypeScript, mocha, farmhash-modern, Databricks SDK
-├── tsconfig.json      # Strict TypeScript
+├── index.js           # Main export — connector class extending leo-connector-common/base
+├── package.json       # mocha, farmhash-modern, Databricks SDK
 ├── lib/
-│   ├── connect.ts     # Databricks connection: staging CSV → temp view → MERGE INTO Delta
-│   ├── checksum.ts    # Checksumming (adapted from ../redshift/lib/checksum.js)
-│   └── dol.ts         # Domain Object Layer — Databricks SQL dialect query builder
+│   ├── connect.js     # Databricks connection: staging CSV → temp view → MERGE INTO Delta
+│   ├── checksum.js    # Checksumming (adapted from ../redshift/lib/checksum.js)
+│   └── dol.js         # Domain Object Layer — Databricks SQL dialect query builder
 ├── docs/              # Design docs and principles
 │   └── project-principles.md
 └── test/
@@ -37,9 +36,9 @@ connectors/datalake/
 ```
 
 **Key upstream reuse from `leo-connector-common`:**
-- `datawarehouse/combine.js` — dedup and sort by natural key before staging
-- `datawarehouse/transform.js` — parse event JSON into table record
-- `datawarehouse/load.js` — orchestrates the full Ingest → Tabulate → Merge pipeline
+- `datawarehouse/transform.js` — parse enriched event records (change-detected, shaped) into table record per `dw_fields` schema
+- `datawarehouse/combine.js` — dedup and sort by natural key before staging to S3
+- `datawarehouse/load.js` — orchestrates offload: stage records to S3, mount as relation in target DB, merge into live tables
 
 ## Deployment Framework
 
@@ -47,11 +46,7 @@ Library package only — no serverless.yml or CDK here. The bots that consume th
 
 ## Environments
 
-| Environment | DW-Fields DynamoDB table | Notes |
-|---|---|---|
-| Test | `TestDW-Fields-1H6FW657GOW3E` | |
-| Staging | `StagingDW-Fields-1EH4E5QRRYJ6U` | |
-| Production | `ProdDW-Fields-1B5OET8S6WRUF` | |
+Table name resolved at deploy time via CloudFormation export: `${proper}DW-Fields`, injected as `process.env.DWFields`.
 
 Databricks workspace targets are configured per environment via environment variables (dev / preprod / prod workspaces). Credentials come from AWS Secrets Manager.
 
@@ -60,8 +55,8 @@ Databricks workspace targets are configured per environment via environment vari
 | Resource | Details |
 |---|---|
 | DynamoDB `${Stage}DW-Fields` | Read at runtime for schema definitions; table name via `process.env.DWFields` |
-| RStreams queues | `dim` (every 10 min, 2M events), `item-quantity-dim` (every 5 min), `supplier-catalog-dim` (every 10 min offset) |
-| Databricks Unity Catalog | Write target for Delta tables; replaces Redshift `datawarehouse.public.*` |
+| RStreams queues | `dim`, `item-quantity-dim`, `supplier-catalog-dim` — schedules and limits in `general/bots/multi-offload-redshift/serverless.yml` and `index.js` |
+| Databricks Unity Catalog | Write target for Delta tables; replaces Redshift `datawarehouse.public.*`; service principal needs `MODIFY` on each table for schema evolution (`ADD COLUMN`, `ALTER COLUMN`, `DROP COLUMN`) |
 | S3 | Staging area for pipe-delimited CSV files before COPY INTO |
 | AWS Secrets Manager | Databricks credentials |
 | Leo checkpointing (DynamoDB) | RStreams progress tracking; managed by leo-sdk |
@@ -86,19 +81,20 @@ Databricks workspace targets are configured per environment via environment vari
 
 **Always:**
 - Check attribute names for PII before reading values
-- Use TypeScript strict mode; no `any`
+- Match sibling connector conventions (plain JavaScript, no TypeScript)
 - Map `varchar(n)` → `string` at SQL generation time (Databricks has no length-constrained string type)
 - Compute surrogate keys via `farmhash-modern` in Node.js, write computed value into staging CSV — not via SQL function
 - Use `TIMESTAMP_NTZ` for timezone-naive timestamp columns; set `infer_timestamp_ntz_type = true` on connectors
 - Keep all dw_fields config changes additive during Redshift coexistence — no change may break the running Redshift pipeline
 
 **Never:**
-- Modify any Redshift-side code as part of datalake connector work — this means no changes to `../redshift/`, `../postgres/`, `../../general/lib/offload_to_redshift.js`, or any existing bot entry point. The Redshift pipeline must remain independently deployable at any point during the migration, unaffected by what is or isn't complete on the Databricks side.
+- Release Redshift-side changes that impact the running Redshift pipeline as side effects. Redshift code (`../redshift/`, `../postgres/`, `../../general/lib/offload_to_redshift.js`, bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
 - Use Redshift-specific SQL syntax in new code (`GETDATE()`, `TOP N`, `DISTKEY`/`SORTKEY` in DDL, `FARMFINGERPRINT64()`)
-- Change Redshift SORTKEY behavior — Redshift continues inferring sort key from `public.v_dist_sort_key` at runtime; `clusterKey` must have no effect on Redshift by default (see below)
+- Add `clusterKey` behavior that affects Redshift — `clusterKey` must have no effect on Redshift by default (see below)
 - Add npm dependencies without asking first
 - Write SQL stored procedures
 - Commit credentials or Databricks tokens
+- Push code containing local file paths in `package.json` (e.g., `"file:../../connectors/datalake"`); only use npm registry versions for published code. Local paths are for development only; before committing, ensure all module references resolve from npm or a registry.
 
 **Ask before:**
 - Adding a new top-level field to dw_fields (coordinate with DPLAT-442 / John Cronin — same field, same DynamoDB record; must be safe for the Redshift loader to silently ignore)
@@ -107,7 +103,9 @@ Databricks workspace targets are configured per environment via environment vari
 - Changing how surrogate keys are computed (output must remain identical to `FARMFINGERPRINT64()`)
 
 **Redshift pipeline independence:**
-The Redshift pipeline (`general/`, `offload_to_redshift.js`, `leo-connector-postgres`, `dwconnect.js`) must be mergeable and deployable to production at any time, completely independent of migration progress. This means:
+The Redshift pipeline (`general/`, `offload_to_redshift.js`, `leo-connector-postgres`, `dwconnect.js`) must be mergeable and deployable to production at any time, completely independent of migration progress. Refactors and improvements are welcome; the constraint is safe gating, not no-touch:
+- Refactors and shared infrastructure improvements are fine as long as they remain backwards-compatible and don't change Redshift behavior
+- New functionality (e.g., new dw_fields fields, new config options) must be disabled by default and explicitly gated — never activate as a side effect
 - All dw_fields config changes must be additive and safe for the Redshift loader to ignore unknown fields (it already does)
 - The datalake connector is a new package — it does not replace or wrap the Redshift connector; both exist independently
 - Datalake-side bots are new Lambda functions alongside (not replacing) the existing Redshift loader bots
@@ -128,30 +126,6 @@ Additionally:
 - New dw_fields config keys must be additive only (no breaking changes to Redshift consumers)
 - Connector output verified equivalent to the Redshift connector on the same input events
 
-## Project Principles (highest priority)
+## Project Principles
 
-Read and follow [docs/project-principles.md](docs/project-principles.md). These take precedence over the development first principles and platform principles when they overlap. If the user tells you to write any change to principles, write it there.
-
-## Development First Principles (second priority)
-
-Read `docs/development-first-principles.md` from the workspace root (`~/git/dw/docs/development-first-principles.md`). Covers software design, security, code quality, and AI-assisted development standards.
-
-## Data Platform Principles (third priority)
-
-When doing design, architecture, spec, or implementation work, also read `docs/data-platform-principles-and-strategies.md` from the workspace root (`~/git/dw/docs/data-platform-principles-and-strategies.md`).
-
-## Execution Overview
-
-[Project docs on Notion](https://app.notion.com/p/commercehub/Proposal-Migrate-Retailer-data-warehouse-to-Databricks-344e0f2aafae801990b7c88822458a0b) — when adding or moving docs to Notion, complete these steps:
-1. Create the new page as a child of the Proposal page
-2. Fetch the Proposal page content to find the "# Project Docs" section
-3. Add a link to the newly created page under Project Docs (before the "---" separator that precedes the Reference section)
-4. Update the Proposal page with the modified content
-
-High-level project plans live at [EDW Migration](https://www.notion.so/commercehub/EDW-Migration-Redshift-to-Databrcks-347e0f2aafae80aca55ff27de210ea26?source=copy_link)
-
-The technical design of the lift-and-shift work is in [Technical Overview: Lift, Shift, and Rebuild](https://www.notion.so/commercehub/Technical-Overview-Lift-Shift-and-Rebuild-34fe0f2aafae81e1876efe7bb3189c26?source=copy_link).
-
-The PII decision space for migrating the Redshift `public` schema is in [PII Handling: Options for Migrating Redshift public to the Data Lake](https://www.notion.so/commercehub/PII-Handling-Options-for-Migrating-Redshift-public-to-the-Data-Lake-34fe0f2aafae81969264e601c6e041ed?source=copy_link).
-
-Resolved decisions on dw_fields and dw-schema configuration for Databricks coexistence (type mapping, physical hints, varchar validation, surrogate key computation) are in [Configuration Migration Analysis](https://app.notion.com/p/351e0f2aafae8128b7baed05f6a5adbc).
+See [docs/project-principles.md](docs/project-principles.md).
