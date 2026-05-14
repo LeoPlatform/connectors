@@ -123,10 +123,10 @@ The Redshift pipeline (`general/`, `offload_to_redshift.js`, `leo-connector-post
 ## Definition of Done
 
 Run in this order; all must pass before considering work complete:
-1. `npm run format` — prettier
-2. `npm run type-check` — `tsc --noEmit`, strict mode
-3. `npm run lint` — eslint
-4. `npm test` — mocha unit tests
+1. `npm run lint` — eslint
+2. `npm test` — mocha unit tests
+
+Note: this connector is plain JavaScript (matches all siblings in `connectors/`). There is no TypeScript compilation step.
 
 Additionally:
 - New dw_fields config keys must be additive only (no breaking changes to Redshift consumers)
