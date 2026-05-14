@@ -196,16 +196,18 @@ module.exports = function(dbconfig, options) {
 					const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
 					const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 
+					const mergeCallback = (mergeErr, mergeResult) => _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback);
+
 					if (pruneCol) {
 						const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM \`${viewName}\``;
 						client.query(minSql, [], (qErr, results) => {
 							if (!qErr && results && results[0] && results[0].minval != null) {
 								naturalKeyFilter = client.escapeValue ? client.escapeValueNoToLower(String(results[0].minval)) : `'${results[0].minval}'`;
 							}
-							_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback);
+							_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
 						});
 					} else {
-						_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, null, callback);
+						_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
 					}
 				});
 			});
@@ -267,5 +269,21 @@ function _doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig,
 
 	client.query(mergeSql, [], (err, results) => {
 		callback(err, results ? { count: (results && results.length) || 0 } : { count: 0 });
+	});
+}
+
+function _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
+	if (dbconfig.keepS3Files) {
+		return callback(mergeErr, mergeResult);
+	}
+	const staging = client._lastStagingS3;
+	if (!staging) {
+		return callback(mergeErr, mergeResult);
+	}
+	staging.s3.deleteObject({ Bucket: staging.bucket, Key: staging.key }, deleteErr => {
+		if (deleteErr) {
+			logger.info('staged file delete failed:', staging.key, deleteErr);
+		}
+		callback(mergeErr, mergeResult);
 	});
 }

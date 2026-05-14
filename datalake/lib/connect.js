@@ -239,6 +239,7 @@ function _streamToTableFromS3(client, table, config) {
 
 		const awsS3 = new (require('aws-sdk')).S3({ region: config.region || process.env.AWS_REGION });
 		s3Stream = ls.toS3(s3Bucket, s3Key, { s3: awsS3 });
+		client._lastStagingS3 = { s3: awsS3, bucket: s3Bucket, key: s3Key };
 		s3Stream.on('finish', () => s3Stream.emit('end'));
 		s3Stream.on('error', err => {
 			logger.error('S3 stream error:', err);
