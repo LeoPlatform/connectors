@@ -213,28 +213,59 @@ function createSessionClient(session, _parentCache, _config) {
 	return conn;
 }
 
+// ── RootLocation lookup ───────────────────────────────────────────────────────
+// Queries DESCRIBE SCHEMA EXTENDED and parses the RootLocation row, which is the
+// managed storage root configured in Unity Catalog and doubles as the S3 staging
+// prefix for this schema. Result is cached on the client; do not use the Location
+// row (internal UC path with UUID) or the catalog's Storage Root (different convention).
+function _ensureStagingLocation(client, catalog, schema) {
+	if (client._stagingLocation) return Promise.resolve(client._stagingLocation);
+
+	return new Promise((resolve, reject) => {
+		const sql = `DESCRIBE SCHEMA EXTENDED \`${catalog}\`.\`${schema}\``;
+		client.query(sql, [], (err, rows) => {
+			if (err) return reject(err);
+			const rootRow = (rows || []).find(r => r.database_description_item === 'RootLocation');
+			if (!rootRow || !rootRow.database_description_value) {
+				return reject(new Error(
+					`RootLocation not found for ${catalog}.${schema} — schema must have a managed storage location configured in Unity Catalog`
+				));
+			}
+			const rootUrl = rootRow.database_description_value.trim();
+			const match = rootUrl.match(/^s3:\/\/([^/]+)\/(.+)$/);
+			if (!match) {
+				return reject(new Error(`Unexpected RootLocation format: ${rootUrl}`));
+			}
+			client._stagingLocation = { s3Bucket: match[1], s3Prefix: match[2].replace(/\/$/, '') };
+			resolve(client._stagingLocation);
+		});
+	});
+}
+
 // ── streamToTableFromS3 implementation ───────────────────────────────────────
 function _streamToTableFromS3(client, table, config) {
-	const s3Bucket = config.s3Bucket;
-	const s3Prefix = (config.s3prefix || 'dw_datalake_ingest').replace(/^\/*|\/*$/g, '');
-
-	const cleanAuditDate = client.auditdate.replace(/'/g, '').replace(/:/g, '-');
-	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
-	const s3Uri = `s3://${s3Bucket}/${s3Key}`;
-
 	let columns = [];
 	let s3Stream = null;
+	let s3Key = null;
+	let s3Uri = null;
 	let pending = null;
 	let schemaReady = false;
 
-	// Fetch column list from schema cache, then open S3 write stream.
-	client.describeTable(table.replace(/^.*\./, ''), config.schema).then(result => {
-		columns = result.map(f => f.column_name);
+	// Resolve schema columns and S3 staging location from Unity Catalog in parallel.
+	Promise.all([
+		client.describeTable(table.replace(/^.*\./, ''), config.schema),
+		_ensureStagingLocation(client, config.catalog, config.schema),
+	]).then(([tableFields, stagingLocation]) => {
+		columns = tableFields.map(f => f.column_name);
 		schemaReady = true;
 
+		const cleanAuditDate = client.auditdate.replace(/'/g, '').replace(/:/g, '-');
+		s3Key = `${stagingLocation.s3Prefix}/${table}/${cleanAuditDate}.csv`;
+		s3Uri = `s3://${stagingLocation.s3Bucket}/${s3Key}`;
+
 		const awsS3 = new (require('aws-sdk')).S3({ region: config.region });
-		s3Stream = ls.toS3(s3Bucket, s3Key, { s3: awsS3 });
-		client._lastStagingS3 = { s3: awsS3, bucket: s3Bucket, key: s3Key };
+		s3Stream = ls.toS3(stagingLocation.s3Bucket, s3Key, { s3: awsS3 });
+		client._lastStagingS3 = { s3: awsS3, bucket: stagingLocation.s3Bucket, key: s3Key };
 		s3Stream.on('finish', () => s3Stream.emit('end'));
 		s3Stream.on('error', err => {
 			logger.error('S3 stream error:', err);
@@ -242,7 +273,7 @@ function _streamToTableFromS3(client, table, config) {
 
 		if (pending) pending();
 	}).catch(err => {
-		logger.error('describeTable error in streamToTableFromS3:', err);
+		logger.error('setup error in streamToTableFromS3:', err);
 	});
 
 	// Null/newline normalization matching connectors/postgres/lib/connect.js:394-402
