@@ -1,31 +1,23 @@
 'use strict';
 
 // Step 9 — Integration harness
-// Verifies that the per-run schema is created and dropped correctly.
+// Verifies connectivity, schema accessibility, and UC RootLocation lookup.
 // Skips all tests when required env vars are unset (exit 0 offline).
 //
-// Deferred: blocked on open questions #3 and #6 in BUILD_PLAN.md.
-// See connectors/datalake/README.md § "Deferred env config" for what to fill in.
+// Deferred: blocked on open questions #3, #5, #6 in BUILD_PLAN.md.
+// Uses fixed schema names (public_stage_local for local dev, public_stage for CI);
+// isolation is per-branch catalog, not per-run UUID schema.
 
+const { expect } = require('chai');
 const { getConfig, checkNonprod } = require('./helpers/databricks.js');
 
 let dbconfig;
 let client;
-let runSchema;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) {
-		return this.skip();
-	}
-	checkNonprod(dbconfig.host, dbconfig.s3Bucket);
-
-	// Per-run UUID schema is expected to be set by the caller via DATABRICKS_SCHEMA
-	// e.g.: export DATABRICKS_SCHEMA=datalake_test_$(uuidgen | tr -d - | head -c 8 | tr '[:upper:]' '[:lower:]')
-	runSchema = dbconfig.schema;
-	if (!runSchema) {
-		throw new Error('DATABRICKS_SCHEMA must be set to a per-run scratch schema name');
-	}
+	if (!dbconfig) return this.skip();
+	checkNonprod(dbconfig.host);
 });
 
 describe('Integration harness', function() {
@@ -37,43 +29,44 @@ describe('Integration harness', function() {
 		client = connect(dbconfig);
 	});
 
-	after(async function() {
-		if (!client || !dbconfig) return;
-		// Drop the per-run schema. Run manually if after() hook crashes:
-		// DROP SCHEMA <catalog>.<schema> CASCADE
-		const catalog = dbconfig.catalog;
+	it('can execute a query', async function() {
+		if (!dbconfig) return this.skip();
 		await new Promise((resolve, reject) => {
-			client.query(
-				`DROP SCHEMA IF EXISTS ${catalog}.${runSchema} CASCADE`,
-				[],
-				err => err ? reject(err) : resolve()
-			);
+			client.query('SELECT 1 AS n', [], (err, rows) => {
+				if (err) return reject(err);
+				expect(rows[0].n).to.equal(1);
+				resolve();
+			});
 		});
 	});
 
-	it('can create a scratch schema', async function() {
+	it('target schema exists in information_schema', async function() {
 		if (!dbconfig) return this.skip();
-		const catalog = dbconfig.catalog;
 		await new Promise((resolve, reject) => {
 			client.query(
-				`CREATE SCHEMA IF NOT EXISTS ${catalog}.${runSchema}`,
-				[],
-				err => err ? reject(err) : resolve()
-			);
-		});
-	});
-
-	it('can query information_schema', async function() {
-		if (!dbconfig) return this.skip();
-		const catalog = dbconfig.catalog;
-		await new Promise((resolve, reject) => {
-			client.query(
-				`SELECT schema_name FROM ${catalog}.information_schema.schemata WHERE schema_name = ?`,
-				[runSchema],
+				`SELECT schema_name FROM ${dbconfig.catalog}.information_schema.schemata WHERE schema_name = ?`,
+				[dbconfig.schema],
 				(err, rows) => {
 					if (err) return reject(err);
-					const { expect } = require('chai');
-					expect(rows.map(r => r.schema_name)).to.include(runSchema);
+					expect(rows.map(r => r.schema_name), `schema "${dbconfig.schema}" not found in catalog "${dbconfig.catalog}"`).to.include(dbconfig.schema);
+					resolve();
+				}
+			);
+		});
+	});
+
+	it('RootLocation resolves to a valid S3 URI', async function() {
+		if (!dbconfig) return this.skip();
+		// Exercises _ensureStagingLocation — the first streamToTableFromS3 call will rely on this.
+		await new Promise((resolve, reject) => {
+			client.query(
+				`DESCRIBE SCHEMA EXTENDED \`${dbconfig.catalog}\`.\`${dbconfig.schema}\``,
+				[],
+				(err, rows) => {
+					if (err) return reject(err);
+					const rootRow = (rows || []).find(r => r.database_description_item === 'RootLocation');
+					expect(rootRow, 'RootLocation row missing — schema must have a managed storage location').to.exist;
+					expect(rootRow.database_description_value).to.match(/^s3:\/\//);
 					resolve();
 				}
 			);

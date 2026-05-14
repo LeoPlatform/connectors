@@ -11,7 +11,7 @@ let dbconfig;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host, dbconfig.s3Bucket);
+	checkNonprod(dbconfig.host);
 });
 
 describe('Round-trip: fact + dim', function() {
