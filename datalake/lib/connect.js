@@ -5,11 +5,6 @@ const logger = require('leo-logger')('connector.sql.datalake');
 const csv = require('fast-csv');
 const ls = require('leo-streams');
 
-// ENV PLACEHOLDERS — fill before running integration tests.
-// See connectors/datalake/README.md § "Deferred env config" for context on each.
-// #3: DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN, DATABRICKS_CATALOG, DATABRICKS_SCHEMA
-// #6: AWS_S3_BUCKET, AWS_S3_PREFIX, AWS_REGION
-
 module.exports = function(config) {
 	// Schema cache mirrors connectors/postgres/lib/connect.js lines 40-135.
 	let cache = {
@@ -33,13 +28,13 @@ module.exports = function(config) {
 		connect: async (_opts) => {
 			const dbsql = new DBSQLClient();
 			await dbsql.connect({
-				host: config.host || process.env.DATABRICKS_HOST,
-				path: config.path || process.env.DATABRICKS_HTTP_PATH,
-				token: config.token || process.env.DATABRICKS_TOKEN,
+				host: config.host,
+				path: config.path,
+				token: config.token,
 			});
 
-			const catalog = config.catalog || process.env.DATABRICKS_CATALOG;
-			const schema = config.schema || process.env.DATABRICKS_SCHEMA;
+			const catalog = config.catalog;
+			const schema = config.schema;
 
 			const session = await dbsql.openSession({
 				initialCatalog: catalog,
@@ -87,7 +82,7 @@ module.exports = function(config) {
 		// ── Schema describe ───────────────────────────────────────────────
 		describeTable: async (table, tableSchema) => {
 			return new Promise((resolve, reject) => {
-				tableSchema = tableSchema || config.schema || process.env.DATABRICKS_SCHEMA || 'default';
+				tableSchema = tableSchema || config.schema || 'default';
 				const qualifiedTable = `${tableSchema}.${table}`;
 				if (cache.schema[qualifiedTable]) {
 					logger.info(`Table "${qualifiedTable}" schema from cache`, cache.timestamp);
@@ -104,12 +99,12 @@ module.exports = function(config) {
 
 		describeTables: async (tableSchema) => {
 			return new Promise((resolve, reject) => {
-				tableSchema = tableSchema || config.schema || process.env.DATABRICKS_SCHEMA || 'default';
+				tableSchema = tableSchema || config.schema || 'default';
 				if (Object.keys(cache.schema || {}).length) {
 					logger.info('Tables schema from cache', cache.timestamp);
 					return resolve(cache.schema);
 				}
-				const catalog = config.catalog || process.env.DATABRICKS_CATALOG;
+				const catalog = config.catalog;
 				const sql = `SELECT table_name, column_name, data_type, is_nullable FROM ${catalog}.information_schema.columns WHERE table_schema = ? ORDER BY ordinal_position ASC`;
 				client.query(sql, [tableSchema], (err, result) => {
 					if (err) return reject(err);
@@ -220,8 +215,8 @@ function createSessionClient(session, _parentCache, _config) {
 
 // ── streamToTableFromS3 implementation ───────────────────────────────────────
 function _streamToTableFromS3(client, table, config) {
-	const s3Bucket = config.s3Bucket || process.env.AWS_S3_BUCKET;
-	const s3Prefix = (config.s3prefix || process.env.AWS_S3_PREFIX || 'dw_datalake_ingest').replace(/^\/*|\/*$/g, '');
+	const s3Bucket = config.s3Bucket;
+	const s3Prefix = (config.s3prefix || 'dw_datalake_ingest').replace(/^\/*|\/*$/g, '');
 
 	const cleanAuditDate = client.auditdate.replace(/'/g, '').replace(/:/g, '-');
 	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
@@ -233,11 +228,11 @@ function _streamToTableFromS3(client, table, config) {
 	let schemaReady = false;
 
 	// Fetch column list from schema cache, then open S3 write stream.
-	client.describeTable(table.replace(/^.*\./, ''), config.schema || process.env.DATABRICKS_SCHEMA).then(result => {
+	client.describeTable(table.replace(/^.*\./, ''), config.schema).then(result => {
 		columns = result.map(f => f.column_name);
 		schemaReady = true;
 
-		const awsS3 = new (require('aws-sdk')).S3({ region: config.region || process.env.AWS_REGION });
+		const awsS3 = new (require('aws-sdk')).S3({ region: config.region });
 		s3Stream = ls.toS3(s3Bucket, s3Key, { s3: awsS3 });
 		client._lastStagingS3 = { s3: awsS3, bucket: s3Bucket, key: s3Key };
 		s3Stream.on('finish', () => s3Stream.emit('end'));

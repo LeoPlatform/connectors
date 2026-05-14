@@ -49,8 +49,8 @@ module.exports = function(dbconfig, options) {
 	client.changeTableStructure = async function(structures) {
 		const tableResults = {};
 
-		const catalog = dbconfig.catalog || process.env.DATABRICKS_CATALOG;
-		const schema = dbconfig.schema || process.env.DATABRICKS_SCHEMA || 'default';
+		const catalog = dbconfig.catalog;
+		const schema = dbconfig.schema || 'default';
 
 		await client.describeTables(schema);
 
@@ -101,7 +101,6 @@ module.exports = function(dbconfig, options) {
 			}).catch(err => {
 				if (err === 'NO_SCHEMA_FOUND') {
 					logger.info('Creating table', table);
-					const catalog = dbconfig.catalog || process.env.DATABRICKS_CATALOG;
 					const qualifiedTable = `${catalog}.${schema}.${client.escapeId(table).replace(/`/g, '')}`;
 					const ddl = sql.createTable(qualifiedTable, structures[table], columnConfig, client.escapeId);
 					client.query(ddl, [], createErr => {
@@ -134,8 +133,8 @@ module.exports = function(dbconfig, options) {
 		if (!Array.isArray(ids)) ids = [ids];
 		tableDef = tableDef || {};
 
-		const catalog = dbconfig.catalog || process.env.DATABRICKS_CATALOG;
-		const schema = dbconfig.schema || process.env.DATABRICKS_SCHEMA || 'default';
+		const catalog = dbconfig.catalog;
+		const schema = dbconfig.schema || 'default';
 		const qualifiedTable = `${catalog}.${schema}.${client.escapeId(table).replace(/`/g, '')}`;
 
 		// Stream-level delete handler: collect __leo_delete__ records separately.
