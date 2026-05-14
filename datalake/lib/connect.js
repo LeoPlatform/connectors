@@ -30,7 +30,7 @@ module.exports = function(config) {
 		},
 
 		// ── Connection ────────────────────────────────────────────────────
-		connect: async () => {
+		connect: async (_opts) => {
 			const dbsql = new DBSQLClient();
 			await dbsql.connect({
 				host: config.host || process.env.DATABRICKS_HOST,
@@ -56,7 +56,7 @@ module.exports = function(config) {
 
 			// Return an isolated sub-client wrapping this session, so callers
 			// can release() it without closing the outer connection.
-			return createSessionClient(session);
+			return createSessionClient(session, cache, config);
 		},
 
 		disconnect: async () => {
@@ -179,11 +179,11 @@ module.exports = function(config) {
 
 // ── Session-scoped sub-client ─────────────────────────────────────────────────
 // Wraps a single DBSQLSession so callers can release() it after use.
-function createSessionClient(session) {
+function createSessionClient(session, _parentCache, _config) {
 	let closed = false;
 
 	const conn = {
-		query: async (sql, paramsOrCb, cbOrOpts) => {
+		query: async (sql, paramsOrCb, cbOrOpts, _opts) => {
 			let params, cb;
 			if (typeof paramsOrCb === 'function') {
 				cb = paramsOrCb;

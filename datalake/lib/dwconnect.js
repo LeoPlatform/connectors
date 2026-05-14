@@ -140,7 +140,7 @@ module.exports = function(dbconfig, options) {
 
 		// Stream-level delete handler: collect __leo_delete__ records separately.
 		const deleteRecords = [];
-		const dataStream = ls.through((obj, done) => {
+		const dataStream = ls.through((obj, done, _push) => {
 			if (obj.__leo_delete__) {
 				deleteRecords.push(obj);
 				done();
