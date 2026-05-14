@@ -69,13 +69,19 @@ Databricks workspace targets are configured per environment via environment vari
 
 ## Exemplar References
 
+The publishing/offload path does **not** go through `leo-connector-redshift`. The bot-side caller (`general/lib/offload_to_redshift.js`) loads `leo-connector-common/datawarehouse/load.js` and `leo-connector-postgres/lib/dwconnect.js` — `connectors/redshift` is only used by the `report/` consumer. Model the data-publishing side on `connectors/postgres`, not `connectors/redshift`.
+
 | What | Where | Why |
 |---|---|---|
-| Connection layer to adapt | `../redshift/lib/connect.js` | Postgres pool → Databricks client; same interface contract |
-| Domain Object Layer | `../redshift/lib/dol.js` | SQL query builder pattern to replicate for Databricks dialect |
+| **Offload mechanics** (staging, merge, schema discovery, `_auditdate`/`_current`/`_deleted` cols, dim/fact handling) | `../postgres/lib/dwconnect.js` | The actual code `offload_to_redshift.js` invokes; the datalake connector must expose the same shape, staging to S3 + `COPY INTO`/`MERGE` against Delta |
 | Pipeline orchestration | `../common/datawarehouse/load.js`, `combine.js`, `transform.js` | Reused unchanged; understand before touching |
+| `package.json` / `index.js` shape, file layout | `../postgres/package.json`, `../postgres/index.js` | Drop `pg`/`pg-copy-streams`/`pg-format`; add `farmhash-modern` + Databricks SQL client |
+| Connection layer | `../postgres/lib/connect.js` | Connection-pool plumbing; adapt to Databricks SQL client |
+| Domain Object Layer (consumer-side queries) | `../postgres/lib/dol.js` | SQL query builder pattern; Databricks-dialect adaptation. Not on the publishing critical path |
 | dw_fields schema format | `../../order/dw_fields/d_order.json` | Canonical dimension schema with nk, sk, groups, structure |
 | How bots call the connector | `../../general/lib/offload_to_redshift.js` | Calling convention; datalake connector must match this interface |
+
+**Skip:** `../postgres/lib/binlogreader.js`, `../postgres/lib/lsn.js`, `../postgres/lib/test_decoding.js` — CDC/logical-replication; not relevant to RStreams-driven publishing.
 
 ## Coding Rules
 
@@ -88,7 +94,7 @@ Databricks workspace targets are configured per environment via environment vari
 - Keep all dw_fields config changes additive during Redshift coexistence — no change may break the running Redshift pipeline
 
 **Never:**
-- Release Redshift-side changes that impact the running Redshift pipeline as side effects. Redshift code (`../redshift/`, `../postgres/`, `../../general/lib/offload_to_redshift.js`, bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
+- Release changes that impact the running Redshift pipeline as side effects. The publishing-path code (`../postgres/` — especially `lib/dwconnect.js` — plus `../common/datawarehouse/`, `../../general/lib/offload_to_redshift.js`, and the offload bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. `../redshift/` is consumer-only (used by `report/`) and is not on the publishing path. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
 - Use Redshift-specific SQL syntax in new code (`GETDATE()`, `TOP N`, `DISTKEY`/`SORTKEY` in DDL, `FARMFINGERPRINT64()`)
 - Add `clusterKey` behavior that affects Redshift — `clusterKey` must have no effect on Redshift by default (see below)
 - Add npm dependencies without asking first
