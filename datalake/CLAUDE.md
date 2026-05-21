@@ -17,7 +17,7 @@ This connector handles ingestion of retailer platform event data from RStreams q
 
 ## Architecture & Layout
 
-This is a **library package** within the LeoPlatform/connectors monorepo. It is not a deployed Lambda service — it publishes as an npm package consumed by bot services (e.g., `../../general/`).
+This is a **library package** within the LeoPlatform/connectors monorepo. It is not a deployed Lambda service — it publishes as an npm package consumed by bot services, e.g. [general](https://github.com/Chub-Engineering/general).
 
 **Projected structure** (code not yet written — matches sibling connector pattern):
 ```

@@ -224,14 +224,18 @@ Two complementary checks must both pass before DoD is satisfied:
 | `general/lib/offload_to_redshift.js` | Calling-convention reference. The future `offload_to_datalake.js` bot will call the new library the same way. |
 
 ## Critical files to read while executing
+The following paths are relative to the location of the current file.
 
-- `/Users/paul.mogren/git/dw/connectors/datalake/CLAUDE.md` — coding rules, especially Redshift-pipeline independence, varchar→string, TIMESTAMP_NTZ, surrogate-key convention, never-list.
-- `/Users/paul.mogren/git/dw/connectors/postgres/lib/dwconnect.js` — port template (on `development`; `importFact` at line 128, `changeTableStructure` at 848, Redshift COPY `NULL AS '\\N'` at 1247).
-- `/Users/paul.mogren/git/dw/connectors/postgres/lib/connect.js` — `streamToTableFromS3` at line 576; the in-checkout reference for Step 7's CSV+S3 staging path.
-- `/Users/paul.mogren/git/dw/general/lib/offload_to_redshift.js` lines 436–627 — dbconfig shape + dw_fields scan-from-DynamoDB pattern.
-- `/Users/paul.mogren/git/dw/connectors/common/datawarehouse/load.js` — client surface contract (lines 224–316).
-- `/Users/paul.mogren/git/dw/order/dw_fields/d_order.json` + `f_order.json` — fixtures for Steps 4, 5, 6, 7.
-- `/Users/paul.mogren/git/dw/connectors/postgres/lib/dol.js` — port template (83 lines; superset of the 33-line redshift version).
+- `./CLAUDE.md` — coding rules, especially Redshift-pipeline independence, varchar→string, TIMESTAMP_NTZ, surrogate-key convention, never-list.
+- `../postgres/lib/dwconnect.js` — port template (on `development`; `importFact` at line 128, `changeTableStructure` at 848, Redshift COPY `NULL AS '\\N'` at 1247).
+- `../postgres/lib/connect.js` — `streamToTableFromS3` at line 576; the in-checkout reference for Step 7's CSV+S3 staging path.
+- `../common/datawarehouse/load.js` — client surface contract (lines 224–316).
+- `../postgres/lib/dol.js` — port template (83 lines; superset of the 33-line redshift version).
+
+Also from other repositories:
+
+- [general project: offload_to_redshift.js](https://github.com/Chub-Engineering/general/blob/main/lib/offload_to_redshift.js) lines 436–627 — dbconfig shape + dw_fields scan-from-DynamoDB pattern.
+- [order project: d_order.json](https://github.com/Chub-Engineering/order/blob/main/dw_fields/d_order.json) and [f_order.json](https://github.com/Chub-Engineering/order/blob/main/dw_fields/d_order.json) — fixtures for Steps 4, 5, 6, 7.
 
 ---
 
@@ -282,7 +286,7 @@ Zero diffs ⇒ Definition of Done satisfied.
 
 1. **`@databricks/sql` binding diff.** Postgres uses `$1`; Databricks uses `?`. Contained to `dwconnect.js` call sites — call out in code review.
 2. **`MODIFY` grant.** Step 11 needs ADD COLUMN; pre-check infra grants before running.
-3. **Identifier-casing convention drift.** The lowercase-everywhere rule (open question #7) depends on the `bus-models/dw-schema` deploy gate landing alongside the connector. If a producer adds a mixed-case key to dw_fields *before* the gate ships, the connector silently lowercases it on write while Redshift tolerates either casing — consumer queries that case-match Redshift will diverge on Databricks. Mitigation: extend `bus-models/dw-schema` with the lowercase assertion as part of Step 1 prerequisites, not as a follow-up.
+3. **Identifier-casing convention drift.** The lowercase-everywhere rule (open question #7) depends on the [bus-models/dw-schema](https://github.com/Chub-Engineering/bus-models/blob/ba5d13f04a005f9d0e2a4b6c90c3b81da22929b0/src/dw-schema/index.ts) deploy gate landing alongside the connector. If a producer adds a mixed-case key to dw_fields *before* the gate ships, the connector silently lowercases it on write while Redshift tolerates either casing — consumer queries that case-match Redshift will diverge on Databricks. Mitigation: extend `bus-models/dw-schema` with the lowercase assertion as part of Step 1 prerequisites, not as a follow-up.
 4. **Bot wiring out of scope.** Without an `offload_to_datalake.js` bot, nothing in production runs this library yet. Plan a follow-up task to create that bot once Steps 1–12 land.
-5. **Operational monitors and alerts not migrated.** Existing CloudWatch alarms, Datadog monitors and dashboards, and PagerDuty services watching Redshift pipeline health need counterparts for the Databricks path. Plan a follow-up to inventory existing monitors (see `data-warehouse-tooling/` invoice monitoring Lambda + PagerDuty integrations) and create equivalent Databricks-side alerts and dashboards before Redshift is retired.
+5. **Operational monitors and alerts not migrated.** Existing CloudWatch alarms, Datadog monitors and dashboards, and PagerDuty services watching Redshift pipeline health need counterparts for the Databricks path. Plan a follow-up to inventory existing monitors and create equivalent Databricks-side alerts and dashboards before Redshift is retired.
 6. **Redshift-specific AI Arcanum skills not migrated.** Any skills in AI Arcanum that embed Redshift SQL, Redshift connection strings, or Redshift-specific procedures will produce wrong output once the Databricks pipeline is live. Plan a follow-up to audit AI Arcanum for Redshift-targeted skills and update or replace them with Databricks-dialect equivalents.
