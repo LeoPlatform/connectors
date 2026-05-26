@@ -7,6 +7,9 @@
 		"url": "git://github.com/LeoPlatform/connectors.git"
 	},
 	"main": "index.js",
+	"engines": {
+		"node": ">=22"
+	},
 	"scripts": {
 		"lint": "eslint index.js lib/**/*.js test/**/*.js",
 		"test": "mocha test/unit/**/*.test.js",

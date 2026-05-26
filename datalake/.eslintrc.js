@@ -6,8 +6,11 @@ module.exports = {
 	},
 	"extends": "eslint:recommended",
 	"parserOptions": {
-		"ecmaVersion": 2017,
+		"ecmaVersion": 2019,
 		"sourceType": "module"
+	},
+	"globals": {
+		"BigInt": "readonly"
 	},
 	"rules": {
 		"eol-last": ["error", "always"],
@@ -20,6 +23,6 @@ module.exports = {
 			"error",
 			"always"
 		],
-		"no-unused-vars": ["error", { "vars": "all", "args": "after-used", "argsIgnorePattern": "^_" }]
+		"no-unused-vars": ["error", { "vars": "all", "args": "after-used", "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
 	}
 };

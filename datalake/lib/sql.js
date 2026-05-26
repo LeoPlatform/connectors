@@ -1,7 +1,40 @@
 'use strict';
 
-// Type map from dw_fields types to Databricks DDL types.
-// Audit of all cloned producer repos found only these scalar types — no super/json columns.
+// Basic type map from dw_fields types to Databricks DDL types,
+// for use only by the mapType function which has additional behavior.
+// Audit of all cloned producer repos found only these scalar types and varchar(n) —
+// no super/json columns.
+//
+// Why `timestamp` and `timestamptz` map to DIFFERENT Databricks types:
+//
+//   timestamp   → TIMESTAMP_NTZ  — Redshift `TIMESTAMP` is zone-naive. The stored
+//                                  values are wall-clocks whose intended timezone
+//                                  varies by source (per-source convention, not
+//                                  carried in the column). NTZ matches that
+//                                  semantics. See ../CLAUDE.md "Timestamp handling
+//                                  — preserving legacy no-TZ semantics" and
+//                                  data-warehouse/docs/timezone-data-conventions.md
+//                                  for the per-source breakdown.
+//
+//   timestamptz → TIMESTAMP      — Redshift `TIMESTAMPTZ` carries an explicit offset
+//                                  (stored as UTC internally). Databricks `TIMESTAMP`
+//                                  is also zone-aware (stored as UTC, rendered in
+//                                  session TZ). The mapping preserves the offset's
+//                                  meaning across joins, comparisons, and time math.
+//
+// Do not collapse these into a single mapping. Different types at the source mean
+// different things and should remain distinct at the target:
+//   - timestamptz → TIMESTAMP_NTZ would silently drop the offset, defeating the
+//     producer's deliberate choice to carry zone information
+//   - timestamp   → TIMESTAMP    would force a UTC interpretation on data that is
+//     not UTC (Pacific `d_order.created_at` values would shift on read)
+//
+// No producer in the current dw_fields audit uses `timestamptz`. The branch is
+// kept defined and tested so the right behavior is wired up if one appears, rather
+// than falling through to STRING.
+//
+// Databricks SQL keywords (including type names) are case-insensitive — `int` and
+// `INT` both work. Uppercase here is stylistic, for readability of generated DDL.
 const TYPE_MAP = {
 	'boolean': 'BOOLEAN',
 	'date': 'DATE',

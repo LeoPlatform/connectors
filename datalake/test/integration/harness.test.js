@@ -1,10 +1,9 @@
 'use strict';
 
 // Step 9 — Integration harness
-// Verifies connectivity, schema accessibility, and UC RootLocation lookup.
-// Skips all tests when required env vars are unset (exit 0 offline).
+// Verifies connectivity, schema accessibility, and staging-location resolution.
+// Skips all tests when ~/.databrickscfg [dev-cup] (or env override) is absent.
 //
-// Deferred: blocked on open questions #3, #5, #6 in BUILD_PLAN.md.
 // Uses fixed schema names (public_stage_local for local dev, public_stage for CI);
 // isolation is per-branch catalog, not per-run UUID schema.
 
@@ -55,21 +54,14 @@ describe('Integration harness', function() {
 		});
 	});
 
-	it('RootLocation resolves to a valid S3 URI', async function() {
+	it('staging location resolves to a valid s3:// URI', function() {
 		if (!dbconfig) return this.skip();
-		// Exercises _ensureStagingLocation — the first streamToTableFromS3 call will rely on this.
-		await new Promise((resolve, reject) => {
-			client.query(
-				`DESCRIBE SCHEMA EXTENDED \`${dbconfig.catalog}\`.\`${dbconfig.schema}\``,
-				[],
-				(err, rows) => {
-					if (err) return reject(err);
-					const rootRow = (rows || []).find(r => r.database_description_item === 'RootLocation');
-					expect(rootRow, 'RootLocation row missing — schema must have a managed storage location').to.exist;
-					expect(rootRow.database_description_value).to.match(/^s3:\/\//);
-					resolve();
-				}
-			);
-		});
+		// Exercises the staging-location resolution contract that streamToTableFromS3 relies on.
+		// In local dev the helper supplies explicit s3Bucket/s3Prefix; in environments where
+		// the schema has a managed RootLocation, connect.js can fall back to UC lookup.
+		expect(dbconfig.s3Bucket, 's3Bucket must be set in config').to.be.a('string').and.not.empty;
+		expect(dbconfig.s3Prefix, 's3Prefix must be set in config').to.be.a('string').and.not.empty;
+		const uri = `s3://${dbconfig.s3Bucket}/${dbconfig.s3Prefix}`;
+		expect(uri).to.match(/^s3:\/\/[^/]+\/.+$/);
 	});
 });

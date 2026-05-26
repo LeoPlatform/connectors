@@ -3,7 +3,11 @@
 const { DBSQLClient } = require('@databricks/sql');
 const logger = require('leo-logger')('connector.sql.datalake');
 const csv = require('fast-csv');
-const ls = require('leo-streams');
+// leo-sdk.streams is the canonical Leo stream module across LeoPlatform connectors
+// (cf. connectors/postgres/lib/dwconnect.js — same pattern). It exposes pipeline,
+// through, pipe, AND toS3 — use it for all stream primitives. The separate
+// `leo-streams` npm package is a lighter sibling without toS3; we don't import it.
+const ls = require('leo-sdk').streams;
 
 module.exports = function(config) {
 	// Schema cache mirrors connectors/postgres/lib/connect.js lines 40-135.
@@ -27,11 +31,23 @@ module.exports = function(config) {
 		// ── Connection ────────────────────────────────────────────────────
 		connect: async (_opts) => {
 			const dbsql = new DBSQLClient();
-			await dbsql.connect({
-				host: config.host,
-				path: config.path,
-				token: config.token,
-			});
+			// Auth selection: prefer OAuth M2M (service principal) when client_id/client_secret
+			// are provided; otherwise use PAT. Local dev uses M2M via ~/.databrickscfg [dev-cup];
+			// CI may use PAT in the future.
+			const connOpts = (config.clientId && config.clientSecret)
+				? {
+					host: config.host,
+					path: config.path,
+					authType: 'databricks-oauth',
+					oauthClientId: config.clientId,
+					oauthClientSecret: config.clientSecret,
+				}
+				: {
+					host: config.host,
+					path: config.path,
+					token: config.token,
+				};
+			await dbsql.connect(connOpts);
 
 			const catalog = config.catalog;
 			const schema = config.schema;
@@ -105,7 +121,9 @@ module.exports = function(config) {
 					return resolve(cache.schema);
 				}
 				const catalog = config.catalog;
-				const sql = `SELECT table_name, column_name, data_type, is_nullable FROM ${catalog}.information_schema.columns WHERE table_schema = ? ORDER BY ordinal_position ASC`;
+				// Include numeric_precision/numeric_scale so callers can reconstruct
+				// DECIMAL(p,s) — data_type alone reports just "DECIMAL" without precision.
+				const sql = `SELECT table_name, column_name, data_type, numeric_precision, numeric_scale, is_nullable FROM ${catalog}.information_schema.columns WHERE table_schema = ? ORDER BY ordinal_position ASC`;
 				client.query(sql, [tableSchema], (err, result) => {
 					if (err) return reject(err);
 					let schema = {};
@@ -151,10 +169,35 @@ module.exports = function(config) {
 			return value;
 		},
 
-		// ── S3 staging → temp view ────────────────────────────────────────
-		// See BUILD_PLAN.md Step 7 for the full rationale on each read_files option.
+		// ── S3 staging → inline read_files() ──────────────────────────────
+		// Stages CSV to S3. The downstream MERGE/MIN queries read it back via an
+		// inline `read_files(...)` subquery rather than a CREATE TEMPORARY VIEW —
+		// each query() opens its own session, so a session-scoped temp view would
+		// be invisible to subsequent queries. See BUILD_PLAN.md Step 7 for the
+		// per-option rationale of the read_files arguments.
 		streamToTableFromS3: (table, config) => {
 			return _streamToTableFromS3(client, table, config);
+		},
+
+		// Build the read_files() SELECT for use inline in MIN / MERGE queries.
+		// columnDefs is `[{name, type}, ...]` — types must match the target table so
+		// MERGE's COALESCE(staging.x, target.x) sees consistent types on both sides.
+		buildStagingSelect: (s3Uri, columnDefs) => {
+			const schemaStr = columnDefs.map(c => `${c.name} ${c.type}`).join(', ');
+			return [
+				`SELECT * FROM read_files(`,
+				`  '${s3Uri}',`,
+				`  format => 'csv',`,
+				`  sep => '|',`,
+				`  header => false,`,
+				`  quote => '"',`,
+				`  escape => '"',`,
+				`  multiLine => 'true',`,
+				`  nullValue => '\\\\N',`,
+				`  mode => 'PERMISSIVE',`,
+				`  schema => '${schemaStr}'`,
+				`)`,
+			].join('\n');
 		},
 
 		// streamToTable: direct-write path (not used in Databricks; kept for interface parity)
@@ -164,7 +207,10 @@ module.exports = function(config) {
 	};
 
 	function setAuditdate() {
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, 'Z') + "'";
+		// Drop the trailing Z so the same string works as both a SQL literal and a CSV
+		// value for TIMESTAMP_NTZ columns. read_files CSV parsing rejects the Z
+		// (PERMISSIVE → null), and quoted SQL literals accept it but don't require it.
+		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '') + "'";
 	}
 
 	setAuditdate();
@@ -189,10 +235,10 @@ function createSessionClient(session, _parentCache, _config) {
 			}
 
 			try {
-				const operation = await session.executeStatement(sql, {
-					parameters: params.map((v, i) => ({ name: String(i), value: v })),
-					runAsync: false,
-				});
+				// `ordinalParameters` binds positional `?` placeholders. The previous code
+				// passed `parameters:` which is not a recognized option — binds were silently ignored.
+				const execOpts = params.length ? { ordinalParameters: params } : {};
+				const operation = await session.executeStatement(sql, execOpts);
 				const result = await operation.fetchAll();
 				await operation.close();
 				const fields = result.length ? Object.keys(result[0]).map(name => ({ name })) : [];
@@ -213,14 +259,27 @@ function createSessionClient(session, _parentCache, _config) {
 	return conn;
 }
 
-// ── RootLocation lookup ───────────────────────────────────────────────────────
-// Queries DESCRIBE SCHEMA EXTENDED and parses the RootLocation row, which is the
-// managed storage root configured in Unity Catalog and doubles as the S3 staging
-// prefix for this schema. Result is cached on the client; do not use the Location
-// row (internal UC path with UUID) or the catalog's Storage Root (different convention).
-function _ensureStagingLocation(client, catalog, schema) {
+// ── Staging location resolution ───────────────────────────────────────────────
+// Preference order:
+//   1. Explicit config.s3Bucket + config.s3Prefix (set by caller / test helper)
+//   2. UC RootLocation lookup via DESCRIBE SCHEMA EXTENDED (fallback for schemas
+//      configured with a managed storage location)
+// The UC fallback uses the `RootLocation` row, not `Location` (UUID-suffixed
+// internal path) or the catalog `Storage Root` (managed-table area, not a
+// staging convention).
+function _ensureStagingLocation(client, config) {
 	if (client._stagingLocation) return Promise.resolve(client._stagingLocation);
 
+	if (config.s3Bucket && config.s3Prefix) {
+		client._stagingLocation = {
+			s3Bucket: config.s3Bucket,
+			s3Prefix: String(config.s3Prefix).replace(/\/$/, ''),
+		};
+		return Promise.resolve(client._stagingLocation);
+	}
+
+	const catalog = config.catalog;
+	const schema = config.schema;
 	return new Promise((resolve, reject) => {
 		const sql = `DESCRIBE SCHEMA EXTENDED \`${catalog}\`.\`${schema}\``;
 		client.query(sql, [], (err, rows) => {
@@ -228,7 +287,8 @@ function _ensureStagingLocation(client, catalog, schema) {
 			const rootRow = (rows || []).find(r => r.database_description_item === 'RootLocation');
 			if (!rootRow || !rootRow.database_description_value) {
 				return reject(new Error(
-					`RootLocation not found for ${catalog}.${schema} — schema must have a managed storage location configured in Unity Catalog`
+					`Staging location unresolved: no config.s3Bucket/s3Prefix and no RootLocation row for ${catalog}.${schema}. ` +
+					`Provide explicit s3Bucket+s3Prefix in dbconfig, or configure a managed location on the schema.`
 				));
 			}
 			const rootUrl = rootRow.database_description_value.trim();
@@ -243,40 +303,35 @@ function _ensureStagingLocation(client, catalog, schema) {
 }
 
 // ── streamToTableFromS3 implementation ───────────────────────────────────────
-function _streamToTableFromS3(client, table, config) {
-	let columns = [];
-	let s3Stream = null;
-	let s3Key = null;
-	let s3Uri = null;
-	let pending = null;
-	let schemaReady = false;
+// Caller must supply `columns`, `s3Bucket`, `s3Prefix` in opts so setup is fully
+// synchronous — no async describeTable / staging-location lookup happens here.
+// Doing the lookup inside the pipeline race conditions with incoming rows
+// (records arrive before the SDK promise resolves, no place to safely buffer).
+function _streamToTableFromS3(client, table, opts) {
+	const columnDefs = opts.columnDefs;
+	const s3Bucket = opts.s3Bucket;
+	const s3Prefix = opts.s3Prefix;
+	if (!columnDefs || !columnDefs.length) throw new Error('streamToTableFromS3: columnDefs required ([{name, type}, ...])');
+	if (!s3Bucket || !s3Prefix) throw new Error('streamToTableFromS3: s3Bucket and s3Prefix required');
+	const columns = columnDefs.map(c => c.name);
 
-	// Resolve schema columns and S3 staging location from Unity Catalog in parallel.
-	Promise.all([
-		client.describeTable(table.replace(/^.*\./, ''), config.schema),
-		_ensureStagingLocation(client, config.catalog, config.schema),
-	]).then(([tableFields, stagingLocation]) => {
-		columns = tableFields.map(f => f.column_name);
-		schemaReady = true;
+	const cleanAuditDate = (opts.auditdate || client.auditdate || "'" + new Date().toISOString() + "'")
+		.replace(/'/g, '').replace(/:/g, '-');
+	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
+	const s3Uri = `s3://${s3Bucket}/${s3Key}`;
 
-		const cleanAuditDate = client.auditdate.replace(/'/g, '').replace(/:/g, '-');
-		s3Key = `${stagingLocation.s3Prefix}/${table}/${cleanAuditDate}.csv`;
-		s3Uri = `s3://${stagingLocation.s3Bucket}/${s3Key}`;
+	client._lastStagingS3 = { bucket: s3Bucket, key: s3Key };
+	client._lastStagingS3Uri = s3Uri;
+	client._lastStagingColumnDefs = columnDefs.slice();
 
-		const awsS3 = new (require('aws-sdk')).S3({ region: config.region });
-		s3Stream = ls.toS3(stagingLocation.s3Bucket, s3Key, { s3: awsS3 });
-		client._lastStagingS3 = { s3: awsS3, bucket: stagingLocation.s3Bucket, key: s3Key };
-		s3Stream.on('finish', () => s3Stream.emit('end'));
-		s3Stream.on('error', err => {
-			logger.error('S3 stream error:', err);
-		});
+	// Pre-compute which columns target TIMESTAMP_NTZ so the transform can strip
+	// offset markers from incoming values. read_files in PERMISSIVE mode nulls any
+	// timestamp value with a trailing `Z` or `±HH:MM` against an NTZ schema; the
+	// audit columns were already handled at setAuditdate time, but payload columns
+	// flow through this transform untouched. See docs/timestamp-followups.md #1
+	// and ../CLAUDE.md "Timestamp handling".
+	const ntzColumns = new Set(columnDefs.filter(c => isNtzType(c.type)).map(c => c.name));
 
-		if (pending) pending();
-	}).catch(err => {
-		logger.error('setup error in streamToTableFromS3:', err);
-	});
-
-	// Null/newline normalization matching connectors/postgres/lib/connect.js:394-402
 	function nonNull(v) {
 		if (v === '' || v === null || v === undefined) return '\\N';
 		if (typeof v === 'string' && v.search(/\r/) !== -1) return v.replace(/\r\n?/g, '\n');
@@ -285,66 +340,53 @@ function _streamToTableFromS3(client, table, config) {
 
 	let count = 0;
 
+	// fast-csv pipe-delimited rows → leo-sdk's toS3 (the canonical Leo S3-write helper).
+	// toS3's internal s3 client uses the AWS default credential chain at call time —
+	// in production that's the Lambda IAM role; in local dev tests it's the env vars
+	// set by the integration helper after assume-role.
 	return ls.pipeline(
 		csv.createWriteStream({
 			headers: false,
 			delimiter: '|',
-			transform: (row, done) => {
-				if (!schemaReady) {
-					pending = () => done(null, columns.map(f => nonNull(row[f])));
-				} else {
-					done(null, columns.map(f => nonNull(row[f])));
-				}
-			},
+			transform: (row, done) => done(null, columns.map(f => {
+				const v = row[f];
+				return nonNull(ntzColumns.has(f) ? stripTimestampOffset(v) : v);
+			})),
 		}),
-		ls.write(
-			(r, done) => {
-				count++;
-				if (count % 10000 === 0) logger.info(table + ': ' + count);
-				if (!s3Stream.write(r)) {
-					s3Stream.once('drain', done);
-				} else {
-					done(null);
-				}
-			},
-			(done) => {
-				if (s3Stream) {
-					s3Stream.on('end', async (err) => {
-						if (err) return done(err);
-
-						// Mount staged file as a temporary view, then signal done.
-						// The MERGE itself is issued by dwconnect.importFact after streamToTableFromS3 completes.
-						const viewName = `staging_${table.replace(/[^a-z0-9_]/gi, '_')}`;
-						const colDefs = columns.map(c => `${c} STRING`).join(', ');
-
-						// read_files options — see BUILD_PLAN.md Step 7 for per-option rationale
-						const viewSql = [
-							`CREATE OR REPLACE TEMPORARY VIEW \`${viewName}\` AS`,
-							`SELECT * FROM read_files(`,
-							`  '${s3Uri}',`,
-							`  format => 'csv',`,
-							`  sep => '|',`,
-							`  header => false,`,
-							`  quote => '"',`,
-							`  escape => '"',`,
-							`  multiLine => 'true',`,
-							`  nullValue => '\\\\N',`,
-							`  mode => 'PERMISSIVE',`,
-							`  schema => '${colDefs}'`,
-							`)`,
-						].join('\n');
-
-						client.query(viewSql, [], (viewErr) => {
-							if (viewErr) return done(viewErr);
-							client._lastStagingView = viewName;
-							done();
-						});
-					});
-					s3Stream.end();
-				} else {
-					done();
-				}
-			}
-		)
+		ls.through((row, done) => {
+			count++;
+			if (count % 10000 === 0) logger.info(table + ': ' + count);
+			done(null, row);
+		}),
+		ls.toS3(s3Bucket, s3Key)
 	);
 }
+
+// ── Timestamp normalization for TIMESTAMP_NTZ staging ────────────────────────
+// read_files in PERMISSIVE mode nulls any timestamp value with a trailing `Z`
+// or `±HH:MM` offset against a TIMESTAMP_NTZ schema. Producers commonly emit
+// `Date.toISOString()` (always `Z`-suffixed) into timestamp payload fields —
+// e.g. item-dw's `f_item_change_event.last_at`. Strip the offset suffix so the
+// value reaches Delta as the same wall-clock Redshift's COPY TIMEFORMAT 'auto'
+// would have stored. The connector inherits Redshift's deliberate no-TZ posture
+// (see CLAUDE.md "Timestamp handling — preserving legacy no-TZ semantics");
+// semantic normalization is a downstream concern.
+//
+// Matches ISO-8601-like `YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH[:?]MM]`. Values that
+// don't match the shape (plain dates, non-strings, already naked) pass through.
+const TS_OFFSET_RE = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)(Z|[+-]\d{2}:?\d{2})$/;
+function stripTimestampOffset(value) {
+	if (typeof value !== 'string') return value;
+	const m = value.match(TS_OFFSET_RE);
+	return m ? m[1] : value;
+}
+
+function isNtzType(type) {
+	if (!type) return false;
+	const t = String(type).toUpperCase().trim();
+	return t === 'TIMESTAMP_NTZ';
+}
+
+// Exposed for unit tests; not part of the public client surface.
+module.exports._stripTimestampOffset = stripTimestampOffset;
+module.exports._isNtzType = isNtzType;

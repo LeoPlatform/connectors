@@ -45,4 +45,17 @@ describe('surrogate_key.js', () => {
 	it('converts non-string values to strings', () => {
 		expect(fingerprint64([42])).to.equal(fingerprint64(['42']));
 	});
+
+	it('returns signed-64 (negative) for unsigned values > 2^63-1', () => {
+		// fingerprint64(["1"]) hashes to 9304157803607034849 (unsigned) — above the
+		// signed BIGINT max of 9223372036854775807, so it must be returned as the
+		// negative signed-64 equivalent (-9142586270102516767). Without this
+		// conversion the staging-CSV value overflows the target BIGINT column → null.
+		expect(fingerprint64(['1'])).to.equal('-9142586270102516767');
+	});
+
+	it('returns non-negative for values that fit in signed-64', () => {
+		// fingerprint64(["2"]) hashes to 6920640749119439000 (fits in signed BIGINT).
+		expect(fingerprint64(['2'])).to.match(/^[0-9]/);
+	});
 });

@@ -1,7 +1,8 @@
 'use strict';
 
 const async = require('async');
-const ls = require('leo-streams');
+// leo-sdk.streams is the canonical Leo stream module (cf. connect.js / postgres connector).
+const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
 const sql = require('./sql.js');
 const fingerprint64 = require('./surrogate_key.js');
@@ -37,7 +38,8 @@ module.exports = function(dbconfig, options) {
 
 	// ── Audit date ─────────────────────────────────────────────────────────
 	client.setAuditdate = () => {
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, 'Z') + "'";
+		// Drop the trailing Z (see connect.js setAuditdate for rationale).
+		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '') + "'";
 	};
 	client.setAuditdate();
 
@@ -150,6 +152,7 @@ module.exports = function(dbconfig, options) {
 
 		client.describeTable(table, schema).then(tableFields => {
 			const allCols = tableFields.map(f => f.column_name);
+			const columnDefs = tableFields.map(f => ({ name: f.column_name, type: reconstructType(f) }));
 			const nks = ids;
 			const auditCol = columnConfig._auditdate;
 			const delCol = columnConfig._deleted;
@@ -170,43 +173,52 @@ module.exports = function(dbconfig, options) {
 					const nkValues = nks.map(k => obj[k]);
 					obj[skField] = fingerprint64(nkValues);
 				}
-				obj[auditCol] = dwClient.auditdate ? dwClient.auditdate.replace(/'/g, '') : new Date().toISOString();
+				obj[auditCol] = dwClient.auditdate ? dwClient.auditdate.replace(/'/g, '') : new Date().toISOString().replace(/Z$/, '');
 				obj[delCol] = false;
 				done(null, obj);
 			});
 
-			// Stage to S3 + mount temp view
-			const stageStream = client.streamToTableFromS3(table, Object.assign({}, dbconfig, {
-				schema: schema,
-			}));
+			// Resolve staging location once up front — fully synchronous setup downstream.
+			if (!dbconfig.s3Bucket || !dbconfig.s3Prefix) {
+				return callback(new Error('importFact: dbconfig.s3Bucket and dbconfig.s3Prefix are required'));
+			}
+			const stageStream = client.streamToTableFromS3(table, {
+				columnDefs: columnDefs,
+				s3Bucket: dbconfig.s3Bucket,
+				s3Prefix: dbconfig.s3Prefix,
+				auditdate: dwClient.auditdate,
+			});
 
 			ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
 				if (err) return callback(err);
 
-				// Now issue deletes, then MERGE
-				_flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
-					// Get the staging view name
-					const viewName = client._lastStagingView || `staging_${table}`;
+				// Build an inline read_files(...) SELECT for the staged S3 file. Each
+				// client.query() opens its own session — a session-scoped temp view
+				// would not survive across the MIN and MERGE queries, so we inline.
+				if (!client._lastStagingS3Uri || !client._lastStagingColumnDefs) {
+					return callback(new Error('staging did not produce an S3 URI; cannot build staging SELECT'));
+				}
+				const stagingSelect = client.buildStagingSelect(client._lastStagingS3Uri, client._lastStagingColumnDefs);
+				const stagingClause = `(\n${stagingSelect}\n)`;
 
-					// Collect min of prune column for naturalKeyFilter
+				_flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
 					let naturalKeyFilter = null;
 
-					// Build data columns (exclude NKs and audit columns)
 					const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
 					const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 
 					const mergeCallback = (mergeErr, mergeResult) => _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback);
 
 					if (pruneCol) {
-						const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM \`${viewName}\``;
+						const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
 						client.query(minSql, [], (qErr, results) => {
 							if (!qErr && results && results[0] && results[0].minval != null) {
 								naturalKeyFilter = client.escapeValue ? client.escapeValueNoToLower(String(results[0].minval)) : `'${results[0].minval}'`;
 							}
-							_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
+							_doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
 						});
 					} else {
-						_doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
+						_doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
 					}
 				});
 			});
@@ -231,6 +243,20 @@ module.exports = function(dbconfig, options) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// information_schema.columns.data_type reports DECIMAL without (precision, scale).
+// Reconstruct from numeric_precision / numeric_scale so the staging read_files
+// schema clause matches the target column type exactly — otherwise DECIMAL
+// defaults to DECIMAL(10,0) and silently truncates fractional values.
+function reconstructType(field) {
+	const t = String(field.data_type || '').toUpperCase();
+	if (t === 'DECIMAL') {
+		const p = field.numeric_precision != null ? field.numeric_precision : 18;
+		const s = field.numeric_scale != null ? field.numeric_scale : 0;
+		return `DECIMAL(${p},${s})`;
+	}
+	return t;
+}
+
 function _flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, callback) {
 	if (!deleteRecords.length) return callback();
 
@@ -254,10 +280,10 @@ function _flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig,
 	async.series(tasks, callback);
 }
 
-function _doMerge(client, qualifiedTable, viewName, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
+function _doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
 	const mergeSql = sql.mergeFact(
 		qualifiedTable,
-		`\`${viewName}\``,
+		stagingClause,
 		nks,
 		dataCols,
 		columnConfig,
@@ -279,7 +305,9 @@ function _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
 	if (!staging) {
 		return callback(mergeErr, mergeResult);
 	}
-	staging.s3.deleteObject({ Bucket: staging.bucket, Key: staging.key }, deleteErr => {
+	// Same S3 client leo-sdk's streams.toS3 used for the upload (default credential chain).
+	const s3 = require('leo-sdk').aws.s3;
+	s3.deleteObject({ Bucket: staging.bucket, Key: staging.key }, deleteErr => {
 		if (deleteErr) {
 			logger.info('staged file delete failed:', staging.key, deleteErr);
 		}

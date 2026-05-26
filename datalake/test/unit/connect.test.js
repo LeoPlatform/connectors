@@ -92,6 +92,67 @@ describe('connect.js', () => {
 		});
 	});
 
+	describe('TIMESTAMP_NTZ normalization helpers', () => {
+		// Pull the unstubbed helpers — they're pure functions and don't touch the
+		// Databricks/leo-sdk stubs above. Using require directly avoids the
+		// proxyquire shim, which doesn't proxy named-export augmentations.
+		const realConnect = require('../../lib/connect.js');
+
+		describe('stripTimestampOffset', () => {
+			it('strips trailing Z', () => {
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00Z')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.123Z')).to.equal('2026-03-15T14:30:00.123');
+			});
+
+			it('strips ±HH:MM offsets', () => {
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00-08:00')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00+05:30')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.250+00:00')).to.equal('2026-03-15T14:30:00.250');
+			});
+
+			it('strips ±HHMM offsets (no colon)', () => {
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00-0800')).to.equal('2026-03-15T14:30:00');
+			});
+
+			it('accepts space separator between date and time', () => {
+				expect(realConnect._stripTimestampOffset('2026-03-15 14:30:00Z')).to.equal('2026-03-15 14:30:00');
+			});
+
+			it('leaves naked ISO unchanged', () => {
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.123')).to.equal('2026-03-15T14:30:00.123');
+			});
+
+			it('leaves non-string and non-matching values unchanged', () => {
+				expect(realConnect._stripTimestampOffset(null)).to.equal(null);
+				expect(realConnect._stripTimestampOffset(undefined)).to.equal(undefined);
+				expect(realConnect._stripTimestampOffset(42)).to.equal(42);
+				expect(realConnect._stripTimestampOffset('not a timestamp')).to.equal('not a timestamp');
+				// Pure date — different shape, must pass through; DATE columns are
+				// not NTZ anyway, but defense in depth.
+				expect(realConnect._stripTimestampOffset('2026-03-15')).to.equal('2026-03-15');
+			});
+		});
+
+		describe('isNtzType', () => {
+			it('matches TIMESTAMP_NTZ in any case', () => {
+				expect(realConnect._isNtzType('TIMESTAMP_NTZ')).to.equal(true);
+				expect(realConnect._isNtzType('timestamp_ntz')).to.equal(true);
+				expect(realConnect._isNtzType(' Timestamp_Ntz ')).to.equal(true);
+			});
+
+			it('rejects zone-aware TIMESTAMP and other types', () => {
+				// TIMESTAMP (zone-aware in Databricks) MUST NOT be stripped — the
+				// offset is meaningful for that type.
+				expect(realConnect._isNtzType('TIMESTAMP')).to.equal(false);
+				expect(realConnect._isNtzType('STRING')).to.equal(false);
+				expect(realConnect._isNtzType('DATE')).to.equal(false);
+				expect(realConnect._isNtzType(null)).to.equal(false);
+				expect(realConnect._isNtzType(undefined)).to.equal(false);
+			});
+		});
+	});
+
 	describe('connect() + query()', () => {
 		it('calls DBSQLClient.connect with host/path/token', async () => {
 			const client = connectFactory({ host: 'myhost', path: '/sql/1', token: 'mytoken', catalog: 'cat', schema: 'sch' });

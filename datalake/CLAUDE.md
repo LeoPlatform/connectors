@@ -90,7 +90,7 @@ The publishing/offload path does **not** go through `leo-connector-redshift`. Th
 - Match sibling connector conventions (plain JavaScript, no TypeScript)
 - Map `varchar(n)` → `string` at SQL generation time (Databricks has no length-constrained string type)
 - Compute surrogate keys via `farmhash-modern` in Node.js, write computed value into staging CSV — not via SQL function
-- Use `TIMESTAMP_NTZ` for timezone-naive timestamp columns; set `infer_timestamp_ntz_type = true` on connectors
+- Map all Redshift `TIMESTAMP` (no TZ) columns to Databricks `TIMESTAMP_NTZ` and keep the connector's TZ posture unchanged — see [Timestamp handling](#timestamp-handling--preserving-legacy-no-tz-semantics) below
 - Keep all dw_fields config changes additive during Redshift coexistence — no change may break the running Redshift pipeline
 
 **Never:**
@@ -119,6 +119,37 @@ The Redshift pipeline (`general/`, `offload_to_redshift.js`, `leo-connector-post
 
 **`clusterKey` field — Databricks only by default:**
 `clusterKey` in dw_fields drives Databricks `CLUSTER BY` for liquid clustering. The Redshift connector ignores it entirely (unknown fields are silently ignored by the DynamoDB scan). The option to also use it as a Redshift SORTKEY override may be implemented but **must be off by default** and gated behind an explicit configuration flag — never activated as a side effect of adding the field.
+
+## Timestamp handling — preserving legacy no-TZ semantics
+
+Every timestamp column this connector writes — audit columns (`_auditdate`, SCD2 `_startdate`/`_enddate`) and data-payload columns alike — inherits from a Redshift `TIMESTAMP` (no TZ) schema. These columns store a naked wall-clock; the intended timezone is a per-source convention that lives outside the schema:
+
+- DSCO/CUP order timestamps (e.g. `d_order.created_at`) are stored as US/Pacific — pre-converted upstream by `fixTimestamp()` in `@chub-engineering/layer-util` (`DEFAULT_DESTINATION_TIMEZONE = 'US/Pacific'`).
+- `f_item_change_event.last_at` is stored as UTC (source string is ISO `Z`; Redshift `COPY TIMEFORMAT 'auto'` strips the offset and stores the wall-clock).
+- OrderStream-origin timestamps land as Eastern.
+- Audit columns are UTC (Redshift session TZ is UTC, so `sysdate` writes UTC).
+
+The migration must reproduce these wall-clocks bit-for-bit in Databricks during the long coexistence period — consumers cut over per-source over many months, and any shift in the meaning of stored values would silently corrupt every reader. Semantic normalization is a downstream concern (enterprise dbt models, per-consumer queries), not an ingest concern.
+
+**Target type:** `TIMESTAMP_NTZ` — the only Databricks type that preserves "no offset stored, no conversion on read/write."
+
+**Required session parameters** (already set in [lib/connect.js](lib/connect.js#L58-L62)):
+- `timezone = UTC` — keeps server-side `current_timestamp()` returning UTC, matching Redshift's UTC-session `sysdate` for audit columns.
+- `infer_timestamp_ntz_type = true` — keeps CSV/Parquet timestamp inference from shifting wall-clocks into Databricks' default zone-aware `TIMESTAMP`.
+
+**CSV staging implication:** `read_files` with NTZ inference in PERMISSIVE mode rejects offset markers — empirically confirmed by [`test/integration/timezone.test.js`](test/integration/timezone.test.js): a `Z`-suffixed or `±HH:MM`-suffixed value seen directly by `read_files` nulls out. Any timestamp value written to staging CSV must reach the file as naked ISO local form (`YYYY-MM-DDTHH:MM:SS`), no `Z`, no `±HH:MM`. The connector enforces this in two places:
+
+- [`setAuditdate`](lib/connect.js#L206-L211) — strips the trailing `Z` from `Date.toISOString()` when building the audit timestamp literal.
+- [`_streamToTableFromS3`](lib/connect.js) — for every column whose `columnDef.type` is `TIMESTAMP_NTZ`, routes the value through `stripTimestampOffset()` before the CSV write, normalizing payload values from producers that emit `Date.toISOString()` (always `Z`-suffixed) or any other ISO-with-offset shape.
+
+This is one rule with two implementations; do not treat the audit-column strip as an audit-specific quirk. See [`docs/timestamp-followups.md`](docs/timestamp-followups.md) for the design rationale and the deferred producer-side audit that remediates already-corrupted historical data.
+
+**Do not "fix" this:**
+- Don't retype a `TIMESTAMP_NTZ` column to zone-aware `TIMESTAMP` "for clarity" — it forces a UTC interpretation onto values that may not be UTC; Pacific `d_order` values would shift by 7–8 hours and corrupt every downstream join. (Note: this is about retyping existing no-TZ columns. If a producer column is `timestamptz` at the source, mapping it to Databricks `TIMESTAMP` is correct and that's what [`lib/sql.js`](lib/sql.js) does — the offset is in the data and carries its own meaning.)
+- Don't apply `CONVERT_TIMEZONE` / `from_utc_timestamp` in the connector — semantic normalization belongs in downstream models, not at ingest.
+- Don't change session `timezone` away from UTC — both the `Z` strip and the audit-column UTC assumption depend on it. If you must change it, audit-column writes and the strip have to change together.
+
+**Canonical reference for stored timezones per table:** [../../data-warehouse/docs/timezone-data-conventions.md](../../data-warehouse/docs/timezone-data-conventions.md).
 
 ## Definition of Done
 

@@ -20,6 +20,7 @@ describe('sql.js', () => {
 			['timestamp', 'TIMESTAMP_NTZ'],
 			['TIMESTAMP', 'TIMESTAMP_NTZ'],
 			['timestamptz', 'TIMESTAMP'],
+			['TIMESTAMPTZ', 'TIMESTAMP'],
 			['date', 'DATE'],
 			['boolean', 'BOOLEAN'],
 			['BOOLEAN', 'BOOLEAN'],
