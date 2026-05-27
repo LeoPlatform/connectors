@@ -3,6 +3,8 @@
 const { expect } = require('chai');
 const { PassThrough } = require('stream');
 const csv = require('fast-csv');
+const sinon = require('sinon');
+const proxyquire = require('proxyquire').noCallThru();
 
 // Test nonNull/CSV serialization directly — this is the function from connect.js
 // duplicated here for unit testing the serialization contract.
@@ -126,5 +128,229 @@ describe('importFact — CSV output contract', () => {
 			['id', 'active']
 		);
 		expect(output.trim()).to.equal('1|false');
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Orchestration tests: cover importFact's wiring of describeTable →
+// ensureStagingLocation → streamToTableFromS3 → MERGE, plus prune-query
+// type-aware quoting, error propagation, and the row-level routing
+// (delete records out, sk + audit + _deleted onto every survivor).
+//
+// leo-sdk.streams is the canonical leo-streams package (cf. connect.js);
+// we stub it so ls.pipe completes synchronously and ls.through hands us
+// the per-row callbacks for direct invocation.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('importFact — orchestration', () => {
+	function setup(opts) {
+		opts = opts || {};
+		const queryHistory = [];
+		const throughCallbacks = [];
+		let pipeFinalCb = null;
+
+		const clientStub = {
+			auditdate: "'2026-05-27T00:00:00'",
+			setAuditdate: sinon.stub(),
+			escapeId: name => '`' + String(name).toLowerCase() + '`',
+			escapeValueNoToLower: v => typeof v === 'string' ? "'" + v.replace(/'/g, "\\'") + "'" : v,
+			describeTable: sinon.stub().resolves(opts.tableFields),
+			ensureStagingLocation: sinon.stub().resolves({ s3Bucket: 'b', s3Prefix: 'p' }),
+			streamToTableFromS3: sinon.stub().returns({ pipe: sinon.stub() }),
+			lastStagingS3Uri: opts.stagingUri === null ? null : (opts.stagingUri || 's3://bucket/key.csv'),
+			lastStagingS3: opts.stagingUri === null ? null : { bucket: 'bucket', key: 'key.csv' },
+			lastStagingColumnDefs: opts.tableFields.map(f => ({ name: f.column_name, type: f.data_type })),
+			buildStagingSelect: sinon.stub().returns('SELECT * FROM read_files(...)'),
+			query: sinon.stub().callsFake((sql, params, cb) => {
+				queryHistory.push(sql);
+				const finalCb = typeof cb === 'function' ? cb : (typeof params === 'function' ? params : () => {});
+				if (sql.indexOf('SELECT MIN(') === 0) {
+					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: 50 }]);
+				}
+				return finalCb(null, []);
+			}),
+		};
+
+		const lsStub = {
+			through: cb => { throughCallbacks.push(cb); return { pipe: sinon.stub() }; },
+			pipe: (...args) => { pipeFinalCb = args[args.length - 1]; },
+		};
+
+		const factory = proxyquire('../../lib/dwconnect.js', {
+			'./connect.js': sinon.stub().returns(clientStub),
+			'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
+			'leo-sdk': {
+				streams: lsStub,
+				aws: { s3: { deleteObject: (p, cb) => cb(null) } },
+			},
+			'./sql.js': require('../../lib/sql.js'),
+			'./surrogate_key.js': require('../../lib/surrogate_key.js'),
+			// Pin the audit timestamp so enrichment assertions are deterministic.
+			// The factory's setAuditdate() would otherwise stamp client.auditdate
+			// with naiveIsoNow() at construction time and clobber our stub value.
+			'./audit_timestamp.js': () => '2026-05-27T00:00:00',
+		});
+
+		const dwClient = factory(opts.dbconfig || { catalog: 'cat', schema: 'sch' });
+
+		return {
+			dwClient,
+			clientStub,
+			queryHistory,
+			throughCallbacks,
+			completePipeline: (err) => { pipeFinalCb(err || null); },
+		};
+	}
+
+	function callImportFact(dwClient, table, ids, tableDef) {
+		return new Promise((resolve, reject) => {
+			dwClient.importFact(null, table, ids, (err, result) => err ? reject(err) : resolve(result), tableDef);
+		});
+	}
+
+	// Drive importFact through to completion. The promise resolves when the
+	// final callback fires (after MERGE + cleanupStagedFile). pipeline is
+	// completed synchronously after a tick so the describeTable + ensureStagingLocation
+	// promises have settled.
+	async function runToCompletion(ctx, table, ids, tableDef, pipelineError) {
+		const p = callImportFact(ctx.dwClient, table, ids, tableDef);
+		// Allow the describeTable/ensureStagingLocation promise chain to register ls.pipe.
+		await new Promise(setImmediate);
+		ctx.completePipeline(pipelineError);
+		return p;
+	}
+
+	const factTableFields = [
+		{ column_name: 'id', data_type: 'BIGINT' },
+		{ column_name: 'qty', data_type: 'INT' },
+		{ column_name: 'created_at', data_type: 'TIMESTAMP_NTZ' },
+		{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+		{ column_name: '_deleted', data_type: 'BOOLEAN' },
+	];
+
+	it('emits MERGE INTO against the qualified target table', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		await runToCompletion(ctx, 'f_order_item', ['id']);
+		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
+		expect(merge, 'expected a MERGE INTO query').to.exist;
+		expect(merge).to.include('cat.sch.f_order_item');
+	});
+
+	it('runs a SELECT MIN prune query against the single NK', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		await runToCompletion(ctx, 'f_order_item', ['id']);
+		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
+		expect(minQuery, 'expected a prune MIN query').to.exist;
+		expect(minQuery).to.include('`id`');
+	});
+
+	it('prefers tableDef.clusterKey over ids as the prune column', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'qty' });
+		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
+		expect(minQuery).to.include('`qty`');
+		expect(minQuery).to.not.include('MIN(`id`)');
+	});
+
+	it('numeric prune column produces unquoted naturalKeyFilter in the MERGE predicate', async () => {
+		// mergeFact only emits the cluster predicate when tableDef.clusterKey is
+		// set (without it, importFact still runs the MIN query but the literal
+		// has nowhere to land in the SQL).
+		const ctx = setup({ tableFields: factTableFields, minVal: 12345 });
+		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'id' });
+		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
+		expect(merge).to.include('>= 12345');
+		expect(merge).to.not.include(">= '12345'");
+	});
+
+	it('non-numeric prune column produces quoted naturalKeyFilter', async () => {
+		// `created_at` is TIMESTAMP_NTZ — values must be quoted to parse.
+		const ctx = setup({ tableFields: factTableFields, minVal: '2026-03-15 14:30:00' });
+		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'created_at' });
+		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
+		expect(merge).to.include(">= '2026-03-15 14:30:00'");
+	});
+
+	it('skips prune query for composite NKs when no clusterKey is set', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
+		expect(ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0)).to.not.exist;
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.exist;
+	});
+
+	it('normalizes a single non-array id to an array', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		await runToCompletion(ctx, 'f_order_item', 'id');
+		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
+		expect(minQuery).to.include('`id`');
+	});
+
+	it('propagates a pipeline error to the callback and skips MERGE', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		let caught;
+		try {
+			await runToCompletion(ctx, 'f_order_item', ['id'], undefined, new Error('pipe failed'));
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.exist;
+		expect(caught.message).to.equal('pipe failed');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+	});
+
+	it('rejects when staging did not produce an S3 URI', async () => {
+		const ctx = setup({ tableFields: factTableFields, stagingUri: null });
+		let caught;
+		try {
+			await runToCompletion(ctx, 'f_order_item', ['id']);
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.exist;
+		expect(caught.message).to.include('staging did not produce an S3 URI');
+	});
+
+	it('dataStream callback filters __leo_delete__ markers from the staging path', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		const runP = runToCompletion(ctx, 'f_order_item', ['id']);
+		await runP;
+		// throughCallbacks[0] is the dataStream filter (registered first)
+		const dataStreamCb = ctx.throughCallbacks[0];
+		const forwarded = [];
+		dataStreamCb({ __leo_delete__: 'id', __leo_delete_id__: 42 }, (err, obj) => {
+			if (obj !== undefined) forwarded.push(obj);
+		});
+		dataStreamCb({ id: 1, qty: 5 }, (err, obj) => {
+			if (obj !== undefined) forwarded.push(obj);
+		});
+		expect(forwarded).to.deep.equal([{ id: 1, qty: 5 }]);
+	});
+
+	it('enrichedStream stamps audit/_deleted and computes sk via fingerprint64', async () => {
+		const ctx = setup({
+			tableFields: [
+				...factTableFields,
+				{ column_name: '_id', data_type: 'BIGINT' },
+			],
+		});
+		const tableDef = {
+			structure: {
+				'_id': 'sk',
+				'id': { nk: true, type: 'integer' },
+				'qty': { type: 'integer' },
+			},
+		};
+		await runToCompletion(ctx, 'f_order_item', ['id'], tableDef);
+		// throughCallbacks[1] is the enrichment stream (registered after the filter)
+		const enrichedCb = ctx.throughCallbacks[1];
+		let enriched;
+		enrichedCb({ id: 42, qty: 5 }, (err, obj) => { enriched = obj; });
+		expect(enriched.id).to.equal(42);
+		expect(enriched.qty).to.equal(5);
+		expect(enriched._auditdate).to.equal('2026-05-27T00:00:00');
+		expect(enriched._deleted).to.equal(false);
+		// _id is the sk column → fingerprint64 of natural-key values
+		expect(typeof enriched._id).to.equal('string');
+		expect(enriched._id).to.match(/^-?\d+$/);
 	});
 });
