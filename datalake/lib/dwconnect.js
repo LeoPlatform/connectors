@@ -7,6 +7,8 @@ const logger = require('leo-logger');
 const sql = require('./sql.js');
 const fingerprint64 = require('./surrogate_key.js');
 
+const naiveIsoNow = require('./audit_timestamp.js');
+
 module.exports = function(dbconfig, options) {
 	const connect = require('./connect.js');
 	const client = connect(dbconfig);
@@ -38,8 +40,7 @@ module.exports = function(dbconfig, options) {
 
 	// ── Audit date ─────────────────────────────────────────────────────────
 	client.setAuditdate = () => {
-		// Drop the trailing Z (see connect.js setAuditdate for rationale).
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '') + "'";
+		client.auditdate = "'" + naiveIsoNow() + "'";
 	};
 	client.setAuditdate();
 
@@ -173,7 +174,7 @@ module.exports = function(dbconfig, options) {
 					const nkValues = nks.map(k => obj[k]);
 					obj[skField] = fingerprint64(nkValues);
 				}
-				obj[auditCol] = dwClient.auditdate ? dwClient.auditdate.replace(/'/g, '') : new Date().toISOString().replace(/Z$/, '');
+				obj[auditCol] = dwClient.auditdate ? dwClient.auditdate.replace(/'/g, '') : naiveIsoNow();
 				obj[delCol] = false;
 				done(null, obj);
 			});

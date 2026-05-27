@@ -127,7 +127,7 @@ Every timestamp column this connector writes — audit columns (`_auditdate`, SC
 - DSCO/CUP order timestamps (e.g. `d_order.created_at`) are stored as US/Pacific — pre-converted upstream by `fixTimestamp()` in `@chub-engineering/layer-util` (`DEFAULT_DESTINATION_TIMEZONE = 'US/Pacific'`).
 - `f_item_change_event.last_at` is stored as UTC (source string is ISO `Z`; Redshift `COPY TIMEFORMAT 'auto'` strips the offset and stores the wall-clock).
 - OrderStream-origin timestamps land as Eastern.
-- Audit columns are UTC (Redshift session TZ is UTC, so `sysdate` writes UTC).
+- Audit columns are UTC (Redshift session TZ is UTC, so `sysdate` writes UTC). Verified against ProdDW: `pg_user.useconfig` shows no per-user TZ override — only `looker` and `etl` carry `search_path=…` overrides, nothing TZ-related — so the session UTC assumption holds for every loader user.
 
 The migration must reproduce these wall-clocks bit-for-bit in Databricks during the long coexistence period — consumers cut over per-source over many months, and any shift in the meaning of stored values would silently corrupt every reader. Semantic normalization is a downstream concern (enterprise dbt models, per-consumer queries), not an ingest concern.
 
@@ -142,7 +142,9 @@ The migration must reproduce these wall-clocks bit-for-bit in Databricks during 
 - [`setAuditdate`](lib/connect.js#L206-L211) — strips the trailing `Z` from `Date.toISOString()` when building the audit timestamp literal.
 - [`_streamToTableFromS3`](lib/connect.js) — for every column whose `columnDef.type` is `TIMESTAMP_NTZ`, routes the value through `stripTimestampOffset()` before the CSV write, normalizing payload values from producers that emit `Date.toISOString()` (always `Z`-suffixed) or any other ISO-with-offset shape.
 
-This is one rule with two implementations; do not treat the audit-column strip as an audit-specific quirk. See [`docs/timestamp-followups.md`](docs/timestamp-followups.md) for the design rationale and the deferred producer-side audit that remediates already-corrupted historical data.
+This is one rule with two implementations; do not treat the audit-column strip as an audit-specific quirk.
+
+The shared audit-timestamp helper [`lib/audit_timestamp.js`](lib/audit_timestamp.js) is the single source of truth for the audit-literal shape. It emits `YYYY-MM-DDTHH:MM:SS` — second-resolution, no millis, no `Z` — matching the postgres/redshift sibling convention exactly except for the unavoidable Z-strip (postgres emits `…SSZ`; see [`connectors/postgres/lib/connect.js`](../postgres/lib/connect.js) `setAuditdate`).
 
 **Do not "fix" this:**
 - Don't retype a `TIMESTAMP_NTZ` column to zone-aware `TIMESTAMP` "for clarity" — it forces a UTC interpretation onto values that may not be UTC; Pacific `d_order` values would shift by 7–8 hours and corrupt every downstream join. (Note: this is about retyping existing no-TZ columns. If a producer column is `timestamptz` at the source, mapping it to Databricks `TIMESTAMP` is correct and that's what [`lib/sql.js`](lib/sql.js) does — the offset is in the data and carries its own meaning.)

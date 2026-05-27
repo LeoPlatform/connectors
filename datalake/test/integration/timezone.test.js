@@ -7,7 +7,7 @@
 //   - Session TZ assertion (current_timezone() returns UTC)
 //   - Payload-CSV normalization: connector strips trailing `Z` and `±HH:MM`
 //     from values destined for TIMESTAMP_NTZ columns, so PERMISSIVE inference
-//     sees naked-ISO and preserves the wall-clock (see ../../docs/timestamp-followups.md #1)
+//     sees naked-ISO and preserves the wall-clock
 //   - Round-trip parity across canonical timestamp shapes
 //   - DST boundary cases — wall-clock preserved, no DST awareness in NTZ
 //

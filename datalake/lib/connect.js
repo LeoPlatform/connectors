@@ -8,6 +8,7 @@ const csv = require('fast-csv');
 // through, pipe, AND toS3 — use it for all stream primitives. The separate
 // `leo-streams` npm package is a lighter sibling without toS3; we don't import it.
 const ls = require('leo-sdk').streams;
+const naiveIsoNow = require('./audit_timestamp.js');
 
 module.exports = function(config) {
 	// Schema cache mirrors connectors/postgres/lib/connect.js lines 40-135.
@@ -207,10 +208,7 @@ module.exports = function(config) {
 	};
 
 	function setAuditdate() {
-		// Drop the trailing Z so the same string works as both a SQL literal and a CSV
-		// value for TIMESTAMP_NTZ columns. read_files CSV parsing rejects the Z
-		// (PERMISSIVE → null), and quoted SQL literals accept it but don't require it.
-		client.auditdate = "'" + new Date().toISOString().replace(/\.\d*Z/, '') + "'";
+		client.auditdate = "'" + naiveIsoNow() + "'";
 	}
 
 	setAuditdate();
@@ -315,7 +313,7 @@ function _streamToTableFromS3(client, table, opts) {
 	if (!s3Bucket || !s3Prefix) throw new Error('streamToTableFromS3: s3Bucket and s3Prefix required');
 	const columns = columnDefs.map(c => c.name);
 
-	const cleanAuditDate = (opts.auditdate || client.auditdate || "'" + new Date().toISOString() + "'")
+	const cleanAuditDate = (opts.auditdate || client.auditdate || "'" + naiveIsoNow() + "'")
 		.replace(/'/g, '').replace(/:/g, '-');
 	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
 	const s3Uri = `s3://${s3Bucket}/${s3Key}`;
@@ -328,8 +326,7 @@ function _streamToTableFromS3(client, table, opts) {
 	// offset markers from incoming values. read_files in PERMISSIVE mode nulls any
 	// timestamp value with a trailing `Z` or `±HH:MM` against an NTZ schema; the
 	// audit columns were already handled at setAuditdate time, but payload columns
-	// flow through this transform untouched. See docs/timestamp-followups.md #1
-	// and ../CLAUDE.md "Timestamp handling".
+	// flow through this transform untouched. See ../CLAUDE.md "Timestamp handling".
 	const ntzColumns = new Set(columnDefs.filter(c => isNtzType(c.type)).map(c => c.name));
 
 	function nonNull(v) {

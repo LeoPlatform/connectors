@@ -7,7 +7,7 @@ const proxyquire = require('proxyquire').noCallThru();
 function makeClientStub(schemaByTable) {
 	const queryHistory = [];
 	const client = {
-		auditdate: "'2024-01-01T00:00:00Z'",
+		auditdate: "'2024-01-01T00:00:00'",
 		setAuditdate: sinon.stub(),
 		clearSchemaCache: sinon.stub(),
 		getSchemaCache: sinon.stub().returns({}),
