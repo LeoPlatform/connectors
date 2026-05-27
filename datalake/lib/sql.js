@@ -72,7 +72,10 @@ function colDef(name, rawType, escapeId) {
 
 /**
  * Generate CREATE TABLE IF NOT EXISTS DDL for a dw_fields table definition.
- * Always appends _auditdate TIMESTAMP_NTZ and _deleted BOOLEAN audit columns.
+ * Always appends _auditdate TIMESTAMP_NTZ. Facts also get _deleted BOOLEAN;
+ * dimensions instead get the SCD2 columns _startdate / _enddate / _current —
+ * matching the dim/fact split in ../postgres/lib/dwconnect.js (createTable
+ * branches at the `if (definition.isDimension)` block).
  * Appends CLUSTER BY (clusterKey) when clusterKey is set.
  *
  * @param {string} qualifiedTable  - fully-qualified table name (catalog.schema.table)
@@ -99,7 +102,13 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 	});
 
 	cols.push(`${escapeId(columnConfig._auditdate)} TIMESTAMP_NTZ`);
-	cols.push(`${escapeId(columnConfig._deleted)} BOOLEAN`);
+	if (definition.isDimension) {
+		cols.push(`${escapeId(columnConfig._startdate)} TIMESTAMP_NTZ`);
+		cols.push(`${escapeId(columnConfig._enddate)} TIMESTAMP_NTZ`);
+		cols.push(`${escapeId(columnConfig._current)} BOOLEAN`);
+	} else {
+		cols.push(`${escapeId(columnConfig._deleted)} BOOLEAN`);
+	}
 
 	let sql = `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA`;
 

@@ -8,6 +8,9 @@ const escapeId = name => '`' + String(name).toLowerCase().replace(/`/g, '') + '`
 const columnConfig = {
 	_auditdate: '_auditdate',
 	_deleted: '_deleted',
+	_startdate: '_startdate',
+	_enddate: '_enddate',
+	_current: '_current',
 };
 
 describe('sql.js', () => {
@@ -84,10 +87,30 @@ describe('sql.js', () => {
 			expect(ddl).to.include('`archived` BOOLEAN');
 		});
 
-		it('appends _auditdate TIMESTAMP_NTZ and _deleted BOOLEAN', () => {
+		it('dimension: appends _auditdate + SCD2 audit cols, no _deleted', () => {
 			const ddl = createTable('cat.sch.d_order', dOrderDef, columnConfig, escapeId);
 			expect(ddl).to.include('`_auditdate` TIMESTAMP_NTZ');
+			expect(ddl).to.include('`_startdate` TIMESTAMP_NTZ');
+			expect(ddl).to.include('`_enddate` TIMESTAMP_NTZ');
+			expect(ddl).to.include('`_current` BOOLEAN');
+			expect(ddl).to.not.include('`_deleted`');
+		});
+
+		it('fact: appends _auditdate + _deleted, no SCD2 cols', () => {
+			const fOrderItemDef = {
+				isDimension: false,
+				structure: {
+					'_id': 'sk',
+					'id': { nk: true, type: 'integer' },
+					'qty': { type: 'integer' },
+				},
+			};
+			const ddl = createTable('cat.sch.f_order_item', fOrderItemDef, columnConfig, escapeId);
+			expect(ddl).to.include('`_auditdate` TIMESTAMP_NTZ');
 			expect(ddl).to.include('`_deleted` BOOLEAN');
+			expect(ddl).to.not.include('`_startdate`');
+			expect(ddl).to.not.include('`_enddate`');
+			expect(ddl).to.not.include('`_current`');
 		});
 
 		it('appends CLUSTER BY when clusterKey set', () => {

@@ -83,6 +83,15 @@ The publishing/offload path does **not** go through `leo-connector-redshift`. Th
 
 **Skip:** `../postgres/lib/binlogreader.js`, `../postgres/lib/lsn.js`, `../postgres/lib/test_decoding.js` — CDC/logical-replication; not relevant to RStreams-driven publishing.
 
+### Porting discipline (read before adapting any postgres helper)
+
+When porting a function from `../postgres/`, **preserve every branch** in the original — don't silently flatten conditional logic to "simplify" the Databricks version. The bugs from doing that are exactly the kind that pass unit tests, slip past code review, and corrupt data at runtime months later. Concrete patterns to watch for:
+
+- **Dim vs fact branching.** Many postgres helpers gate behavior on `definition.isDimension` — e.g., `createTable` adds `_deleted` only for facts and `_startdate`/`_enddate`/`_current` only for dims. Mirror the branch; don't unconditionally apply one side's columns.
+- **Type-aware literal rendering.** `naturalKeyFilter` (and similar MIN/MAX bound literals) branches on the column's type — numeric columns render unquoted, string/timestamp quoted. Always quoting works in the happy path and produces silently wrong MERGE predicates when the column is numeric. Look up the column type from `describeTable` results.
+- **Configuration gates.** Postgres often gates a feature on `config.hashedSurrogateKeys`, `config.version`, etc. If the datalake side only supports one branch today, keep the conditional and `throw` (or no-op) the unsupported branch — don't delete it. Future contributors need to see the shape.
+- **Validate with a postgres-side grep, not the unit tests.** The unit-test fixtures in this repo were written alongside the port and can encode the same flattening bug — a passing test proves consistency with the test, not with the postgres source. When in doubt, `grep -n "<helper>" ../postgres/lib/dwconnect.js` and read the surrounding 30–50 lines.
+
 ## Coding Rules
 
 **Always:**

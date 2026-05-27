@@ -154,6 +154,10 @@ module.exports = function(dbconfig, options) {
 		client.describeTable(table, schema).then(tableFields => {
 			const allCols = tableFields.map(f => f.column_name);
 			const columnDefs = tableFields.map(f => ({ name: f.column_name, type: reconstructType(f) }));
+			const fieldLookup = tableFields.reduce((acc, f) => {
+				acc[f.column_name.toLowerCase()] = f;
+				return acc;
+			}, {});
 			const nks = ids;
 			const auditCol = columnConfig._auditdate;
 			const delCol = columnConfig._deleted;
@@ -210,9 +214,10 @@ module.exports = function(dbconfig, options) {
 
 						if (pruneCol) {
 							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+							const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
 							client.query(minSql, [], (qErr, results) => {
 								if (!qErr && results && results[0] && results[0].minval != null) {
-									naturalKeyFilter = client.escapeValueNoToLower(String(results[0].minval));
+									naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
 								}
 								doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
 							});
@@ -255,6 +260,20 @@ function reconstructType(field) {
 		return `DECIMAL(${p},${s})`;
 	}
 	return t;
+}
+
+// Render `value` as a SQL literal appropriate for `dataType`. Numeric columns
+// take an unquoted literal; everything else (string, timestamp, date) is
+// single-quoted via the connector's standard escaper. Mirrors the type-aware
+// branching in ../postgres/lib/dwconnect.js naturalKeyFilter — Databricks
+// types replace Postgres int4/int8/varchar/timestamp.
+function literalForType(value, dataType, escapeValueNoToLower) {
+	const t = String(dataType || '').toUpperCase();
+	const isNumeric = /^(BIGINT|INT|INTEGER|SMALLINT|TINYINT|DECIMAL|DOUBLE|FLOAT|REAL|NUMERIC)/.test(t);
+	if (isNumeric) {
+		return String(value);
+	}
+	return escapeValueNoToLower(String(value));
 }
 
 function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, callback) {
@@ -314,3 +333,6 @@ function cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
 		callback(mergeErr, mergeResult);
 	});
 }
+
+// Exposed for unit testing of the type-aware naturalKeyFilter quoting.
+module.exports.literalForType = literalForType;
