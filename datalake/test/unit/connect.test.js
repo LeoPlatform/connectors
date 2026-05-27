@@ -206,4 +206,101 @@ describe('connect.js', () => {
 			});
 		});
 	});
+
+	describe('ensureStagingLocation', () => {
+		// Three resolution paths to verify:
+		//  1. config provides s3Bucket+s3Prefix      → pin them on the client
+		//  2. client already pinned                   → idempotent, no query
+		//  3. neither set → DESCRIBE SCHEMA EXTENDED  → parse RootLocation row
+		// Plus the two error shapes from the UC fallback.
+
+		it('pins s3Bucket/s3Prefix from config when both are provided', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'b1', s3Prefix: 'p1' });
+			const queryStub = sinon.stub();
+			client.query = queryStub;
+			const out = await client.ensureStagingLocation();
+			expect(out.s3Bucket).to.equal('b1');
+			expect(out.s3Prefix).to.equal('p1');
+			expect(client.s3Bucket).to.equal('b1');
+			expect(client.s3Prefix).to.equal('p1');
+			expect(queryStub.called, 'should not query when config is explicit').to.be.false;
+		});
+
+		it('strips a trailing slash from config s3Prefix', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'b1', s3Prefix: 'some/path/' });
+			client.query = sinon.stub();
+			const out = await client.ensureStagingLocation();
+			expect(out.s3Prefix).to.equal('some/path');
+		});
+
+		it('is idempotent — second call returns the pinned values without re-querying', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'b1', s3Prefix: 'p1' });
+			const queryStub = sinon.stub();
+			client.query = queryStub;
+			await client.ensureStagingLocation();
+			await client.ensureStagingLocation();
+			expect(queryStub.called, 'pinned client should never query').to.be.false;
+		});
+
+		it('falls back to DESCRIBE SCHEMA EXTENDED and parses RootLocation when config has no explicit bucket', async () => {
+			const client = connectFactory({ catalog: 'mycat', schema: 'mysch' });
+			const queryStub = sinon.stub().callsFake((sql, params, cb) => {
+				cb(null, [
+					{ database_description_item: 'Catalog Name',  database_description_value: 'mycat' },
+					{ database_description_item: 'Namespace Name', database_description_value: 'mysch' },
+					{ database_description_item: 'RootLocation',  database_description_value: 's3://uc-bucket/managed/mycat/mysch/' },
+				]);
+			});
+			client.query = queryStub;
+
+			const out = await client.ensureStagingLocation();
+
+			expect(queryStub.calledOnce).to.be.true;
+			expect(queryStub.firstCall.args[0]).to.equal('DESCRIBE SCHEMA EXTENDED `mycat`.`mysch`');
+			expect(out.s3Bucket).to.equal('uc-bucket');
+			expect(out.s3Prefix).to.equal('managed/mycat/mysch'); // trailing slash stripped
+			expect(client.s3Bucket).to.equal('uc-bucket');
+			expect(client.s3Prefix).to.equal('managed/mycat/mysch');
+		});
+
+		it('rejects with a clear error when no RootLocation row is returned', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			client.query = sinon.stub().callsFake((sql, params, cb) => {
+				cb(null, [
+					{ database_description_item: 'Catalog Name',   database_description_value: 'c' },
+					{ database_description_item: 'Namespace Name', database_description_value: 's' },
+					// no RootLocation — schema has no managed location
+				]);
+			});
+			let caught;
+			try { await client.ensureStagingLocation(); } catch (e) { caught = e; }
+			expect(caught, 'should reject').to.exist;
+			expect(caught.message).to.include('Staging location unresolved');
+			expect(caught.message).to.include('c.s');
+		});
+
+		it('rejects when RootLocation is not an s3:// URL', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			client.query = sinon.stub().callsFake((sql, params, cb) => {
+				cb(null, [
+					{ database_description_item: 'RootLocation', database_description_value: 'dbfs:/mnt/managed/c/s' },
+				]);
+			});
+			let caught;
+			try { await client.ensureStagingLocation(); } catch (e) { caught = e; }
+			expect(caught).to.exist;
+			expect(caught.message).to.include('Unexpected RootLocation format');
+		});
+
+		it('propagates the underlying query error from DESCRIBE SCHEMA', async () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			client.query = sinon.stub().callsFake((sql, params, cb) => {
+				cb(new Error('permission denied'));
+			});
+			let caught;
+			try { await client.ensureStagingLocation(); } catch (e) { caught = e; }
+			expect(caught).to.exist;
+			expect(caught.message).to.equal('permission denied');
+		});
+	});
 });
