@@ -393,6 +393,15 @@ function doStreamToTableFromS3(client, table, opts) {
 // don't match the shape (plain dates, non-strings, already naked) pass through.
 const TS_OFFSET_RE = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)(Z|[+-]\d{2}:?\d{2})$/;
 function stripTimestampOffset(value) {
+	// Native Date objects are inherently UTC instants — producers that hand a
+	// Date in (e.g. via JSON revivers or direct assignment) would otherwise
+	// bypass the strip and reach the CSV as `.toISOString()` output with the
+	// Z intact, which read_files under TIMESTAMP_NTZ then nulls. Coerce to
+	// the ISO form so the regex below picks up the Z.
+	if (value instanceof Date) {
+		if (isNaN(value.getTime())) return value;
+		value = value.toISOString();
+	}
 	if (typeof value !== 'string') return value;
 	const m = value.match(TS_OFFSET_RE);
 	return m ? m[1] : value;

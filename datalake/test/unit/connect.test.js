@@ -132,6 +132,21 @@ describe('connect.js', () => {
 				// not NTZ anyway, but defense in depth.
 				expect(realConnect.stripTimestampOffset('2026-03-15')).to.equal('2026-03-15');
 			});
+
+			it('coerces Date instances to ISO and strips the Z', () => {
+				// Date is inherently a UTC instant — `new Date(0)` is the epoch
+				// regardless of host TZ. The strip should produce the naked UTC
+				// wall-clock, not the local one.
+				expect(realConnect.stripTimestampOffset(new Date(Date.UTC(2026, 2, 15, 14, 30, 0))))
+					.to.equal('2026-03-15T14:30:00.000');
+				expect(realConnect.stripTimestampOffset(new Date(Date.UTC(2026, 0, 1, 0, 0, 0, 250))))
+					.to.equal('2026-01-01T00:00:00.250');
+			});
+
+			it('passes invalid Date instances through unchanged', () => {
+				const bad = new Date('not-a-real-date');
+				expect(realConnect.stripTimestampOffset(bad)).to.equal(bad);
+			});
 		});
 
 		describe('isNtzType', () => {
