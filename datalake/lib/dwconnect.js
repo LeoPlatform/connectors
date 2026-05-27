@@ -167,13 +167,16 @@ module.exports = function(dbconfig, options) {
 			const clusterKey = tableDef.clusterKey || null;
 			const pruneCol = clusterKey || (ids.length === 1 ? ids[0] : null);
 
+			// Resolve the surrogate-key column once — tableDef.structure is fixed
+			// for the duration of this importFact call, so the lookup belongs
+			// outside the per-row closure.
+			const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
+				const f = tableDef.structure[k];
+				return f === 'sk' || (f && f.sk);
+			});
+
 			// Enrich each row: add auditdate, _deleted=false, compute surrogate key.
 			const enrichedStream = ls.through((obj, done) => {
-				// Compute surrogate key if schema has a sk column
-				const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
-					const f = tableDef.structure[k];
-					return f === 'sk' || (f && f.sk);
-				});
 				if (skField) {
 					const nkValues = nks.map(k => obj[k]);
 					obj[skField] = fingerprint64(nkValues);
