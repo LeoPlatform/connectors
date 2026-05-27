@@ -140,7 +140,7 @@ The migration must reproduce these wall-clocks bit-for-bit in Databricks during 
 **CSV staging implication:** `read_files` with NTZ inference in PERMISSIVE mode rejects offset markers — empirically confirmed by [`test/integration/timezone.test.js`](test/integration/timezone.test.js): a `Z`-suffixed or `±HH:MM`-suffixed value seen directly by `read_files` nulls out. Any timestamp value written to staging CSV must reach the file as naked ISO local form (`YYYY-MM-DDTHH:MM:SS`), no `Z`, no `±HH:MM`. The connector enforces this in two places:
 
 - [`setAuditdate`](lib/connect.js#L206-L211) — strips the trailing `Z` from `Date.toISOString()` when building the audit timestamp literal.
-- [`_streamToTableFromS3`](lib/connect.js) — for every column whose `columnDef.type` is `TIMESTAMP_NTZ`, routes the value through `stripTimestampOffset()` before the CSV write, normalizing payload values from producers that emit `Date.toISOString()` (always `Z`-suffixed) or any other ISO-with-offset shape.
+- [`doStreamToTableFromS3`](lib/connect.js) — for every column whose `columnDef.type` is `TIMESTAMP_NTZ`, routes the value through `stripTimestampOffset()` before the CSV write, normalizing payload values from producers that emit `Date.toISOString()` (always `Z`-suffixed) or any other ISO-with-offset shape.
 
 This is one rule with two implementations; do not treat the audit-column strip as an audit-specific quirk.
 

@@ -179,50 +179,49 @@ module.exports = function(dbconfig, options) {
 				done(null, obj);
 			});
 
-			// Resolve staging location once up front — fully synchronous setup downstream.
-			if (!dbconfig.s3Bucket || !dbconfig.s3Prefix) {
-				return callback(new Error('importFact: dbconfig.s3Bucket and dbconfig.s3Prefix are required'));
-			}
-			const stageStream = client.streamToTableFromS3(table, {
-				columnDefs: columnDefs,
-				s3Bucket: dbconfig.s3Bucket,
-				s3Prefix: dbconfig.s3Prefix,
-				auditdate: dwClient.auditdate,
-			});
-
-			ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
-				if (err) return callback(err);
-
-				// Build an inline read_files(...) SELECT for the staged S3 file. Each
-				// client.query() opens its own session — a session-scoped temp view
-				// would not survive across the MIN and MERGE queries, so we inline.
-				if (!client._lastStagingS3Uri || !client._lastStagingColumnDefs) {
-					return callback(new Error('staging did not produce an S3 URI; cannot build staging SELECT'));
-				}
-				const stagingSelect = client.buildStagingSelect(client._lastStagingS3Uri, client._lastStagingColumnDefs);
-				const stagingClause = `(\n${stagingSelect}\n)`;
-
-				_flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
-					let naturalKeyFilter = null;
-
-					const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
-					const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-
-					const mergeCallback = (mergeErr, mergeResult) => _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback);
-
-					if (pruneCol) {
-						const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-						client.query(minSql, [], (qErr, results) => {
-							if (!qErr && results && results[0] && results[0].minval != null) {
-								naturalKeyFilter = client.escapeValue ? client.escapeValueNoToLower(String(results[0].minval)) : `'${results[0].minval}'`;
-							}
-							_doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
-						});
-					} else {
-						_doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
-					}
+			// Resolve staging location via the connector's single source of truth.
+			// ensureStagingLocation pins client.s3Bucket / client.s3Prefix; downstream
+			// staging reads from the client without re-resolving.
+			client.ensureStagingLocation().then(() => {
+				const stageStream = client.streamToTableFromS3(table, {
+					columnDefs: columnDefs,
+					auditdate: dwClient.auditdate,
 				});
-			});
+
+				ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
+					if (err) return callback(err);
+
+					// Build an inline read_files(...) SELECT for the staged S3 file. Each
+					// client.query() opens its own session — a session-scoped temp view
+					// would not survive across the MIN and MERGE queries, so we inline.
+					if (!client.lastStagingS3Uri || !client.lastStagingColumnDefs) {
+						return callback(new Error('staging did not produce an S3 URI; cannot build staging SELECT'));
+					}
+					const stagingSelect = client.buildStagingSelect(client.lastStagingS3Uri, client.lastStagingColumnDefs);
+					const stagingClause = `(\n${stagingSelect}\n)`;
+
+					flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
+						let naturalKeyFilter = null;
+
+						const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+						const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
+
+						const mergeCallback = (mergeErr, mergeResult) => cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback);
+
+						if (pruneCol) {
+							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+							client.query(minSql, [], (qErr, results) => {
+								if (!qErr && results && results[0] && results[0].minval != null) {
+									naturalKeyFilter = client.escapeValueNoToLower(String(results[0].minval));
+								}
+								doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
+							});
+						} else {
+							doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
+						}
+					});
+				});
+			}).catch(callback);
 		}).catch(callback);
 	};
 
@@ -258,7 +257,7 @@ function reconstructType(field) {
 	return t;
 }
 
-function _flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, callback) {
+function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, callback) {
 	if (!deleteRecords.length) return callback();
 
 	// Group deletes by the column being deleted
@@ -281,7 +280,7 @@ function _flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig,
 	async.series(tasks, callback);
 }
 
-function _doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
+function doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
 	const mergeSql = sql.mergeFact(
 		qualifiedTable,
 		stagingClause,
@@ -298,11 +297,11 @@ function _doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnCo
 	});
 }
 
-function _cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
+function cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
 	if (dbconfig.keepS3Files) {
 		return callback(mergeErr, mergeResult);
 	}
-	const staging = client._lastStagingS3;
+	const staging = client.lastStagingS3;
 	if (!staging) {
 		return callback(mergeErr, mergeResult);
 	}

@@ -31,7 +31,7 @@ module.exports = function(config) {
 
 		// ── Connection ────────────────────────────────────────────────────
 		connect: async (_opts) => {
-			const dbsql = new DBSQLClient();
+			const sqlClient = new DBSQLClient();
 			// Auth selection: prefer OAuth M2M (service principal) when client_id/client_secret
 			// are provided; otherwise use PAT. Local dev uses M2M via ~/.databrickscfg [dev-cup];
 			// CI may use PAT in the future.
@@ -48,12 +48,12 @@ module.exports = function(config) {
 					path: config.path,
 					token: config.token,
 				};
-			await dbsql.connect(connOpts);
+			await sqlClient.connect(connOpts);
 
 			const catalog = config.catalog;
 			const schema = config.schema;
 
-			const session = await dbsql.openSession({
+			const session = await sqlClient.openSession({
 				initialCatalog: catalog,
 				initialSchema: schema,
 				// ansi_mode=false: mirrors Redshift lenient cast/arithmetic semantics during coexistence.
@@ -170,14 +170,21 @@ module.exports = function(config) {
 			return value;
 		},
 
+		// ── Staging-location resolution ──────────────────────────────────
+		// Resolves the S3 staging bucket/prefix and stores them on the client
+		// as `client.s3Bucket` / `client.s3Prefix`. Idempotent — call from the
+		// bot at startup, or rely on importFact to await it before staging.
+		// See ensureStagingLocation() at module bottom for the resolution rules.
+		ensureStagingLocation: () => ensureStagingLocation(client, config),
+
 		// ── S3 staging → inline read_files() ──────────────────────────────
 		// Stages CSV to S3. The downstream MERGE/MIN queries read it back via an
 		// inline `read_files(...)` subquery rather than a CREATE TEMPORARY VIEW —
 		// each query() opens its own session, so a session-scoped temp view would
 		// be invisible to subsequent queries. See BUILD_PLAN.md Step 7 for the
 		// per-option rationale of the read_files arguments.
-		streamToTableFromS3: (table, config) => {
-			return _streamToTableFromS3(client, table, config);
+		streamToTableFromS3: (table, opts) => {
+			return doStreamToTableFromS3(client, table, opts);
 		},
 
 		// Build the read_files() SELECT for use inline in MIN / MERGE queries.
@@ -258,22 +265,29 @@ function createSessionClient(session, _parentCache, _config) {
 }
 
 // ── Staging location resolution ───────────────────────────────────────────────
+// Single source of truth for client.s3Bucket / client.s3Prefix. Resolves once
+// per client (idempotent re-entry returns the cached values) and pins the
+// result on the client object. Downstream callers — streamToTableFromS3,
+// importFact, bot wrappers — read client.s3Bucket / client.s3Prefix directly
+// rather than re-invoking the resolver.
+//
 // Preference order:
-//   1. Explicit config.s3Bucket + config.s3Prefix (set by caller / test helper)
-//   2. UC RootLocation lookup via DESCRIBE SCHEMA EXTENDED (fallback for schemas
-//      configured with a managed storage location)
+//   1. config.s3Bucket + config.s3Prefix (set by the bot / test helper)
+//   2. UC RootLocation lookup via DESCRIBE SCHEMA EXTENDED (fallback for
+//      schemas configured with a managed storage location)
+//
 // The UC fallback uses the `RootLocation` row, not `Location` (UUID-suffixed
 // internal path) or the catalog `Storage Root` (managed-table area, not a
 // staging convention).
-function _ensureStagingLocation(client, config) {
-	if (client._stagingLocation) return Promise.resolve(client._stagingLocation);
+function ensureStagingLocation(client, config) {
+	if (client.s3Bucket && client.s3Prefix) {
+		return Promise.resolve({ s3Bucket: client.s3Bucket, s3Prefix: client.s3Prefix });
+	}
 
 	if (config.s3Bucket && config.s3Prefix) {
-		client._stagingLocation = {
-			s3Bucket: config.s3Bucket,
-			s3Prefix: String(config.s3Prefix).replace(/\/$/, ''),
-		};
-		return Promise.resolve(client._stagingLocation);
+		client.s3Bucket = config.s3Bucket;
+		client.s3Prefix = String(config.s3Prefix).replace(/\/$/, '');
+		return Promise.resolve({ s3Bucket: client.s3Bucket, s3Prefix: client.s3Prefix });
 	}
 
 	const catalog = config.catalog;
@@ -294,23 +308,29 @@ function _ensureStagingLocation(client, config) {
 			if (!match) {
 				return reject(new Error(`Unexpected RootLocation format: ${rootUrl}`));
 			}
-			client._stagingLocation = { s3Bucket: match[1], s3Prefix: match[2].replace(/\/$/, '') };
-			resolve(client._stagingLocation);
+			client.s3Bucket = match[1];
+			client.s3Prefix = match[2].replace(/\/$/, '');
+			resolve({ s3Bucket: client.s3Bucket, s3Prefix: client.s3Prefix });
 		});
 	});
 }
 
 // ── streamToTableFromS3 implementation ───────────────────────────────────────
-// Caller must supply `columns`, `s3Bucket`, `s3Prefix` in opts so setup is fully
-// synchronous — no async describeTable / staging-location lookup happens here.
-// Doing the lookup inside the pipeline race conditions with incoming rows
-// (records arrive before the SDK promise resolves, no place to safely buffer).
-function _streamToTableFromS3(client, table, opts) {
+// Caller must supply `columnDefs` in opts; s3Bucket / s3Prefix come from the
+// client (populated by ensureStagingLocation) unless overridden in opts. Setup
+// is fully synchronous — no async describeTable / staging-location lookup
+// happens here. Doing the lookup inside the pipeline race conditions with
+// incoming rows (records arrive before the SDK promise resolves, no place to
+// safely buffer).
+function doStreamToTableFromS3(client, table, opts) {
+	opts = opts || {};
 	const columnDefs = opts.columnDefs;
-	const s3Bucket = opts.s3Bucket;
-	const s3Prefix = opts.s3Prefix;
+	const s3Bucket = opts.s3Bucket || client.s3Bucket;
+	const s3Prefix = opts.s3Prefix || client.s3Prefix;
 	if (!columnDefs || !columnDefs.length) throw new Error('streamToTableFromS3: columnDefs required ([{name, type}, ...])');
-	if (!s3Bucket || !s3Prefix) throw new Error('streamToTableFromS3: s3Bucket and s3Prefix required');
+	if (!s3Bucket || !s3Prefix) {
+		throw new Error('streamToTableFromS3: s3Bucket/s3Prefix unresolved — call client.ensureStagingLocation() before staging, or pass them in opts');
+	}
 	const columns = columnDefs.map(c => c.name);
 
 	const cleanAuditDate = (opts.auditdate || client.auditdate || "'" + naiveIsoNow() + "'")
@@ -318,9 +338,9 @@ function _streamToTableFromS3(client, table, opts) {
 	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
 	const s3Uri = `s3://${s3Bucket}/${s3Key}`;
 
-	client._lastStagingS3 = { bucket: s3Bucket, key: s3Key };
-	client._lastStagingS3Uri = s3Uri;
-	client._lastStagingColumnDefs = columnDefs.slice();
+	client.lastStagingS3 = { bucket: s3Bucket, key: s3Key };
+	client.lastStagingS3Uri = s3Uri;
+	client.lastStagingColumnDefs = columnDefs.slice();
 
 	// Pre-compute which columns target TIMESTAMP_NTZ so the transform can strip
 	// offset markers from incoming values. read_files in PERMISSIVE mode nulls any
@@ -384,6 +404,6 @@ function isNtzType(type) {
 	return t === 'TIMESTAMP_NTZ';
 }
 
-// Exposed for unit tests; not part of the public client surface.
-module.exports._stripTimestampOffset = stripTimestampOffset;
-module.exports._isNtzType = isNtzType;
+// Exposed alongside the factory for unit tests and bot use.
+module.exports.stripTimestampOffset = stripTimestampOffset;
+module.exports.isNtzType = isNtzType;

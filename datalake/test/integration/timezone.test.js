@@ -68,16 +68,16 @@ describe('Timezone handling', function() {
 		});
 
 		after(async function() {
-			if (!dbconfig || !client._lastStagingS3) return;
+			if (!dbconfig || !client.lastStagingS3) return;
 			// Use a fresh S3 client rather than relying on whatever shape the connector
-			// happens to have stored on _lastStagingS3 — _cleanupStagedFile in
+			// happens to have stored on lastStagingS3 — cleanupStagedFile in
 			// dwconnect.js does the same (it uses leo-sdk's s3 rather than the stored
 			// instance), so the field shape is not part of the contract.
 			const s3 = new (require('aws-sdk')).S3({ region: dbconfig.region });
 			await new Promise((resolve) => {
 				s3.deleteObject({
-					Bucket: client._lastStagingS3.bucket,
-					Key: client._lastStagingS3.key,
+					Bucket: client.lastStagingS3.bucket,
+					Key: client.lastStagingS3.key,
 				}, () => resolve());
 			});
 		});
@@ -182,7 +182,7 @@ async function stageAndReadProbes(client, dbconfig, probes) {
 			.on('error', reject);
 	});
 
-	const stagingSelect = client.buildStagingSelect(client._lastStagingS3Uri, columnDefs);
+	const stagingSelect = client.buildStagingSelect(client.lastStagingS3Uri, columnDefs);
 	const wrapper = [
 		`SELECT label,`,
 		`       date_format(ts, 'yyyy-MM-dd HH:mm:ss') AS rendered,`,

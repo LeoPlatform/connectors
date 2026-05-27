@@ -100,55 +100,55 @@ describe('connect.js', () => {
 
 		describe('stripTimestampOffset', () => {
 			it('strips trailing Z', () => {
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00Z')).to.equal('2026-03-15T14:30:00');
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.123Z')).to.equal('2026-03-15T14:30:00.123');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00Z')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00.123Z')).to.equal('2026-03-15T14:30:00.123');
 			});
 
 			it('strips ±HH:MM offsets', () => {
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00-08:00')).to.equal('2026-03-15T14:30:00');
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00+05:30')).to.equal('2026-03-15T14:30:00');
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.250+00:00')).to.equal('2026-03-15T14:30:00.250');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00-08:00')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00+05:30')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00.250+00:00')).to.equal('2026-03-15T14:30:00.250');
 			});
 
 			it('strips ±HHMM offsets (no colon)', () => {
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00-0800')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00-0800')).to.equal('2026-03-15T14:30:00');
 			});
 
 			it('accepts space separator between date and time', () => {
-				expect(realConnect._stripTimestampOffset('2026-03-15 14:30:00Z')).to.equal('2026-03-15 14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15 14:30:00Z')).to.equal('2026-03-15 14:30:00');
 			});
 
 			it('leaves naked ISO unchanged', () => {
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00')).to.equal('2026-03-15T14:30:00');
-				expect(realConnect._stripTimestampOffset('2026-03-15T14:30:00.123')).to.equal('2026-03-15T14:30:00.123');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00')).to.equal('2026-03-15T14:30:00');
+				expect(realConnect.stripTimestampOffset('2026-03-15T14:30:00.123')).to.equal('2026-03-15T14:30:00.123');
 			});
 
 			it('leaves non-string and non-matching values unchanged', () => {
-				expect(realConnect._stripTimestampOffset(null)).to.equal(null);
-				expect(realConnect._stripTimestampOffset(undefined)).to.equal(undefined);
-				expect(realConnect._stripTimestampOffset(42)).to.equal(42);
-				expect(realConnect._stripTimestampOffset('not a timestamp')).to.equal('not a timestamp');
+				expect(realConnect.stripTimestampOffset(null)).to.equal(null);
+				expect(realConnect.stripTimestampOffset(undefined)).to.equal(undefined);
+				expect(realConnect.stripTimestampOffset(42)).to.equal(42);
+				expect(realConnect.stripTimestampOffset('not a timestamp')).to.equal('not a timestamp');
 				// Pure date — different shape, must pass through; DATE columns are
 				// not NTZ anyway, but defense in depth.
-				expect(realConnect._stripTimestampOffset('2026-03-15')).to.equal('2026-03-15');
+				expect(realConnect.stripTimestampOffset('2026-03-15')).to.equal('2026-03-15');
 			});
 		});
 
 		describe('isNtzType', () => {
 			it('matches TIMESTAMP_NTZ in any case', () => {
-				expect(realConnect._isNtzType('TIMESTAMP_NTZ')).to.equal(true);
-				expect(realConnect._isNtzType('timestamp_ntz')).to.equal(true);
-				expect(realConnect._isNtzType(' Timestamp_Ntz ')).to.equal(true);
+				expect(realConnect.isNtzType('TIMESTAMP_NTZ')).to.equal(true);
+				expect(realConnect.isNtzType('timestamp_ntz')).to.equal(true);
+				expect(realConnect.isNtzType(' Timestamp_Ntz ')).to.equal(true);
 			});
 
 			it('rejects zone-aware TIMESTAMP and other types', () => {
 				// TIMESTAMP (zone-aware in Databricks) MUST NOT be stripped — the
 				// offset is meaningful for that type.
-				expect(realConnect._isNtzType('TIMESTAMP')).to.equal(false);
-				expect(realConnect._isNtzType('STRING')).to.equal(false);
-				expect(realConnect._isNtzType('DATE')).to.equal(false);
-				expect(realConnect._isNtzType(null)).to.equal(false);
-				expect(realConnect._isNtzType(undefined)).to.equal(false);
+				expect(realConnect.isNtzType('TIMESTAMP')).to.equal(false);
+				expect(realConnect.isNtzType('STRING')).to.equal(false);
+				expect(realConnect.isNtzType('DATE')).to.equal(false);
+				expect(realConnect.isNtzType(null)).to.equal(false);
+				expect(realConnect.isNtzType(undefined)).to.equal(false);
 			});
 		});
 	});
