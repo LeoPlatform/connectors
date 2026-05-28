@@ -17,6 +17,7 @@ const { Readable } = require('stream');
 const { expect } = require('chai');
 const { getConfig, checkNonprod } = require('./helpers/databricks.js');
 const connectFactory = require('../../lib/connect.js');
+const { stagingS3Path } = require('../../lib/connect.js');
 
 let dbconfig;
 let client;
@@ -61,23 +62,22 @@ describe('Timezone handling', function() {
 		];
 
 		let resultsByLabel;
+		let stagingPath;
 
 		before(async function() {
 			if (!dbconfig) return this.skip();
-			resultsByLabel = await stageAndReadProbes(client, dbconfig, probes);
+			const result = await stageAndReadProbes(client, dbconfig, probes);
+			resultsByLabel = result.rows;
+			stagingPath = result.stagingPath;
 		});
 
 		after(async function() {
-			if (!dbconfig || !client.lastStagingS3) return;
-			// Use a fresh S3 client rather than relying on whatever shape the connector
-			// happens to have stored on lastStagingS3 — cleanupStagedFile in
-			// dwconnect.js does the same (it uses leo-sdk's s3 rather than the stored
-			// instance), so the field shape is not part of the contract.
+			if (!dbconfig || !stagingPath) return;
 			const s3 = new (require('aws-sdk')).S3({ region: dbconfig.region });
 			await new Promise((resolve) => {
 				s3.deleteObject({
-					Bucket: client.lastStagingS3.bucket,
-					Key: client.lastStagingS3.key,
+					Bucket: stagingPath.bucket,
+					Key: stagingPath.key,
 				}, () => resolve());
 			});
 		});
@@ -158,21 +158,29 @@ function runQuery(client, sql, params) {
 // Stages the probe rows to S3 as a single CSV via the connector's normal staging
 // path, then issues a read_files() SELECT with an explicit TIMESTAMP_NTZ schema,
 // rendering each ts via date_format so we can assert on the wall-clock string
-// regardless of the underlying type the parser chose. Returns a {label: row} map.
+// regardless of the underlying type the parser chose. Returns {rows, stagingPath}.
 async function stageAndReadProbes(client, dbconfig, probes) {
 	const columnDefs = [
 		{ name: 'label', type: 'STRING' },
 		{ name: 'ts',    type: 'TIMESTAMP_NTZ' },
 	];
 
-	// Use a probe-prefixed staging path so the file is easy to identify in S3 if a
-	// run is killed before the after() cleanup runs.
+	// Caller owns the staging-path identifier — same as importFact does in
+	// dwconnect.js and as postgres' importFact owns `qualifiedStagingTable`.
+	// Probe-prefixed so the file is easy to identify in S3 if a run dies
+	// before the after() cleanup runs.
+	const auditdate = "'tz_probe_" + Date.now() + "'";
+	const stagingPath = stagingS3Path(
+		dbconfig.s3Bucket,
+		`${dbconfig.s3Prefix}/_tz_probe`,
+		'tz_probe',
+		auditdate
+	);
+
 	const stageStream = client.streamToTableFromS3('tz_probe', {
 		columnDefs,
-		s3Bucket: dbconfig.s3Bucket,
-		s3Prefix: `${dbconfig.s3Prefix}/_tz_probe`,
+		s3Path: stagingPath,
 		region: dbconfig.region,
-		auditdate: "'tz_probe_" + Date.now() + "'",
 	});
 
 	await new Promise((resolve, reject) => {
@@ -182,7 +190,7 @@ async function stageAndReadProbes(client, dbconfig, probes) {
 			.on('error', reject);
 	});
 
-	const stagingSelect = client.buildStagingSelect(client.lastStagingS3Uri, columnDefs);
+	const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
 	const wrapper = [
 		`SELECT label,`,
 		`       date_format(ts, 'yyyy-MM-dd HH:mm:ss') AS rendered,`,
@@ -193,7 +201,7 @@ async function stageAndReadProbes(client, dbconfig, probes) {
 	].join('\n');
 
 	const rows = await runQuery(client, wrapper);
-	const out = {};
-	rows.forEach(r => { out[r.label] = r; });
-	return out;
+	const rowsByLabel = {};
+	rows.forEach(r => { rowsByLabel[r.label] = r; });
+	return { rows: rowsByLabel, stagingPath };
 }

@@ -177,6 +177,19 @@ module.exports = function(config) {
 		// See ensureStagingLocation() at module bottom for the resolution rules.
 		ensureStagingLocation: () => ensureStagingLocation(client, config),
 
+		// Compute a deterministic, per-call S3 staging path. Mirrors postgres'
+		// `qualifiedStagingTable` pattern (../postgres/lib/dwconnect.js:128-130):
+		// the caller — importFact, the integration test — owns the staging
+		// identifier and passes it down to streamToTableFromS3, so the staging
+		// identity flows in one direction and never has to be communicated back
+		// through shared state.
+		stagingS3Path: (table, auditdate) => stagingS3Path(
+			client.s3Bucket,
+			client.s3Prefix,
+			table,
+			auditdate || client.auditdate
+		),
+
 		// ── S3 staging → inline read_files() ──────────────────────────────
 		// Stages CSV to S3. The downstream MERGE/MIN queries read it back via an
 		// inline `read_files(...)` subquery rather than a CREATE TEMPORARY VIEW —
@@ -315,32 +328,55 @@ function ensureStagingLocation(client, config) {
 	});
 }
 
+// ── stagingS3Path implementation ─────────────────────────────────────────────
+// Pure: compute the per-call staging S3 path from (bucket, prefix, table,
+// auditdate). The caller owns the resulting identifier — same shape as
+// postgres' `qualifiedStagingTable`, just with an S3 file as the staging
+// artifact instead of a temp table. Two parallel importFact calls naturally
+// produce distinct paths (different `table`), so the identifier carries no
+// cross-call hazard.
+function stagingS3Path(s3Bucket, s3Prefix, table, auditdate) {
+	if (!s3Bucket || !s3Prefix) {
+		throw new Error('stagingS3Path: s3Bucket/s3Prefix unresolved — call client.ensureStagingLocation() first');
+	}
+	const cleanAuditDate = String(auditdate || "'" + naiveIsoNow() + "'")
+		.replace(/'/g, '').replace(/:/g, '-');
+	const key = `${String(s3Prefix).replace(/\/$/, '')}/${table}/${cleanAuditDate}.csv`;
+	return {
+		bucket: s3Bucket,
+		key,
+		uri: `s3://${s3Bucket}/${key}`,
+	};
+}
+
 // ── streamToTableFromS3 implementation ───────────────────────────────────────
-// Caller must supply `columnDefs` in opts; s3Bucket / s3Prefix come from the
-// client (populated by ensureStagingLocation) unless overridden in opts. Setup
-// is fully synchronous — no async describeTable / staging-location lookup
+// Caller supplies `columnDefs` and either an explicit `s3Path` ({bucket, key,
+// uri}) — produced via client.stagingS3Path(table, auditdate) — or
+// (s3Bucket/s3Prefix, auditdate) for the call to derive the path internally
+// for backwards compatibility with callers that don't yet own the identifier.
+// Setup is fully synchronous — no async describeTable / staging-location lookup
 // happens here. Doing the lookup inside the pipeline race conditions with
 // incoming rows (records arrive before the SDK promise resolves, no place to
 // safely buffer).
 function doStreamToTableFromS3(client, table, opts) {
 	opts = opts || {};
 	const columnDefs = opts.columnDefs;
-	const s3Bucket = opts.s3Bucket || client.s3Bucket;
-	const s3Prefix = opts.s3Prefix || client.s3Prefix;
 	if (!columnDefs || !columnDefs.length) throw new Error('streamToTableFromS3: columnDefs required ([{name, type}, ...])');
-	if (!s3Bucket || !s3Prefix) {
-		throw new Error('streamToTableFromS3: s3Bucket/s3Prefix unresolved — call client.ensureStagingLocation() before staging, or pass them in opts');
+
+	let s3Bucket, s3Key;
+	if (opts.s3Path) {
+		s3Bucket = opts.s3Path.bucket;
+		s3Key = opts.s3Path.key;
+	} else {
+		s3Bucket = opts.s3Bucket || client.s3Bucket;
+		const s3Prefix = opts.s3Prefix || client.s3Prefix;
+		if (!s3Bucket || !s3Prefix) {
+			throw new Error('streamToTableFromS3: s3Bucket/s3Prefix unresolved — call client.ensureStagingLocation() before staging, or pass them in opts');
+		}
+		const path = stagingS3Path(s3Bucket, s3Prefix, table, opts.auditdate || client.auditdate);
+		s3Key = path.key;
 	}
 	const columns = columnDefs.map(c => c.name);
-
-	const cleanAuditDate = (opts.auditdate || client.auditdate || "'" + naiveIsoNow() + "'")
-		.replace(/'/g, '').replace(/:/g, '-');
-	const s3Key = `${s3Prefix}/${table}/${cleanAuditDate}.csv`;
-	const s3Uri = `s3://${s3Bucket}/${s3Key}`;
-
-	client.lastStagingS3 = { bucket: s3Bucket, key: s3Key };
-	client.lastStagingS3Uri = s3Uri;
-	client.lastStagingColumnDefs = columnDefs.slice();
 
 	// Pre-compute which columns target TIMESTAMP_NTZ so the transform can strip
 	// offset markers from incoming values. read_files in PERMISSIVE mode nulls any
@@ -416,3 +452,4 @@ function isNtzType(type) {
 // Exposed alongside the factory for unit tests and bot use.
 module.exports.stripTimestampOffset = stripTimestampOffset;
 module.exports.isNtzType = isNtzType;
+module.exports.stagingS3Path = stagingS3Path;

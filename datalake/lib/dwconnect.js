@@ -186,13 +186,18 @@ module.exports = function(dbconfig, options) {
 				done(null, obj);
 			});
 
-			// Resolve staging location via the connector's single source of truth.
-			// ensureStagingLocation pins client.s3Bucket / client.s3Prefix; downstream
-			// staging reads from the client without re-resolving.
+			// importFact owns the staging-path identifier — same pattern as
+			// postgres' importFact owning `qualifiedStagingTable`. Compute it
+			// here once, pass it down to streamToTableFromS3 for the upload, and
+			// reuse it locally for the MERGE SELECT and the cleanup. No back-
+			// channel through shared client state; safe under load.js's
+			// parallelLimit(tasks, 10).
 			client.ensureStagingLocation().then(() => {
+				const stagingPath = client.stagingS3Path(table, dwClient.auditdate);
+
 				const stageStream = client.streamToTableFromS3(table, {
 					columnDefs: columnDefs,
-					auditdate: dwClient.auditdate,
+					s3Path: stagingPath,
 				});
 
 				ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
@@ -201,10 +206,7 @@ module.exports = function(dbconfig, options) {
 					// Build an inline read_files(...) SELECT for the staged S3 file. Each
 					// client.query() opens its own session — a session-scoped temp view
 					// would not survive across the MIN and MERGE queries, so we inline.
-					if (!client.lastStagingS3Uri || !client.lastStagingColumnDefs) {
-						return callback(new Error('staging did not produce an S3 URI; cannot build staging SELECT'));
-					}
-					const stagingSelect = client.buildStagingSelect(client.lastStagingS3Uri, client.lastStagingColumnDefs);
+					const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
 					const stagingClause = `(\n${stagingSelect}\n)`;
 
 					flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
@@ -213,7 +215,8 @@ module.exports = function(dbconfig, options) {
 						const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
 						const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 
-						const mergeCallback = (mergeErr, mergeResult) => cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback);
+						const mergeCallback = (mergeErr, mergeResult) =>
+							cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callback);
 
 						if (pruneCol) {
 							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
@@ -319,19 +322,15 @@ function doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnCon
 	});
 }
 
-function cleanupStagedFile(client, dbconfig, mergeErr, mergeResult, callback) {
-	if (dbconfig.keepS3Files) {
-		return callback(mergeErr, mergeResult);
-	}
-	const staging = client.lastStagingS3;
-	if (!staging) {
+function cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callback) {
+	if (dbconfig.keepS3Files || !stagingPath) {
 		return callback(mergeErr, mergeResult);
 	}
 	// Same S3 client leo-sdk's streams.toS3 used for the upload (default credential chain).
 	const s3 = require('leo-sdk').aws.s3;
-	s3.deleteObject({ Bucket: staging.bucket, Key: staging.key }, deleteErr => {
+	s3.deleteObject({ Bucket: stagingPath.bucket, Key: stagingPath.key }, deleteErr => {
 		if (deleteErr) {
-			logger.info('staged file delete failed:', staging.key, deleteErr);
+			logger.info('staged file delete failed:', stagingPath.key, deleteErr);
 		}
 		callback(mergeErr, mergeResult);
 	});

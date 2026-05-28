@@ -156,10 +156,16 @@ describe('importFact — orchestration', () => {
 			escapeValueNoToLower: v => typeof v === 'string' ? "'" + v.replace(/'/g, "\\'") + "'" : v,
 			describeTable: sinon.stub().resolves(opts.tableFields),
 			ensureStagingLocation: sinon.stub().resolves({ s3Bucket: 'b', s3Prefix: 'p' }),
+			// importFact now owns the staging-path identifier and passes it down
+			// to streamToTableFromS3; the stub returns a deterministic per-call
+			// {bucket, key, uri} so the assertions can find the MERGE without
+			// reading any back-channel state from the client.
+			stagingS3Path: (table) => ({
+				bucket: 'bucket',
+				key: `p/${table}/2026-05-27T00-00-00.csv`,
+				uri: `s3://bucket/p/${table}/2026-05-27T00-00-00.csv`,
+			}),
 			streamToTableFromS3: sinon.stub().returns({ pipe: sinon.stub() }),
-			lastStagingS3Uri: opts.stagingUri === null ? null : (opts.stagingUri || 's3://bucket/key.csv'),
-			lastStagingS3: opts.stagingUri === null ? null : { bucket: 'bucket', key: 'key.csv' },
-			lastStagingColumnDefs: opts.tableFields.map(f => ({ name: f.column_name, type: f.data_type })),
 			buildStagingSelect: sinon.stub().returns('SELECT * FROM read_files(...)'),
 			query: sinon.stub().callsFake((sql, params, cb) => {
 				queryHistory.push(sql);
@@ -296,18 +302,6 @@ describe('importFact — orchestration', () => {
 		expect(caught).to.exist;
 		expect(caught.message).to.equal('pipe failed');
 		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
-	});
-
-	it('rejects when staging did not produce an S3 URI', async () => {
-		const ctx = setup({ tableFields: factTableFields, stagingUri: null });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'f_order_item', ['id']);
-		} catch (err) {
-			caught = err;
-		}
-		expect(caught).to.exist;
-		expect(caught.message).to.include('staging did not produce an S3 URI');
 	});
 
 	it('dataStream callback filters __leo_delete__ markers from the staging path', async () => {

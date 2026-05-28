@@ -149,6 +149,39 @@ describe('connect.js', () => {
 			});
 		});
 
+		describe('stagingS3Path', () => {
+			it('builds {bucket, key, uri} deterministically from inputs', () => {
+				const p = realConnect.stagingS3Path('bkt', 'prefix/sub', 'f_order', "'2026-03-15T14:30:00'");
+				expect(p.bucket).to.equal('bkt');
+				expect(p.key).to.equal('prefix/sub/f_order/2026-03-15T14-30-00.csv');
+				expect(p.uri).to.equal('s3://bkt/prefix/sub/f_order/2026-03-15T14-30-00.csv');
+			});
+
+			it('strips a trailing slash from the prefix', () => {
+				const p = realConnect.stagingS3Path('bkt', 'prefix/sub/', 't', "'2026-01-01T00:00:00'");
+				expect(p.key).to.equal('prefix/sub/t/2026-01-01T00-00-00.csv');
+			});
+
+			it('strips surrounding single quotes and replaces colons in the auditdate', () => {
+				const p = realConnect.stagingS3Path('b', 'p', 't', "'2026-03-15T14:30:00.123Z'");
+				// colons → dashes; quotes stripped; rest preserved
+				expect(p.key).to.equal('p/t/2026-03-15T14-30-00.123Z.csv');
+			});
+
+			it('two parallel callers with different tables produce distinct paths', () => {
+				const auditdate = "'2026-03-15T14:30:00'";
+				const a = realConnect.stagingS3Path('b', 'p', 'f_order', auditdate);
+				const b = realConnect.stagingS3Path('b', 'p', 'f_order_item', auditdate);
+				expect(a.key).to.not.equal(b.key);
+				expect(a.uri).to.not.equal(b.uri);
+			});
+
+			it('throws when bucket or prefix is missing', () => {
+				expect(() => realConnect.stagingS3Path(null, 'p', 't', "'x'")).to.throw(/unresolved/);
+				expect(() => realConnect.stagingS3Path('b', null, 't', "'x'")).to.throw(/unresolved/);
+			});
+		});
+
 		describe('isNtzType', () => {
 			it('matches TIMESTAMP_NTZ in any case', () => {
 				expect(realConnect.isNtzType('TIMESTAMP_NTZ')).to.equal(true);
