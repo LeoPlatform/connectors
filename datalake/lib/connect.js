@@ -1,6 +1,7 @@
 'use strict';
 
 const { DBSQLClient } = require('@databricks/sql');
+const genericPool = require('generic-pool');
 const logger = require('leo-logger')('connector.sql.datalake');
 const csv = require('fast-csv');
 // leo-sdk.streams is the canonical Leo stream module across LeoPlatform connectors
@@ -10,15 +11,162 @@ const csv = require('fast-csv');
 const ls = require('leo-sdk').streams;
 const naiveIsoNow = require('./audit_timestamp.js');
 
+// ── Config helpers ────────────────────────────────────────────────────────────
+function clamp(val, min, max, defaultVal) {
+	const n = (val != null && val !== '') ? Number(val) : defaultVal;
+	if (isNaN(n)) return defaultVal;
+	return Math.min(max, Math.max(min, n));
+}
+
+// ── Error classification ──────────────────────────────────────────────────────
+// Connection-class errors (network, socket, session-closed) → destroy the pooled
+// session and retry; query-class errors → release the session healthy.
+// Conservative default: treat unknown errors as connection-class so MIN/MERGE
+// (idempotent) get a retry rather than a poisoned session being returned to the pool.
+// Known SQL-error patterns map to query-class to avoid spurious session churn.
+function isConnectionError(err) {
+	if (!err) return false;
+	// Explicit network / transport error types from node-fetch and Node.js
+	if (err.name === 'FetchError') return true;
+	const code = err.code || '';
+	if (['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(code)) return true;
+	const msg = String(err.message || '').toLowerCase();
+	if (msg.includes('socket hang up')) return true;
+	if (msg.includes('session is closed') || msg.includes('session closed')) return true;
+	if (msg.includes('transport error') || msg.includes('connection closed')) return true;
+	// Known SQL compilation / permission error shapes → query-class (return false)
+	if (msg.includes('sql compilation error') || msg.includes('parse_syntax_error') ||
+		msg.includes('permission_denied') || msg.includes('table_or_view_not_found') ||
+		msg.includes('schema_not_found') || msg.includes('syntax error')) return false;
+	// Conservative default: treat remaining unknown errors as connection-class
+	return true;
+}
+
 module.exports = function(config) {
-	// Schema cache mirrors connectors/postgres/lib/connect.js lines 40-135.
+	// ── Config normalization ───────────────────────────────────────────────────
+	// poolMax: tuning knob (not a safety gate) — aligned to load.js parallelLimit(10).
+	const poolMax = clamp(config.poolMax, 1, 50, 10);
+	// statementTimeoutSeconds: runaway guard via STATEMENT_TIMEOUT session param.
+	// Floored to 5 (not optional, prevents disabling via 0/negative), capped at 1800.
+	// queryTimeout is ineffective on SQL Warehouses (per @databricks/sql contracts/).
+	const statementTimeoutSeconds = clamp(config.statementTimeoutSeconds, 5, 1800, 600);
+	// acquireTimeoutMillis: rejects a stuck acquire rather than hanging indefinitely.
+	const acquireTimeoutMillis = (config.acquireTimeoutMillis != null)
+		? Number(config.acquireTimeoutMillis) : 30000;
+	// socketTimeout pinned above the STATEMENT_TIMEOUT cap so a long statement hits
+	// the clean STATEMENT_TIMEOUT abort, not an unretried socket severance.
+	// SDK default (900s) < 1800s cap, so we must raise it when cap is in force.
+	const socketTimeoutMs = (statementTimeoutSeconds + 120) * 1000;
+	// drainTimeoutMs: end()/disconnect() races pool.drain() against this deadline.
+	// Prevents indefinitely-hung drain when a borrow never returns (stuck query or
+	// Lambda freeze mid-flight). Abandoned borrows are cleaned up by pool.clear().
+	const drainTimeoutMs = (config.drainTimeoutMs != null)
+		? Number(config.drainTimeoutMs) : 5000;
+
+	// ── Shared DBSQLClient + memoized connect ─────────────────────────────────
+	// Constructed synchronously at factory time (no network) — unit tests that only
+	// exercise pure helpers never trigger a connect(). Auth branch evaluated once.
+	const sqlClient = new DBSQLClient();
+	const connOpts = (config.clientId && config.clientSecret)
+		? {
+			host: config.host,
+			path: config.path,
+			authType: 'databricks-oauth',
+			oauthClientId: config.clientId,
+			oauthClientSecret: config.clientSecret,
+		}
+		: {
+			host: config.host,
+			path: config.path,
+			token: config.token,
+		};
+
+	// Single shared promise — the first pool.acquire() burst fires N factory.create()
+	// calls in parallel; without this guard they'd all call sqlClient.connect() and
+	// each fetch a fresh OAuth token + open a new socket, defeating the refactor.
+	let connectPromise = null;
+	function ensureConnected() {
+		if (!connectPromise) {
+			// telemetryEnabled:false is merged into this.config inside connect() via
+			// copyDefinedTelemetryOptions() — it must go here, not to new DBSQLClient().
+			// Suppresses the per-host TelemetryClient warning that fires when multiple
+			// DBSQLClient instances register for the same host (identity check, not value).
+			connectPromise = sqlClient.connect(
+				Object.assign({ socketTimeout: socketTimeoutMs, telemetryEnabled: false }, connOpts)
+			);
+		}
+		return connectPromise;
+	}
+
+	// ── Schema cache ──────────────────────────────────────────────────────────
 	let cache = {
 		schema: {},
 		timestamp: null,
 	};
 
+	// ── Pool concurrency observability ────────────────────────────────────────
+	let peakBorrowed = 0;
+	let peakPending = 0;
+
+	// ── Pool factory ──────────────────────────────────────────────────────────
+	const poolFactory = {
+		create: async () => {
+			await ensureConnected();
+			const session = await sqlClient.openSession({
+				initialCatalog: config.catalog,
+				initialSchema: config.schema,
+				// Session params: same as before + STATEMENT_TIMEOUT runaway guard.
+				// ansi_mode=false: mirrors Redshift lenient cast/arithmetic semantics.
+				// timezone=UTC + infer_timestamp_ntz_type=true: preserves NTZ wall-clocks.
+				// STATEMENT_TIMEOUT (seconds, 0=disabled — we always set a positive value).
+				initialParameters: {
+					ansi_mode: 'false',
+					infer_timestamp_ntz_type: 'true',
+					timezone: 'UTC',
+					STATEMENT_TIMEOUT: String(statementTimeoutSeconds),
+				},
+			});
+			const wrapper = createSessionClient(session, cache, config);
+			wrapper.dead = false;
+			return wrapper;
+		},
+		destroy: async (wrapper) => {
+			try { await wrapper._session.close(); } catch (e) { /* ignore */ }
+		},
+		validate: (wrapper) => Promise.resolve(wrapper.dead !== true),
+	};
+
+	const pool = genericPool.createPool(poolFactory, {
+		max: poolMax,
+		min: 0,
+		testOnBorrow: true,
+		acquireTimeoutMillis: acquireTimeoutMillis,
+		autostart: false,
+	});
+
+	async function drainPool() {
+		logger.info('Pool draining — peak stats', { peakBorrowed, peakPending, poolMax });
+		// Correct shutdown sequence for generic-pool 3.x:
+		// 1. pool.drain() — sets _draining=true; future releases auto-destroy instead of
+		//    returning to idle. Returns a promise that resolves when _count===0.
+		// 2. pool.clear() — destroys all idle resources, decrementing _count. This
+		//    unblocks the drain promise: if no borrows remain, drain resolves here.
+		// 3. Race the drain promise against a deadline so a stuck borrow (hung query or
+		//    Lambda freeze) doesn't block shutdown indefinitely. Abandoned borrows are
+		//    orphaned; the Lambda process exits and callbackWaitsForEmptyEventLoop=false.
+		// Note: awaiting drain() before clear() deadlocks — drain waits for count===0,
+		// but count only reaches 0 after clear destroys idle resources. Always start
+		// drain (non-awaited) first to flip the flag, then clear, then await drain.
+		const drainPromise = pool.drain();
+		await pool.clear();
+		const drainDeadline = new Promise(r => setTimeout(r, drainTimeoutMs));
+		await Promise.race([drainPromise, drainDeadline]);
+		connectPromise = null;
+		try { await sqlClient.close(); } catch (e) { /* ignore */ }
+	}
+
 	const client = {
-		// ── Schema cache ──────────────────────────────────────────────────
+		// ── Schema cache ──────────────────────────────────────────────────────
 		clearSchemaCache: () => {
 			logger.info('Clearing Tables schema cache');
 			cache.schema = {};
@@ -29,55 +177,21 @@ module.exports = function(config) {
 			cache.timestamp = Date.now();
 		},
 
-		// ── Connection ────────────────────────────────────────────────────
+		// ── Connection ────────────────────────────────────────────────────────
+		// connect() acquires a pooled session wrapper and returns it. Callers that
+		// need a raw session (e.g. the existing unit tests) can call this; the
+		// wrapper's release() returns it to the pool (no-op on the session itself).
 		connect: async (_opts) => {
-			const sqlClient = new DBSQLClient();
-			// Auth selection: prefer OAuth M2M (service principal) when client_id/client_secret
-			// are provided; otherwise use PAT. Local dev uses M2M via ~/.databrickscfg [dev-cup];
-			// CI may use PAT in the future.
-			const connOpts = (config.clientId && config.clientSecret)
-				? {
-					host: config.host,
-					path: config.path,
-					authType: 'databricks-oauth',
-					oauthClientId: config.clientId,
-					oauthClientSecret: config.clientSecret,
-				}
-				: {
-					host: config.host,
-					path: config.path,
-					token: config.token,
-				};
-			await sqlClient.connect(connOpts);
-
-			const catalog = config.catalog;
-			const schema = config.schema;
-
-			const session = await sqlClient.openSession({
-				initialCatalog: catalog,
-				initialSchema: schema,
-				// ansi_mode=false: mirrors Redshift lenient cast/arithmetic semantics during coexistence.
-				// timezone=UTC + infer_timestamp_ntz_type=true: paired to avoid a third TZ shift on top
-				// of the existing enterprise correction chain. Connector reads/writes only TIMESTAMP_NTZ.
-				initialParameters: {
-					ansi_mode: 'false',
-					infer_timestamp_ntz_type: 'true',
-					timezone: 'UTC',
-				},
-			});
-
-			// Return an isolated sub-client wrapping this session, so callers
-			// can release() it without closing the outer connection.
-			return createSessionClient(session, cache, config);
+			await ensureConnected();
+			return pool.acquire();
 		},
 
-		disconnect: async () => {
-			// No-op: connection is opened per-operation via client.connect().
-		},
-		end: async () => {},
+		disconnect: async () => drainPool(),
+		end: async () => drainPool(),
 		release: () => {},
 
-		// ── Query ─────────────────────────────────────────────────────────
+		// ── Query ─────────────────────────────────────────────────────────────
+		// Routes through pool.acquire → execute → classify error → pool.release/destroy.
 		query: (sql, paramsOrCb, cbOrOpts, opts) => {
 			let params, cb;
 			if (typeof paramsOrCb === 'function') {
@@ -88,15 +202,25 @@ module.exports = function(config) {
 				cb = cbOrOpts;
 			}
 
-			client.connect().then(conn => {
-				conn.query(sql, params, (err, rows, fields) => {
-					conn.release();
+			pool.acquire().then(wrapper => {
+				const borrowed = pool.borrowed;
+				if (borrowed > peakBorrowed) peakBorrowed = borrowed;
+				const pending = pool.pending;
+				if (pending > peakPending) peakPending = pending;
+
+				wrapper.query(sql, params, (err, rows, fields) => {
+					if (err && isConnectionError(err)) {
+						wrapper.dead = true;
+						pool.destroy(wrapper).catch(() => {});
+					} else {
+						pool.release(wrapper).catch(() => {});
+					}
 					cb(err, rows, fields);
 				}, opts);
 			}).catch(cb);
 		},
 
-		// ── Schema describe ───────────────────────────────────────────────
+		// ── Schema describe ───────────────────────────────────────────────────
 		describeTable: async (table, tableSchema) => {
 			return new Promise((resolve, reject) => {
 				tableSchema = tableSchema || config.schema || 'default';
@@ -141,7 +265,7 @@ module.exports = function(config) {
 			});
 		},
 
-		// ── Identifier quoting ────────────────────────────────────────────
+		// ── Identifier quoting ────────────────────────────────────────────────
 		// Databricks SQL uses backtick quoting. Lowercases all identifiers per the
 		// lowercase-everywhere convention (open question #7 in BUILD_PLAN.md).
 		escapeId: (name) => {
@@ -170,7 +294,7 @@ module.exports = function(config) {
 			return value;
 		},
 
-		// ── Staging-location resolution ──────────────────────────────────
+		// ── Staging-location resolution ──────────────────────────────────────
 		// Resolves the S3 staging bucket/prefix and stores them on the client
 		// as `client.s3Bucket` / `client.s3Prefix`. Idempotent — call from the
 		// bot at startup, or rely on importFact to await it before staging.
@@ -190,12 +314,12 @@ module.exports = function(config) {
 			auditdate || client.auditdate
 		),
 
-		// ── S3 staging → inline read_files() ──────────────────────────────
+		// ── S3 staging → inline read_files() ──────────────────────────────────
 		// Stages CSV to S3. The downstream MERGE/MIN queries read it back via an
 		// inline `read_files(...)` subquery rather than a CREATE TEMPORARY VIEW —
-		// each query() opens its own session, so a session-scoped temp view would
-		// be invisible to subsequent queries. See BUILD_PLAN.md Step 7 for the
-		// per-option rationale of the read_files arguments.
+		// sessions are pooled and reused across queries, so a session-scoped temp
+		// view from one acquire may not be visible to a later acquire.
+		// See BUILD_PLAN.md Step 7 for the per-option rationale of the read_files arguments.
 		streamToTableFromS3: (table, opts) => {
 			return doStreamToTableFromS3(client, table, opts);
 		},
@@ -237,11 +361,15 @@ module.exports = function(config) {
 };
 
 // ── Session-scoped sub-client ─────────────────────────────────────────────────
-// Wraps a single DBSQLSession so callers can release() it after use.
+// Wraps a single DBSQLSession. In the pool model:
+//   - _session is exposed so the pool factory.destroy() can close it.
+//   - dead flag is set by query() error classification; pool.validate() checks it.
+//   - release() is a no-op — the pool owns lifecycle (acquire/release/destroy).
 function createSessionClient(session, _parentCache, _config) {
-	let closed = false;
-
 	const conn = {
+		_session: session,
+		dead: false,
+
 		query: async (sql, paramsOrCb, cbOrOpts, _opts) => {
 			let params, cb;
 			if (typeof paramsOrCb === 'function') {
@@ -266,12 +394,7 @@ function createSessionClient(session, _parentCache, _config) {
 			}
 		},
 
-		release: async () => {
-			if (!closed) {
-				closed = true;
-				try { await session.close(); } catch (e) { /* ignore */ }
-			}
-		},
+		release: () => {},
 	};
 
 	return conn;
@@ -453,3 +576,4 @@ function isNtzType(type) {
 module.exports.stripTimestampOffset = stripTimestampOffset;
 module.exports.isNtzType = isNtzType;
 module.exports.stagingS3Path = stagingS3Path;
+module.exports.isConnectionError = isConnectionError;

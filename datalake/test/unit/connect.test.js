@@ -17,6 +17,7 @@ function makeDatabricksStub(overrides) {
 	const clientStub = Object.assign({
 		connect: sinon.stub().resolves(),
 		openSession: sinon.stub().resolves(sessionStub),
+		close: sinon.stub().resolves(),
 	}, overrides && overrides.client);
 
 	return {
@@ -26,21 +27,59 @@ function makeDatabricksStub(overrides) {
 	};
 }
 
+// generic-pool stub — lightweight pool that immediately creates/releases/destroys
+// without any async complexity. Tracks borrow accounting for unit tests.
+function makePoolStub(overrides) {
+	let borrowed = 0;
+	let pending = 0;
+	let drainCalled = false;
+	let clearCalled = false;
+	const stub = Object.assign({
+		acquire: sinon.stub(),
+		release: sinon.stub().resolves(),
+		destroy: sinon.stub().resolves(),
+		drain: sinon.stub().callsFake(() => { drainCalled = true; return Promise.resolve(); }),
+		clear: sinon.stub().callsFake(() => { clearCalled = true; return Promise.resolve(); }),
+		get borrowed() { return borrowed; },
+		get pending() { return pending; },
+		_setBorrowed: v => { borrowed = v; },
+		_setPending: v => { pending = v; },
+		_drainCalled: () => drainCalled,
+		_clearCalled: () => clearCalled,
+	}, overrides);
+	return stub;
+}
+
+function makeGenericPoolStub(poolStub) {
+	return {
+		createPool: sinon.stub().returns(poolStub),
+	};
+}
+
+function makeConnectFactory(databricksStub, genericPoolStub) {
+	return proxyquire('../../lib/connect.js', {
+		'@databricks/sql': databricksStub,
+		'generic-pool': genericPoolStub,
+		'leo-logger': () => ({ info: () => {}, debug: () => {}, error: () => {} }),
+		'leo-sdk': {
+			streams: {
+				pipeline: sinon.stub(),
+				through: sinon.stub(),
+				toS3: sinon.stub(),
+			},
+		},
+		'fast-csv': { createWriteStream: sinon.stub() },
+	});
+}
+
 describe('connect.js', () => {
-	let connectFactory, databricksStub;
+	let connectFactory, databricksStub, poolStub, genericPoolStub;
 
 	beforeEach(() => {
 		databricksStub = makeDatabricksStub();
-		connectFactory = proxyquire('../../lib/connect.js', {
-			'@databricks/sql': databricksStub,
-			'leo-logger': () => ({ info: () => {}, debug: () => {}, error: () => {} }),
-			'leo-streams': {
-				pipeline: sinon.stub(),
-				write: sinon.stub(),
-				toS3: sinon.stub(),
-			},
-			'fast-csv': { createWriteStream: sinon.stub() },
-		});
+		poolStub = makePoolStub();
+		genericPoolStub = makeGenericPoolStub(poolStub);
+		connectFactory = makeConnectFactory(databricksStub, genericPoolStub);
 	});
 
 	describe('interface surface', () => {
@@ -59,6 +98,231 @@ describe('connect.js', () => {
 			expect(client.streamToTableFromS3).to.be.a('function');
 			expect(client.escapeId).to.be.a('function');
 			expect(client.escape).to.be.a('function');
+		});
+	});
+
+	describe('factory construction — no network at construct time', () => {
+		it('does NOT call sqlClient.connect() when the factory is called', () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			expect(databricksStub._client.connect.called,
+				'sqlClient.connect should not fire at factory time').to.be.false;
+		});
+
+		it('creates DBSQLClient synchronously', () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			expect(databricksStub.DBSQLClient.calledOnce).to.be.true;
+		});
+	});
+
+	describe('config normalization', () => {
+		it('poolMax defaults to 10', () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const poolOpts = genericPoolStub.createPool.firstCall.args[1];
+			expect(poolOpts.max).to.equal(10);
+		});
+
+		it('poolMax is clamped to [1, 50]', () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's', poolMax: 0 });
+			expect(genericPoolStub.createPool.firstCall.args[1].max).to.equal(1);
+
+			genericPoolStub.createPool.resetHistory();
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's', poolMax: 999 });
+			expect(genericPoolStub.createPool.firstCall.args[1].max).to.equal(50);
+		});
+
+		it('statementTimeoutSeconds defaults to 600', async () => {
+			poolStub.acquire.resolves({ dead: false, query: sinon.stub().callsFake((s, p, cb) => cb(null, [])), release: () => {} });
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			// Trigger pool.acquire() so the factory.create fires and we can inspect openSession args
+			databricksStub._client.openSession = sinon.stub().callsFake(async (opts) => {
+				expect(opts.initialParameters.STATEMENT_TIMEOUT).to.equal('600');
+				return databricksStub._session;
+			});
+			// Call the pool factory's create directly (bypassing the stub)
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			await createFn();
+		});
+
+		it('statementTimeoutSeconds is floored to 5', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's', statementTimeoutSeconds: 0 });
+			databricksStub._client.openSession = sinon.stub().callsFake(async (opts) => {
+				expect(opts.initialParameters.STATEMENT_TIMEOUT).to.equal('5');
+				return databricksStub._session;
+			});
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			await createFn();
+		});
+
+		it('statementTimeoutSeconds is capped at 1800', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's', statementTimeoutSeconds: 99999 });
+			databricksStub._client.openSession = sinon.stub().callsFake(async (opts) => {
+				expect(opts.initialParameters.STATEMENT_TIMEOUT).to.equal('1800');
+				return databricksStub._session;
+			});
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			await createFn();
+		});
+
+		it('socketTimeout is pinned above statementTimeoutSeconds * 1000', () => {
+			// With default statementTimeoutSeconds=600, socketTimeout = (600+120)*1000 = 720000
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			// Trigger ensureConnected inside factory.create
+			void createFn();
+			// sqlClient.connect is called with socketTimeout
+			expect(databricksStub._client.connect.called).to.be.true;
+			const connectArg = databricksStub._client.connect.firstCall.args[0];
+			expect(connectArg.socketTimeout).to.equal(720000);
+			// socketTimeout > statementTimeoutSeconds * 1000
+			expect(connectArg.socketTimeout).to.be.above(600 * 1000);
+		});
+	});
+
+	describe('memoized connect — single sqlClient.connect() under N-way burst', () => {
+		it('fires sqlClient.connect exactly once even when factory.create is called N times', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			// Simulate 5 concurrent factory.create calls
+			await Promise.all([createFn(), createFn(), createFn(), createFn(), createFn()]);
+			expect(databricksStub._client.connect.callCount,
+				'sqlClient.connect must be called exactly once').to.equal(1);
+		});
+	});
+
+	describe('session params', () => {
+		it('passes ansi_mode=false, infer_timestamp_ntz_type=true, timezone=UTC, STATEMENT_TIMEOUT', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			await createFn();
+			const params = databricksStub._client.openSession.firstCall.args[0].initialParameters;
+			expect(params.ansi_mode).to.equal('false');
+			expect(params.infer_timestamp_ntz_type).to.equal('true');
+			expect(params.timezone).to.equal('UTC');
+			expect(params.STATEMENT_TIMEOUT).to.equal('600');
+		});
+
+		it('opens session with initialCatalog and initialSchema', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'mycat', schema: 'mysch' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			await createFn();
+			const sessionArgs = databricksStub._client.openSession.firstCall.args[0];
+			expect(sessionArgs.initialCatalog).to.equal('mycat');
+			expect(sessionArgs.initialSchema).to.equal('mysch');
+		});
+	});
+
+	describe('query() — pool acquire/release/destroy routing', () => {
+		it('calls pool.acquire() and pool.release() on success', (done) => {
+			const wrapper = {
+				dead: false,
+				query: sinon.stub().callsFake((s, p, cb) => cb(null, [{ id: 1 }], [])),
+				release: () => {},
+			};
+			poolStub.acquire.resolves(wrapper);
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.query('SELECT 1', [], (err, rows) => {
+				expect(err).to.be.null;
+				expect(rows).to.deep.equal([{ id: 1 }]);
+				expect(poolStub.acquire.calledOnce).to.be.true;
+				expect(poolStub.release.calledWith(wrapper)).to.be.true;
+				expect(poolStub.destroy.called).to.be.false;
+				done();
+			});
+		});
+
+		it('sets wrapper.dead=true and calls pool.destroy() on connection-class error', (done) => {
+			const connErr = new Error('ECONNRESET');
+			connErr.code = 'ECONNRESET';
+			const wrapper = {
+				dead: false,
+				query: sinon.stub().callsFake((s, p, cb) => cb(connErr)),
+				release: () => {},
+			};
+			poolStub.acquire.resolves(wrapper);
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.query('SELECT 1', [], (err) => {
+				expect(err).to.equal(connErr);
+				expect(wrapper.dead).to.be.true;
+				expect(poolStub.destroy.calledWith(wrapper)).to.be.true;
+				expect(poolStub.release.called).to.be.false;
+				done();
+			});
+		});
+
+		it('calls pool.release() (not destroy) on query-class SQL error', (done) => {
+			const sqlErr = new Error('[PARSE_SYNTAX_ERROR] Syntax error at line 1');
+			const wrapper = {
+				dead: false,
+				query: sinon.stub().callsFake((s, p, cb) => cb(sqlErr)),
+				release: () => {},
+			};
+			poolStub.acquire.resolves(wrapper);
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.query('BAD SQL', [], (err) => {
+				expect(err).to.equal(sqlErr);
+				expect(wrapper.dead).to.be.false;
+				expect(poolStub.release.calledWith(wrapper)).to.be.true;
+				expect(poolStub.destroy.called).to.be.false;
+				done();
+			});
+		});
+
+		it('propagates acquire() rejection via callback', (done) => {
+			poolStub.acquire.rejects(new Error('acquire timeout'));
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.query('SELECT 1', [], (err) => {
+				expect(err.message).to.equal('acquire timeout');
+				done();
+			});
+		});
+	});
+
+	describe('pool.validate() — dead-flag check', () => {
+		it('validate returns true when dead=false', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const validateFn = genericPoolStub.createPool.firstCall.args[0].validate;
+			const result = await validateFn({ dead: false });
+			expect(result).to.be.true;
+		});
+
+		it('validate returns false when dead=true', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const validateFn = genericPoolStub.createPool.firstCall.args[0].validate;
+			const result = await validateFn({ dead: true });
+			expect(result).to.be.false;
+		});
+	});
+
+	describe('disconnect() / end() — drain, clear, close', () => {
+		it('disconnect() calls pool.drain(), pool.clear(), sqlClient.close()', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			await client.disconnect();
+			expect(poolStub.drain.calledOnce).to.be.true;
+			expect(poolStub.clear.calledOnce).to.be.true;
+			expect(databricksStub._client.close.calledOnce).to.be.true;
+		});
+
+		it('end() calls pool.drain(), pool.clear(), sqlClient.close()', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			await client.end();
+			expect(poolStub.drain.calledOnce).to.be.true;
+			expect(poolStub.clear.calledOnce).to.be.true;
+			expect(databricksStub._client.close.calledOnce).to.be.true;
+		});
+	});
+
+	describe('pool factory.destroy() — closes the underlying session', () => {
+		it('destroy() calls wrapper._session.close()', async () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			const destroyFn = genericPoolStub.createPool.firstCall.args[0].destroy;
+			const wrapper = await createFn();
+			await destroyFn(wrapper);
+			expect(databricksStub._session.close.calledOnce).to.be.true;
 		});
 	});
 
@@ -199,44 +463,50 @@ describe('connect.js', () => {
 				expect(realConnect.isNtzType(undefined)).to.equal(false);
 			});
 		});
+
+		describe('isConnectionError', () => {
+			it('returns true for FetchError', () => {
+				const e = new Error('fetch failed');
+				e.name = 'FetchError';
+				expect(realConnect.isConnectionError(e)).to.be.true;
+			});
+
+			it('returns true for ECONNRESET', () => {
+				const e = new Error('socket reset');
+				e.code = 'ECONNRESET';
+				expect(realConnect.isConnectionError(e)).to.be.true;
+			});
+
+			it('returns true for socket hang up message', () => {
+				expect(realConnect.isConnectionError(new Error('socket hang up'))).to.be.true;
+			});
+
+			it('returns true for session closed message', () => {
+				expect(realConnect.isConnectionError(new Error('Session is closed'))).to.be.true;
+			});
+
+			it('returns false for known SQL compilation errors', () => {
+				expect(realConnect.isConnectionError(new Error('[PARSE_SYNTAX_ERROR] bad sql'))).to.be.false;
+				expect(realConnect.isConnectionError(new Error('SQL compilation error: table not found'))).to.be.false;
+				expect(realConnect.isConnectionError(new Error('[PERMISSION_DENIED] access denied'))).to.be.false;
+			});
+
+			it('returns false for null/undefined', () => {
+				expect(realConnect.isConnectionError(null)).to.be.false;
+				expect(realConnect.isConnectionError(undefined)).to.be.false;
+			});
+		});
 	});
 
-	describe('connect() + query()', () => {
-		it('calls DBSQLClient.connect with host/path/token', async () => {
-			const client = connectFactory({ host: 'myhost', path: '/sql/1', token: 'mytoken', catalog: 'cat', schema: 'sch' });
-			await client.connect();
-			expect(databricksStub._client.connect.calledOnce).to.be.true;
-			const args = databricksStub._client.connect.firstCall.args[0];
-			expect(args.host).to.equal('myhost');
-			expect(args.path).to.equal('/sql/1');
-			expect(args.token).to.equal('mytoken');
-		});
+	describe('connect() — acquires from pool', () => {
+		it('calls pool.acquire()', async () => {
+			const wrapper = { dead: false, release: () => {} };
+			poolStub.acquire.resolves(wrapper);
 
-		it('opens session with initialCatalog and initialSchema', async () => {
-			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'mycat', schema: 'mysch' });
-			await client.connect();
-			const sessionArgs = databricksStub._client.openSession.firstCall.args[0];
-			expect(sessionArgs.initialCatalog).to.equal('mycat');
-			expect(sessionArgs.initialSchema).to.equal('mysch');
-		});
-
-		it('passes ansi_mode=false, infer_timestamp_ntz_type=true, timezone=UTC in session params', async () => {
 			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
-			await client.connect();
-			const params = databricksStub._client.openSession.firstCall.args[0].initialParameters;
-			expect(params.ansi_mode).to.equal('false');
-			expect(params.infer_timestamp_ntz_type).to.equal('true');
-			expect(params.timezone).to.equal('UTC');
-		});
-
-		it('propagates query errors via callback', (done) => {
-			databricksStub._session.executeStatement = sinon.stub().rejects(new Error('exec failed'));
-			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
-			client.query('SELECT 1', [], (err) => {
-				expect(err).to.be.instanceOf(Error);
-				expect(err.message).to.equal('exec failed');
-				done();
-			});
+			const conn = await client.connect();
+			expect(poolStub.acquire.calledOnce).to.be.true;
+			expect(conn).to.equal(wrapper);
 		});
 	});
 

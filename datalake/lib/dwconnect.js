@@ -6,11 +6,12 @@ const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
 const sql = require('./sql.js');
 const fingerprint64 = require('./surrogate_key.js');
+const connect = require('./connect.js');
+const { isConnectionError } = connect;
 
 const naiveIsoNow = require('./audit_timestamp.js');
 
 module.exports = function(dbconfig, options) {
-	const connect = require('./connect.js');
 	const client = connect(dbconfig);
 	const dwClient = client;
 
@@ -209,7 +210,7 @@ module.exports = function(dbconfig, options) {
 					const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
 					const stagingClause = `(\n${stagingSelect}\n)`;
 
-					flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, () => {
+					withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, done), {}, () => {
 						let naturalKeyFilter = null;
 
 						const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
@@ -221,14 +222,14 @@ module.exports = function(dbconfig, options) {
 						if (pruneCol) {
 							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
 							const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
-							client.query(minSql, [], (qErr, results) => {
+							withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
 								if (!qErr && results && results[0] && results[0].minval != null) {
 									naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
 								}
-								doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, mergeCallback);
+								withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
 							});
 						} else {
-							doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, mergeCallback);
+							withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
 						}
 					});
 				});
@@ -336,5 +337,35 @@ function cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callbac
 	});
 }
 
-// Exposed for unit testing of the type-aware naturalKeyFilter quoting.
+// ── Bounded idempotent retry ──────────────────────────────────────────────────
+// Wraps a callback-based function `fn(done)` with up to `opts.attempts` retries
+// (default 3). Retries only on connection-class errors — query-class errors
+// (SQL syntax, permission, data) propagate immediately. Each retry re-acquires
+// a fresh pool session (the dead one was destroyed by query()'s error handler).
+// Safe because the callers — MIN SELECT, MERGE, flushDeletes UPDATE — are all
+// idempotent: re-running yields the same final state. Never retry inside query()
+// itself (which runs arbitrary, possibly non-idempotent SQL).
+function withRetry(fn, opts, callback) {
+	const maxAttempts = (opts && opts.attempts) || 3;
+	const backoffMs = (opts && opts.backoffMs) || 200;
+	let attemptsLeft = maxAttempts;
+
+	function attempt() {
+		fn(function(err, result) {
+			if (!err) return callback(null, result);
+			attemptsLeft--;
+			if (attemptsLeft > 0 && isConnectionError(err)) {
+				const delay = backoffMs * (maxAttempts - attemptsLeft);
+				setTimeout(attempt, delay);
+			} else {
+				callback(err, result);
+			}
+		});
+	}
+
+	attempt();
+}
+
+// Exposed for unit testing of the type-aware naturalKeyFilter quoting and retry.
 module.exports.literalForType = literalForType;
+module.exports.withRetry = withRetry;

@@ -38,6 +38,12 @@ describe('Round-trip: 100-event fact load', function() {
 		expect(result[TABLE]).to.equal('Added');
 	});
 
+	after(async function() {
+		if (client) {
+			try { await client.end(); } catch (e) { /* best-effort */ }
+		}
+	});
+
 	it('loads 100 records via importFact', async function() {
 		if (!dbconfig) return this.skip();
 		const records = makeRecords(100);

@@ -306,7 +306,6 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 						}
 					});
 					async.parallelLimit(tasks, 10, (err) => {
-						console.log('HERE------------------------------', err);
 						done(err);
 					});
 				});

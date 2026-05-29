@@ -30,19 +30,26 @@ describe('Schema evolution: add column mid-flight', function() {
 
 	const qualifiedTable = () => `\`${dbconfig.catalog}\`.\`${dbconfig.schema}\`.\`${TABLE}\``;
 
+	let client;
+
 	before(async function() {
 		if (!dbconfig) return this.skip();
-		const setupClient = dwconnectFactory(dbconfig);
-		await runQuery(setupClient, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
-		setupClient.clearSchemaCache();
-		const result = await setupClient.changeTableStructure({ [TABLE]: tableDef });
+		client = dwconnectFactory(dbconfig);
+		await runQuery(client, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
+		client.clearSchemaCache();
+		const result = await client.changeTableStructure({ [TABLE]: tableDef });
 		expect(result[TABLE]).to.equal('Added');
-		await runImport(setupClient, makeRecords(100));
+		await runImport(client, makeRecords(100));
+	});
+
+	after(async function() {
+		if (client) {
+			try { await client.end(); } catch (e) { /* best-effort */ }
+		}
 	});
 
 	it('changeTableStructure with extra_col reports Modified and adds the column', async function() {
 		if (!dbconfig) return this.skip();
-		const client = dwconnectFactory(dbconfig);
 		client.clearSchemaCache();
 		const result = await client.changeTableStructure({ [TABLE]: tableDefWithExtraColumn() });
 		expect(result[TABLE]).to.equal('Modified');
@@ -59,7 +66,6 @@ describe('Schema evolution: add column mid-flight', function() {
 
 	it('loads 10 more rows with extra_col set; prior rows show null', async function() {
 		if (!dbconfig) return this.skip();
-		const client = dwconnectFactory(dbconfig);
 		client.clearSchemaCache(); // pick up the new column for staging columnDefs
 		const extraRecords = [];
 		for (let i = 101; i <= 110; i++) {

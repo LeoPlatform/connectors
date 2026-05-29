@@ -169,6 +169,75 @@ describe('dwconnect.js', () => {
 		});
 	});
 
+	describe('withRetry — bounded idempotent retry', () => {
+		const { withRetry } = require('../../lib/dwconnect.js');
+
+		it('calls callback with result on first-try success', (done) => {
+			let calls = 0;
+			withRetry(cb => { calls++; cb(null, 'ok'); }, {}, (err, result) => {
+				expect(err).to.be.null;
+				expect(result).to.equal('ok');
+				expect(calls).to.equal(1);
+				done();
+			});
+		});
+
+		it('retries on connection-class error and succeeds on second attempt', (done) => {
+			let calls = 0;
+			const connErr = new Error('ECONNRESET');
+			connErr.code = 'ECONNRESET';
+			withRetry(cb => {
+				calls++;
+				if (calls === 1) return cb(connErr);
+				cb(null, 'recovered');
+			}, { backoffMs: 0 }, (err, result) => {
+				expect(err).to.be.null;
+				expect(result).to.equal('recovered');
+				expect(calls).to.equal(2);
+				done();
+			});
+		});
+
+		it('does NOT retry on query-class SQL error', (done) => {
+			let calls = 0;
+			const sqlErr = new Error('[PARSE_SYNTAX_ERROR] bad sql');
+			withRetry(cb => { calls++; cb(sqlErr); }, { backoffMs: 0 }, (err) => {
+				expect(err).to.equal(sqlErr);
+				expect(calls).to.equal(1);
+				done();
+			});
+		});
+
+		it('is bounded — fails after maxAttempts on persistent connection errors', (done) => {
+			let calls = 0;
+			const connErr = new Error('socket hang up');
+			withRetry(cb => { calls++; cb(connErr); }, { attempts: 3, backoffMs: 0 }, (err) => {
+				expect(err).to.equal(connErr);
+				expect(calls).to.equal(3);
+				done();
+			});
+		});
+
+		it('re-acquires a fresh session per retry (each fn() call is independent)', (done) => {
+			// Each retry passes a fresh function call — there is no shared session state.
+			// Verify by asserting the fn receives independent invocations.
+			const sessions = [];
+			let callIdx = 0;
+			const connErr = new Error('ECONNRESET');
+			connErr.code = 'ECONNRESET';
+			withRetry(cb => {
+				sessions.push(++callIdx);
+				if (callIdx < 3) return cb(connErr);
+				cb(null, 'done');
+			}, { attempts: 3, backoffMs: 0 }, (err, result) => {
+				expect(err).to.be.null;
+				expect(result).to.equal('done');
+				expect(sessions).to.deep.equal([1, 2, 3]);
+				done();
+			});
+		});
+	});
+
 	describe('changeTableStructure — schema unchanged → Unmodified', () => {
 		it('returns Unmodified when all columns present', async () => {
 			const existingSchema = [
