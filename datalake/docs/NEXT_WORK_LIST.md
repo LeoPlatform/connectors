@@ -1,0 +1,173 @@
+# Datalake connector — work list (next session)
+
+Consolidates three sources reviewed 2026-05-29:
+
+1. Refreshed datalake-vs-postgres divergence review (post session-reuse, commit `b62d3b8`).
+2. [BUILD_PLAN.md](BUILD_PLAN.md) items not yet implemented.
+3. [BUILD_PLAN.md](BUILD_PLAN.md) items intentionally deferred.
+
+Items are tagged **[Bug]** (correctness regression vs postgres), **[Gap]** (BUILD_PLAN step not yet built), **[Defer]** (intentionally out of scope), or **[Doc]** (documentation drift).
+
+---
+
+## 1. Refreshed divergence review
+
+### 1a. Forced and legitimate divergences (no action — they're correct)
+
+| Area | Postgres | Datalake | Why divergent |
+|---|---|---|---|
+| Staging artifact | `staging_<table>` real table | S3 file, inlined via `read_files()` in MERGE | Each pooled session can serve any query; a session-scoped temp view from one acquire isn't guaranteed to live across the MIN+MERGE pair |
+| UPSERT mechanism | `UPDATE prev FROM staging` + `INSERT WHERE NOT EXISTS` | `MERGE INTO ... WHEN MATCHED ... WHEN NOT MATCHED INSERT` | Delta supports atomic MERGE; Redshift doesn't |
+| `naturalKeyFilter` placement | WHERE clauses on `prev` joins / DELETE | MERGE `ON` clause `target.<clusterKey> >= <filter>` | Forced by MERGE mechanism |
+| `escapeId` casing | preserves case (`"Name"`) | lowercases (`` `name` ``) | Intentional lowercase-everywhere convention ([CLAUDE.md](../CLAUDE.md)); BUILD_PLAN Step 3 open question #7 |
+| Staging identifier | `qualifiedStagingTable = "${stageSchema}.${stageTablePrefix}_${table}"` | `stagingS3Path(s3Bucket, s3Prefix, table, auditdate)` | Different shape (URI vs schema-qualified name), same ownership pattern — caller owns and passes down |
+| Transactions | `BEGIN/COMMIT/ROLLBACK` around post-stage SQL | None | Pool sessions are independent acquires per query; multi-statement TX not viable in this model |
+| Enrichment | At INSERT-SQL time (`SELECT staging.*, false AS _deleted, ${auditdate} AS _auditdate`) | Per-row in `enrichedStream` (datalake/lib/dwconnect.js:179-187) | Hashed surrogate keys force a per-row JS pass; folding audit values in there is natural |
+| Cleanup | Module-level `tempTables[]` + `dropTempTables()` API | Inline `cleanupStagedFile` after MERGE | S3 files must be deleted promptly; postgres temp tables can persist until orchestrator tears down |
+
+### 1b. New since session-reuse (commit `b62d3b8`) — analogous to postgres `pg.Pool`
+
+| Area | Postgres | Datalake (post session-reuse) | Status |
+|---|---|---|---|
+| Connection model | `pg.Pool({ max })` | Shared `DBSQLClient` + `generic-pool` of sessions, validate-on-borrow, destroy-on-error | ✓ Analogous shape |
+| Memoized connect | implicit in pg.Pool | Single `connectPromise` so the first `parallelLimit(10)` burst doesn't fire 10 OAuth fetches | ✓ Net-new but justified |
+| `withRetry` bounded idempotent retry | not needed (pg has its own) | Wraps MIN, MERGE, flushDeletes (datalake/lib/dwconnect.js:213, 225, 229, 232) | ✓ Net-new, justified — SDK doesn't retry ExecuteStatement/OpenSession or connection severances |
+| `STATEMENT_TIMEOUT` runaway guard | implicit (Redshift WLM/QMR) | `STATEMENT_TIMEOUT` session param, floored 5s, capped 1800s, default 600s | ✓ Net-new, justified — serverless warehouse |
+| `isConnectionError` classifier | implicit (pg error codes) | Explicit predicate (datalake/lib/connect.js:27) drives destroy-on-error vs release-healthy | ✓ Net-new, justified |
+| `disconnect`/`end` | `pool.end()` | `pool.drain() → pool.clear() → sqlClient.close()`, raced against `drainTimeoutMs` | ✓ Analogous |
+
+### 1c. Different but accepted (per [porting-decisions.md](porting-decisions.md))
+
+Closed list of items deliberately left matching postgres. Don't re-flag without showing a concrete failure mode in the datalake context:
+
+- `flushDeletes` IN-list via string interpolation
+- `alterColumnType` helper exists but is never called from `changeTableStructure`
+- `escapeValue` lowercases (dead code in datalake; OrderStream/Dsco convention if ever wired)
+- Schema cache invalidated only on `createTable`, not on `ADD COLUMN`
+- `npm` scripts use shell globs
+- `dwClient = client` module-scope alias
+- `naiveIsoNow()` second-resolution (load-bearing — see CLAUDE.md timestamp section)
+- `escapeId('')` returns `` `` ``
+
+### 1d. Residual issues I flagged earlier that the session-reuse commit did NOT fix
+
+These are real and still present after `b62d3b8`. Worth addressing:
+
+- **[Bug] `flushDeletes` post-retry error is swallowed.** [datalake/lib/dwconnect.js:213](../lib/dwconnect.js#L213):
+  ```js
+  withRetry(done => flushDeletes(...), {}, () => {
+  ```
+  The arrow function takes no args, so once `withRetry` exhausts its attempts, the error vanishes and MERGE proceeds anyway. Postgres aborts the transaction in the same situation via `done(err)`.
+
+- **[Bug] MIN query post-retry error is swallowed.** [datalake/lib/dwconnect.js:225-229](../lib/dwconnect.js#L225-L229):
+  ```js
+  withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
+      if (!qErr && results && results[0] && results[0].minval != null) {
+          naturalKeyFilter = literalForType(...);
+      }
+      withRetry(done => doMerge(...), {}, mergeCallback);
+  });
+  ```
+  After retries are exhausted, `qErr` is captured but only used as a guard for the prune-filter branch — MERGE runs full-table-scan with `naturalKeyFilter=null` and no log. Postgres returns `done(err)` and aborts. Fix should at least log the swallowed error and consider failing the importFact.
+
+- **[Bug] `count` returned to the orchestrator is wrong.** [datalake/lib/dwconnect.js:319-322](../lib/dwconnect.js#L319-L322):
+  ```js
+  client.query(mergeSql, [], (err, results) => {
+      callback(err, results ? { count: (results && results.length) || 0 } : { count: 0 });
+  });
+  ```
+  Databricks `MERGE` returns no result rows (or one metrics row depending on endpoint), so `results.length` is 0 or 1, not rows-affected. Postgres returns `{count: totalRecords}` from the staging COUNT(*). The `cnt` *is* already computed in the MIN query — it's thrown away. Use it (or run a separate `SELECT COUNT(*) FROM ${stagingClause}` for the no-pruneCol branch).
+  - **Verification queue:** confirm what `@databricks/sql` returns from a MERGE statement — claim is from general Databricks knowledge, not verified against this connector's actual `fetchAll()` shape.
+
+- **[Doc] Dim path: `createTable` adds SCD2 cols, `importDimension` is a stub.** [datalake/lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250) and [lib/sql.js:101-106](../lib/sql.js#L101-L106). Known defer (BUILD_PLAN Step 7 is fact-only), but a reader of the schema will see `_startdate/_enddate/_current` columns with no writer — surprise factor. Either document inline or accept that the BUILD_PLAN doc is sufficient.
+
+- ~~**[Doc] Outdated `streamToTableFromS3` comment.**~~ ✓ Done (commit pending) — was actually in [dwconnect.js:207-209](../lib/dwconnect.js#L207-L209), not connect.js. Updated the rationale to "Sessions are pooled, so the MIN and MERGE queries may run on different acquires — a session-scoped temp view from one acquire is not guaranteed visible to the next. Inlining avoids that."
+
+---
+
+## 2. BUILD_PLAN.md items not yet implemented
+
+### [Gap] Step 8 — `test/unit/load.smoke.test.js` (offline smoke through real `load.js`)
+BUILD_PLAN Step 8 calls for a unit test that pipes a 100-event in-memory stream through `connectors/common/datawarehouse/load.js` with a stubbed connect+S3, asserting the expected call sequence. **Not present** (no `load.smoke.test.js` under `test/unit/`). Useful as a wiring guard for the bot integration.
+
+### [Gap] Step 9 — CI workflow scaffolding (per-branch cloned catalog)
+BUILD_PLAN Step 9 calls for two GitHub Actions workflows paralleling `data-lake-datapipelines`: `create-catalog.yml` on branch `create` and `destroy-catalog.yml` on branch `delete`, both using `chub-engineering/commercehub-actions/data-lake/shallow_clone` / `destroy`. **Not present** in `.github/workflows/`. Implication: today's integration tests only run locally against `de_cup_dev_us` / `public_stage_local`; CI doesn't validate against a per-branch isolated catalog.
+
+### [Gap] Step 12 — Equivalence script (DoD check)
+[test/equivalence/run.js](../test/equivalence/run.js) exists as a stub that errors out. Blocked on:
+- Open question #3 — captured PII-scrubbed prod fixture + nonprod environments live
+- Open question #6 — `READ_FILES` grant on the relevant External Location
+- Locking the table coverage set (see Step 12 criteria)
+- Lakebridge invocation + hand-rolled MD5 row-level diff implementation
+
+This is the documented DoD gate. Not flippable until the captured fixture exists.
+
+### [Gap] Open question #3 follow-ups (CI plumbing)
+Per BUILD_PLAN open question #3 (otherwise resolved):
+- SQL warehouse HTTP path
+- Service-principal credentials path in Secrets Manager (pattern: `data-emporium/dev/ci/<repo>/variables/*`)
+- GitHub Actions → AWS OIDC trust grant for this repo
+
+All needed before the Step 9 CI workflows can authenticate.
+
+### [Gap] Open question #6 follow-up — `READ_FILES` grant
+External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
+
+### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
+"Without an `offload_to_datalake.js` bot, nothing in production runs this library yet." Connector library is done (modulo bugs in §1d); the bot in `general/` to consume it is not started.
+
+### [Gap] BUILD_PLAN risk #5 — Operational monitors / alerts
+CloudWatch alarms, Datadog monitors, dashboards, PagerDuty services watching Redshift pipeline health need Databricks counterparts before Redshift retires. Inventory not started.
+
+### [Gap] BUILD_PLAN risk #6 — Redshift-specific AI Arcanum skills audit
+Skills that embed Redshift SQL or connection strings will produce wrong output once Databricks is live. Audit not started.
+
+### [Gap] BUILD_PLAN risk #3 — `bus-models/dw-schema` lowercase-assertion deploy gate
+Mentioned in Step 1 prerequisites: extend `bus-models/dw-schema` with the lowercase-keys assertion. Without it, a producer adding a mixed-case key to `dw_fields` would silently diverge (Databricks lowercases on write; Redshift tolerates either casing; consumer queries that case-match Redshift diverge on Databricks). Implementation status in `bus-models` unknown — needs verification.
+
+---
+
+## 3. Intentionally deferred in BUILD_PLAN.md (don't pull forward)
+
+Per BUILD_PLAN's "this plan covers Deliverable #1 only":
+
+### [Defer] Deliverable #2 — VARIANT event tables
+Out of scope for this connector. Different storage shape (semi-structured), different staging path. Reopen when explicitly scoped.
+
+### [Defer] Deliverable #3 — Retabulation library
+Out of scope. Reopen when explicitly scoped.
+
+### [Defer] `checksum.js` — Checksum bot path
+[lib/checksum.js](../lib/checksum.js) is a `throw new Error('checksum not implemented')` stub. Per BUILD_PLAN open question #4: consumed by a separate checksum bot, not the loader hot path. Defer until a checksum bot migration is requested.
+
+### [Defer] `streamToTable` (non-S3 direct-write path)
+[datalake/lib/connect.js:349-351](../lib/connect.js#L349-L351) throws. Postgres has a non-Redshift branch that uses direct COPY; datalake doesn't need it — all paths go through S3 staging. Keep as `throw` for interface parity.
+
+### [Defer] Dimension code paths
+[lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250): `importDimension`, `insertMissingDimensions`, `linkDimensions` all `throw new Error('not yet implemented')`. BUILD_PLAN Step 7 covers fact tables only; `bypassSlowlyChangingDimensions: true`. Reopen if dim coverage is required.
+
+### [Defer] `alterColumnType` wiring
+Per [porting-decisions.md](porting-decisions.md): postgres also doesn't wire it. Defer indefinitely; only file a ticket if a dw_fields type evolution actually needs it.
+
+### [Defer] Module-level `DBSQLClient`
+SESSION_REUSE_PLAN.md follow-up section. Current implementation creates a new `DBSQLClient` per `connectFactory()` call (per-invocation pool); could be hoisted to module scope to amortize OAuth fetch + TLS handshake across Lambda invocations in a warm container. `telemetryEnabled: false` suppresses the warning for now. Revisit once production invocation cadence and OAuth overhead are characterized — not before.
+
+### [Defer] Strict mode (`ansi_mode = true`)
+BUILD_PLAN Step 3 rationale: kept lenient for Redshift `ACCEPTINVCHARS`/`ACCEPTANYDATE` parity during coexistence. Modernization choice to revisit after Redshift retires.
+
+### [Defer] `rescuedDataColumn`
+BUILD_PLAN Step 7.2 rationale: the malformed-record column would diverge from Redshift output. Revisit post-coexistence.
+
+### [Defer] Auto Loader
+BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpointing; Auto Loader would duplicate state. Revisit only if `read_files` proves unreliable at scale.
+
+---
+
+## Quick-action triage for next session
+
+If picking up cold, the highest-value-per-effort items are likely:
+
+1. **The three §1d bugs** (flushDeletes/MIN error swallowing, wrong `count`). All small, all real, all could mask production failures. Verify the `count` claim against actual `fetchAll()` output before fixing.
+2. **Step 8 smoke test** — small, locks in the bot-side contract.
+
+Heavier items (Step 9 CI workflows, Step 12 equivalence) are blocked on infra/fixture inputs and are better picked up when those are ready.

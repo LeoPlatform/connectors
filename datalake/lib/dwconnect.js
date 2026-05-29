@@ -204,9 +204,10 @@ module.exports = function(dbconfig, options) {
 				ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
 					if (err) return callback(err);
 
-					// Build an inline read_files(...) SELECT for the staged S3 file. Each
-					// client.query() opens its own session — a session-scoped temp view
-					// would not survive across the MIN and MERGE queries, so we inline.
+					// Build an inline read_files(...) SELECT for the staged S3 file.
+					// Sessions are pooled, so the MIN and MERGE queries may run on
+					// different acquires — a session-scoped temp view from one acquire
+					// is not guaranteed visible to the next. Inlining avoids that.
 					const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
 					const stagingClause = `(\n${stagingSelect}\n)`;
 
