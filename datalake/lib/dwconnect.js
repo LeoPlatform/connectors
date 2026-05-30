@@ -211,26 +211,43 @@ module.exports = function(dbconfig, options) {
 					const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
 					const stagingClause = `(\n${stagingSelect}\n)`;
 
-					withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, done), {}, () => {
+					const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+					const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
+					let stagingCount = 0;
+
+					// Count sourced from staging rows, not MERGE result (which returns metrics,
+					// not row count). Mirrors postgres's totalRecords = results[0].cnt.
+					const mergeCallback = (mergeErr) =>
+						cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
+
+					withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, done), {}, (flushErr) => {
+						if (flushErr) return mergeCallback(flushErr);
 						let naturalKeyFilter = null;
-
-						const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
-						const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-
-						const mergeCallback = (mergeErr, mergeResult) =>
-							cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callback);
 
 						if (pruneCol) {
 							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
 							const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
 							withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-								if (!qErr && results && results[0] && results[0].minval != null) {
-									naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+								if (qErr) {
+									logger.error('MIN query failed after retries, aborting importFact:', qErr);
+									return mergeCallback(qErr);
+								}
+								if (results && results[0]) {
+									stagingCount = results[0].cnt || 0;
+									if (results[0].minval != null) {
+										naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+									}
 								}
 								withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
 							});
 						} else {
-							withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
+							const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+							client.query(countSql, [], (countErr, countResults) => {
+								if (!countErr && countResults && countResults[0]) {
+									stagingCount = countResults[0].cnt || 0;
+								}
+								withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
+							});
 						}
 					});
 				});
@@ -319,9 +336,7 @@ function doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnCon
 		client.escapeId
 	);
 
-	client.query(mergeSql, [], (err, results) => {
-		callback(err, results ? { count: (results && results.length) || 0 } : { count: 0 });
-	});
+	client.query(mergeSql, [], callback);
 }
 
 function cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callback) {

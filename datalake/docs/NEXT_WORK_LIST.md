@@ -53,35 +53,17 @@ Closed list of items deliberately left matching postgres. Don't re-flag without 
 
 These are real and still present after `b62d3b8`. Worth addressing:
 
-- **[Bug] `flushDeletes` post-retry error is swallowed.** [datalake/lib/dwconnect.js:213](../lib/dwconnect.js#L213):
-  ```js
-  withRetry(done => flushDeletes(...), {}, () => {
-  ```
-  The arrow function takes no args, so once `withRetry` exhausts its attempts, the error vanishes and MERGE proceeds anyway. Postgres aborts the transaction in the same situation via `done(err)`.
+- ~~**[Bug] `flushDeletes` post-retry error is swallowed.**~~ ✓ Fixed — `mergeCallback` hoisted before `withRetry(flushDeletes...)`; callback now takes `(flushErr)` and returns early. Unit-tested: `propagates a flushDeletes error and skips MERGE`.
 
-- **[Bug] MIN query post-retry error is swallowed.** [datalake/lib/dwconnect.js:225-229](../lib/dwconnect.js#L225-L229):
-  ```js
-  withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-      if (!qErr && results && results[0] && results[0].minval != null) {
-          naturalKeyFilter = literalForType(...);
-      }
-      withRetry(done => doMerge(...), {}, mergeCallback);
-  });
-  ```
-  After retries are exhausted, `qErr` is captured but only used as a guard for the prune-filter branch — MERGE runs full-table-scan with `naturalKeyFilter=null` and no log. Postgres returns `done(err)` and aborts. Fix should at least log the swallowed error and consider failing the importFact.
+- ~~**[Bug] MIN query post-retry error is swallowed.**~~ ✓ Fixed — `qErr` now propagates via `mergeCallback`; error is logged at ERROR level before returning. Unit-tested: `propagates a MIN query error and skips MERGE`.
 
-- **[Bug] `count` returned to the orchestrator is wrong.** [datalake/lib/dwconnect.js:319-322](../lib/dwconnect.js#L319-L322):
-  ```js
-  client.query(mergeSql, [], (err, results) => {
-      callback(err, results ? { count: (results && results.length) || 0 } : { count: 0 });
-  });
-  ```
-  Databricks `MERGE` returns no result rows (or one metrics row depending on endpoint), so `results.length` is 0 or 1, not rows-affected. Postgres returns `{count: totalRecords}` from the staging COUNT(*). The `cnt` *is* already computed in the MIN query — it's thrown away. Use it (or run a separate `SELECT COUNT(*) FROM ${stagingClause}` for the no-pruneCol branch).
-  - **Verification queue:** confirm what `@databricks/sql` returns from a MERGE statement — claim is from general Databricks knowledge, not verified against this connector's actual `fetchAll()` shape.
-
-- **[Doc] Dim path: `createTable` adds SCD2 cols, `importDimension` is a stub.** [datalake/lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250) and [lib/sql.js:101-106](../lib/sql.js#L101-L106). Known defer (BUILD_PLAN Step 7 is fact-only), but a reader of the schema will see `_startdate/_enddate/_current` columns with no writer — surprise factor. Either document inline or accept that the BUILD_PLAN doc is sufficient.
+- ~~**[Bug] `count` returned to the orchestrator is wrong.**~~ ✓ Fixed — `stagingCount` captured from MIN query's `cnt` (pruneCol path) or a separate `SELECT CAST(COUNT(*) AS INT)` (no-pruneCol path); `doMerge` simplified to `client.query(mergeSql, [], callback)`. Unit-tested on both paths. Integration-tested: `loads 100 records via importFact` now asserts `tableInfo.count === 100` and passes against live Databricks.
 
 - ~~**[Doc] Outdated `streamToTableFromS3` comment.**~~ ✓ Done (commit pending) — was actually in [dwconnect.js:207-209](../lib/dwconnect.js#L207-L209), not connect.js. Updated the rationale to "Sessions are pooled, so the MIN and MERGE queries may run on different acquires — a session-scoped temp view from one acquire is not guaranteed visible to the next. Inlining avoids that."
+
+### 1e. Remaining documentation drift
+
+- **[Doc] Dim path: `createTable` adds SCD2 cols, `importDimension` is a stub.** [datalake/lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250) and [lib/sql.js:101-106](../lib/sql.js#L101-L106). Known defer (BUILD_PLAN Step 7 is fact-only), but a reader of the schema will see `_startdate/_enddate/_current` columns with no writer — surprise factor. Either document inline or accept that the BUILD_PLAN doc is sufficient.
 
 ---
 

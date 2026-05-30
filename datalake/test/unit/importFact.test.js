@@ -170,8 +170,15 @@ describe('importFact — orchestration', () => {
 			query: sinon.stub().callsFake((sql, params, cb) => {
 				queryHistory.push(sql);
 				const finalCb = typeof cb === 'function' ? cb : (typeof params === 'function' ? params : () => {});
+				if (opts.failFlushDeletes && /^UPDATE\s/i.test(sql)) {
+					return finalCb(new Error('flush delete failed'));
+				}
 				if (sql.indexOf('SELECT MIN(') === 0) {
-					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: 50 }]);
+					if (opts.failMinQuery) return finalCb(new Error('MIN query failed'));
+					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
+				}
+				if (sql.indexOf('SELECT CAST(COUNT(') === 0) {
+					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
 				}
 				return finalCb(null, []);
 			}),
@@ -182,8 +189,13 @@ describe('importFact — orchestration', () => {
 			pipe: (...args) => { pipeFinalCb = args[args.length - 1]; },
 		};
 
+		// connect.js exports isConnectionError as a named property; dwconnect.js
+		// destructures it at require-time, so the stub must carry it too.
+		const connectStub = sinon.stub().returns(clientStub);
+		connectStub.isConnectionError = require('../../lib/connect.js').isConnectionError;
+
 		const factory = proxyquire('../../lib/dwconnect.js', {
-			'./connect.js': sinon.stub().returns(clientStub),
+			'./connect.js': connectStub,
 			'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
 			'leo-sdk': {
 				streams: lsStub,
@@ -318,6 +330,48 @@ describe('importFact — orchestration', () => {
 			if (obj !== undefined) forwarded.push(obj);
 		});
 		expect(forwarded).to.deep.equal([{ id: 1, qty: 5 }]);
+	});
+
+	it('returns staging cnt as result.count (single NK — pruneCol path)', async () => {
+		const ctx = setup({ tableFields: factTableFields, cnt: 77 });
+		const result = await runToCompletion(ctx, 'f_order_item', ['id']);
+		expect(result).to.exist;
+		expect(result.count).to.equal(77);
+	});
+
+	it('returns staging cnt as result.count (composite NK — COUNT path)', async () => {
+		const ctx = setup({ tableFields: factTableFields, cnt: 33 });
+		const result = await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
+		expect(result).to.exist;
+		expect(result.count).to.equal(33);
+	});
+
+	it('propagates a flushDeletes error and skips MERGE', async () => {
+		const ctx = setup({ tableFields: factTableFields, failFlushDeletes: true });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		// dataStream cb (throughCallbacks[0]) is registered synchronously in importFact;
+		// inject a delete record so flushDeletes runs a real UPDATE and hits the error.
+		ctx.throughCallbacks[0]({ __leo_delete__: 'id', __leo_delete_id__: 42 }, () => {});
+		await new Promise(setImmediate);
+		ctx.completePipeline();
+		let caught;
+		try { await p; } catch (e) { caught = e; }
+		expect(caught, 'expected an error from flushDeletes').to.exist;
+		expect(caught.message).to.equal('flush delete failed');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+	});
+
+	it('propagates a MIN query error and skips MERGE', async () => {
+		const ctx = setup({ tableFields: factTableFields, failMinQuery: true });
+		let caught;
+		try {
+			await runToCompletion(ctx, 'f_order_item', ['id']);
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught, 'expected an error from MIN query').to.exist;
+		expect(caught.message).to.equal('MIN query failed');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
 	it('enrichedStream stamps audit/_deleted and computes sk via fingerprint64', async () => {

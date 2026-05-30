@@ -52,7 +52,16 @@ describe('Round-trip: 100-event fact load', function() {
 				Readable.from(records, { objectMode: true }),
 				TABLE,
 				['id'],
-				(err) => err ? reject(err) : resolve(),
+				(err, tableInfo) => {
+					if (err) return reject(err);
+					try {
+						expect(tableInfo, 'importFact must return a result object').to.exist;
+						expect(tableInfo.count, 'count must equal staging row count').to.equal(100);
+						resolve();
+					} catch (e) {
+						reject(e);
+					}
+				},
 				tableDef
 			);
 		});
