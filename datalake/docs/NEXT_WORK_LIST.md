@@ -100,7 +100,7 @@ All needed before the Step 9 CI workflows can authenticate.
 External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
 
 ### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
-"Without an `offload_to_datalake.js` bot, nothing in production runs this library yet." Connector library is done (modulo bugs in §1d); the bot in `general/` to consume it is not started.
+Without this bot in `general/`, nothing runs in production. The connector library is complete for fact tables; dim tables additionally need `importDimension` and `linkDimensions` (see §3 Dimension code paths). Shortest deployment path: write the bot, run it against `supplier-catalog-dim` first (fact-only queue), then add dim queue support once `importDimension` is implemented.
 
 ### [Gap] BUILD_PLAN risk #5 — Operational monitors / alerts
 CloudWatch alarms, Datadog monitors, dashboards, PagerDuty services watching Redshift pipeline health need Databricks counterparts before Redshift retires. Inventory not started.
@@ -129,8 +129,10 @@ Out of scope. Reopen when explicitly scoped.
 ### [Defer] `streamToTable` (non-S3 direct-write path)
 [datalake/lib/connect.js:349-351](../lib/connect.js#L349-L351) throws. Postgres has a non-Redshift branch that uses direct COPY; datalake doesn't need it — all paths go through S3 staging. Keep as `throw` for interface parity.
 
-### [Defer] Dimension code paths
-[lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250): `importDimension`, `insertMissingDimensions`, `linkDimensions` all `throw new Error('not yet implemented')`. BUILD_PLAN Step 7 covers fact tables only; `bypassSlowlyChangingDimensions: true`. Reopen if dim coverage is required.
+### [Defer] Dimension code paths — `importDimension` and `linkDimensions`
+`insertMissingDimensions` is a deliberate no-op (see §1e and porting-decisions.md). `importDimension` and `linkDimensions` are still unimplemented stubs. BUILD_PLAN Step 7 covers fact tables only; `bypassSlowlyChangingDimensions: true` in all configs.
+
+**This is not indefinitely deferrable.** The `dim` and `item-quantity-dim` queues contain both dim and fact tables — any batch will fail at `importDimension` for dim rows. Only `supplier-catalog-dim` is entirely fact-table (`f_item_change_event` only) and can be deployed today without this work. Reopen when deploying either of the other two queues.
 
 ### [Defer] `alterColumnType` wiring
 Per [porting-decisions.md](porting-decisions.md): postgres also doesn't wire it. Defer indefinitely; only file a ticket if a dw_fields type evolution actually needs it.
@@ -151,9 +153,16 @@ BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpoi
 
 ## Quick-action triage for next session
 
-All §1d correctness bugs are fixed. If picking up cold, the highest-value-per-effort items are likely:
+All §1d correctness bugs are fixed. §1e doc items are addressed. If picking up cold, the items are ordered by deployment readiness:
 
-1. **Step 8 smoke test** — `test/unit/load.smoke.test.js` missing; small, locks in the bot-side wiring contract.
-2. **§1e doc note** — dim `createTable` adds SCD2 columns (`_startdate/_enddate/_current`) with no writer yet; either add an inline comment or accept that BUILD_PLAN is sufficient context.
+**To deploy `supplier-catalog-dim` (fact-only, can go now):**
+1. Write `offload_to_datalake.js` bot in `general/` — the library is ready; nothing runs without it.
+2. Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.
 
-Heavier items (Step 9 CI workflows, Step 12 equivalence, offload_to_datalake.js bot) are blocked on infra/fixture inputs and are better picked up when those are ready.
+**To deploy `dim` and `item-quantity-dim` (blocked on dim code):**
+3. Implement `importDimension` — bypassSCD dim upsert; same S3-staging + `read_files()` + MERGE shape as `importFact`, no SCD2 logic needed.
+4. Investigate `linkDimensions` — postgres has a `hashedSurrogateKeys` branch (line 810) but does not no-op entirely; assess what's actually needed before implementing.
+
+**Blocked on infra/fixture inputs (don't pull forward):**
+- Step 9 CI catalog cloning workflows
+- Step 12 equivalence script (formal DoD gate)
