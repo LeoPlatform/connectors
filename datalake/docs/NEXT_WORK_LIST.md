@@ -67,7 +67,9 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 - **[Doc addressed] `_startdate/_enddate/_current` columns are never written.** `createTable` adds these for dim tables to mirror the postgres schema, but SCD is bypassed in all production configs (`bypassSlowlyChangingDimensions=true`, no `scds` fields in any `dw_fields`). These columns will be null until a dim upsert path is built. Clarified in the `sql.js` JSDoc.
 
-- **[Gap] `importDimension` and `linkDimensions` are not yet implemented.** `importDimension` needs the basic dim-upsert path (fact-style MERGE without SCD — `bypassSlowlyChangingDimensions=true` is guaranteed). `linkDimensions` needs the FK-update query logic from postgres (no `hashedSurrogateKeys` shortcut applies). Until these are built, any batch containing dim tables will fail at `importDimension`. File a task before running a dim queue through this connector.
+- ~~**[Gap] `importDimension` not yet implemented.**~~ ✓ Implemented — bypassSCD dim upsert using shared `stageToS3` helper + `sql.mergeDim`. Sentinel values for new rows match postgres bypass path (`_current=true`, `_startdate='1900-01-01 00:00:00'`, `_enddate='9999-01-01 00:00:00'`). `__leo_delete__` markers filtered from staging path; soft-close deferred (no dim queue generates deletes under `bypassSlowlyChangingDimensions=true`). 13 unit tests added. `importFact` refactored to share the same `stageToS3` helper with no behavior change. `linkDimensions` still unimplemented — see item below.
+
+- **[Gap] `linkDimensions` not yet implemented.** FK-update query logic from postgres (no `hashedSurrogateKeys` shortcut applies). Needed before `dim`/`item-quantity-dim` queues can fully run. Assess `postgres/lib/dwconnect.js:810` before implementing.
 
 ---
 
@@ -160,7 +162,7 @@ All §1d correctness bugs are fixed. §1e doc items are addressed. If picking up
 2. Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.
 
 **To deploy `dim` and `item-quantity-dim` (blocked on dim code):**
-3. Implement `importDimension` — bypassSCD dim upsert; same S3-staging + `read_files()` + MERGE shape as `importFact`, no SCD2 logic needed.
+3. ~~Implement `importDimension`~~ ✓ Done.
 4. Investigate `linkDimensions` — postgres has a `hashedSurrogateKeys` branch (line 810) but does not no-op entirely; assess what's actually needed before implementing.
 
 **Blocked on infra/fixture inputs (don't pull forward):**

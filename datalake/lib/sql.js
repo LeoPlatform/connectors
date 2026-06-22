@@ -182,4 +182,70 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
 	].join('\n');
 }
 
-module.exports = { mapType, createTable, alterAddColumn, alterColumnType, mergeFact };
+/**
+ * Build a MERGE INTO statement for dimension tables (bypassSlowlyChangingDimensions=true).
+ *
+ * MATCHED: update data columns + _auditdate only. SCD audit cols (_startdate/_enddate/_current)
+ *          are left untouched — they preserve the target row's original values.
+ * NOT MATCHED: insert nks + data cols + _auditdate from staging; hard-code sentinel values
+ *              that match the postgres bypass path:
+ *                _current   = true
+ *                _startdate = '1900-01-01 00:00:00'
+ *                _enddate   = '9999-01-01 00:00:00'
+ *
+ * Sentinel values mirror connectors/postgres/lib/dwconnect.js:638-642 so that the
+ * Step 12 equivalence check (MD5 row-level diff vs Redshift) passes for new dim rows.
+ * "active current row" consumers filter on _current=true and _enddate='9999-01-01' —
+ * diverging from these values would silently break every downstream join.
+ *
+ * @param {string} target           - fully-qualified target table
+ * @param {string} staging          - staging expression (inline read_files() SELECT)
+ * @param {string[]} nks            - natural key column names
+ * @param {string[]} dataCols       - non-NK, non-audit data columns
+ * @param {object} columnConfig     - audit column name overrides
+ * @param {string|null} clusterKey  - column used for MERGE pruning filter (or null)
+ * @param {string|null} naturalKeyFilter - literal value for WHERE target.clusterKey >= ? (or null)
+ * @param {function} escapeId       - identifier quoting function
+ * @returns {string} MERGE SQL
+ */
+function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, escapeId) {
+	const ad = escapeId(columnConfig._auditdate);
+
+	const nkMatch = nks.map(k => `target.${escapeId(k)} = staging.${escapeId(k)}`).join(' AND ');
+
+	let clusterPredicate = '';
+	if (clusterKey != null && naturalKeyFilter != null) {
+		clusterPredicate = `\n  AND target.${escapeId(clusterKey)} >= ${naturalKeyFilter}`;
+	}
+
+	// MATCHED: update only data cols + _auditdate; leave _startdate/_enddate/_current intact.
+	const updateSets = dataCols.map(c => `${escapeId(c)} = COALESCE(staging.${escapeId(c)}, target.${escapeId(c)})`);
+	updateSets.push(`${ad} = staging.${ad}`);
+
+	// NOT MATCHED: staging provides nks + dataCols + _auditdate; sentinel values hard-coded.
+	const payloadCols = [...nks, ...dataCols, columnConfig._auditdate];
+	const insertCols = [
+		...payloadCols.map(c => escapeId(c)),
+		escapeId(columnConfig._current),
+		escapeId(columnConfig._startdate),
+		escapeId(columnConfig._enddate),
+	].join(', ');
+	const insertVals = [
+		...payloadCols.map(c => `staging.${escapeId(c)}`),
+		'true',
+		"'1900-01-01 00:00:00'",
+		"'9999-01-01 00:00:00'",
+	].join(', ');
+
+	return [
+		`MERGE INTO ${target} AS target`,
+		`USING ${staging} AS staging`,
+		`ON (${nkMatch}${clusterPredicate})`,
+		`WHEN MATCHED THEN UPDATE SET`,
+		`  ${updateSets.join(',\n  ')}`,
+		`WHEN NOT MATCHED THEN INSERT (${insertCols})`,
+		`VALUES (${insertVals})`,
+	].join('\n');
+}
+
+module.exports = { mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim };

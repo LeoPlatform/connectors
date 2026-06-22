@@ -141,7 +141,7 @@ module.exports = function(dbconfig, options) {
 		const schema = dbconfig.schema || 'default';
 		const qualifiedTable = `${catalog}.${schema}.${client.escapeId(table).replace(/`/g, '')}`;
 
-		// Stream-level delete handler: collect __leo_delete__ records separately.
+		// Collect __leo_delete__ records; non-delete records flow through to staging.
 		const deleteRecords = [];
 		const dataStream = ls.through((obj, done, _push) => {
 			if (obj.__leo_delete__) {
@@ -152,116 +152,169 @@ module.exports = function(dbconfig, options) {
 			}
 		});
 
-		client.describeTable(table, schema).then(tableFields => {
-			const allCols = tableFields.map(f => f.column_name);
-			const columnDefs = tableFields.map(f => ({ name: f.column_name, type: reconstructType(f) }));
-			const fieldLookup = tableFields.reduce((acc, f) => {
-				acc[f.column_name.toLowerCase()] = f;
-				return acc;
-			}, {});
-			const nks = ids;
-			const auditCol = columnConfig._auditdate;
-			const delCol = columnConfig._deleted;
+		const nks = ids;
+		const auditCol = columnConfig._auditdate;
+		const delCol = columnConfig._deleted;
+		const clusterKey = tableDef.clusterKey || null;
 
-			// Compute natural-key lower bound for MERGE pruning (hashedSurrogateKeys path).
-			// clusterKey from tableDef takes precedence; fall back to first NK.
-			const clusterKey = tableDef.clusterKey || null;
+		// Resolve the surrogate-key column once — tableDef.structure is fixed
+		// for the duration of this importFact call.
+		const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
+			const f = tableDef.structure[k];
+			return f === 'sk' || (f && f.sk);
+		});
+
+		const auditdate = dwClient.auditdate;
+		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
+
+		const enrichFn = obj => {
+			if (skField) {
+				obj[skField] = fingerprint64(nks.map(k => obj[k]));
+			}
+			obj[auditCol] = auditdateValue;
+			obj[delCol] = false;
+		};
+
+		// importFact owns the staging-path identifier — same pattern as postgres'
+		// importFact owning qualifiedStagingTable. stageToS3 computes it and passes
+		// it back; no back-channel through shared client state.
+		stageToS3(client, table, [stream, dataStream], dbconfig, enrichFn, auditdate, (err, staged) => {
+			if (err) return callback(err);
+
+			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
+			const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 			const pruneCol = clusterKey || (ids.length === 1 ? ids[0] : null);
+			let stagingCount = 0;
 
-			// Resolve the surrogate-key column once — tableDef.structure is fixed
-			// for the duration of this importFact call, so the lookup belongs
-			// outside the per-row closure.
-			const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
-				const f = tableDef.structure[k];
-				return f === 'sk' || (f && f.sk);
-			});
+			// Count sourced from staging rows, not MERGE result (which returns metrics,
+			// not row count). Mirrors postgres's totalRecords = results[0].cnt.
+			const mergeCallback = (mergeErr) =>
+				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
-			// Enrich each row: add auditdate, _deleted=false, compute surrogate key.
-			const enrichedStream = ls.through((obj, done) => {
-				if (skField) {
-					const nkValues = nks.map(k => obj[k]);
-					obj[skField] = fingerprint64(nkValues);
-				}
-				obj[auditCol] = dwClient.auditdate ? dwClient.auditdate.replace(/'/g, '') : naiveIsoNow();
-				obj[delCol] = false;
-				done(null, obj);
-			});
+			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, done), {}, (flushErr) => {
+				if (flushErr) return mergeCallback(flushErr);
+				let naturalKeyFilter = null;
 
-			// importFact owns the staging-path identifier — same pattern as
-			// postgres' importFact owning `qualifiedStagingTable`. Compute it
-			// here once, pass it down to streamToTableFromS3 for the upload, and
-			// reuse it locally for the MERGE SELECT and the cleanup. No back-
-			// channel through shared client state; safe under load.js's
-			// parallelLimit(tasks, 10).
-			client.ensureStagingLocation().then(() => {
-				const stagingPath = client.stagingS3Path(table, dwClient.auditdate);
-
-				const stageStream = client.streamToTableFromS3(table, {
-					columnDefs: columnDefs,
-					s3Path: stagingPath,
-				});
-
-				ls.pipe(stream, dataStream, enrichedStream, stageStream, err => {
-					if (err) return callback(err);
-
-					// Build an inline read_files(...) SELECT for the staged S3 file.
-					// Sessions are pooled, so the MIN and MERGE queries may run on
-					// different acquires — a session-scoped temp view from one acquire
-					// is not guaranteed visible to the next. Inlining avoids that.
-					const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
-					const stagingClause = `(\n${stagingSelect}\n)`;
-
-					const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
-					const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-					let stagingCount = 0;
-
-					// Count sourced from staging rows, not MERGE result (which returns metrics,
-					// not row count). Mirrors postgres's totalRecords = results[0].cnt.
-					const mergeCallback = (mergeErr) =>
-						cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
-
-					withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, dwClient.auditdate, done), {}, (flushErr) => {
-						if (flushErr) return mergeCallback(flushErr);
-						let naturalKeyFilter = null;
-
-						if (pruneCol) {
-							const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-							const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
-							withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-								if (qErr) {
-									logger.error('MIN query failed after retries, aborting importFact:', qErr);
-									return mergeCallback(qErr);
-								}
-								if (results && results[0]) {
-									stagingCount = results[0].cnt || 0;
-									if (results[0].minval != null) {
-										naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
-									}
-								}
-								withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
-							});
-						} else {
-							const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-							client.query(countSql, [], (countErr, countResults) => {
-								if (!countErr && countResults && countResults[0]) {
-									stagingCount = countResults[0].cnt || 0;
-								}
-								withRetry(done => doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
-							});
+				if (pruneCol) {
+					const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+					const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
+					withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
+						if (qErr) {
+							logger.error('MIN query failed after retries, aborting importFact:', qErr);
+							return mergeCallback(qErr);
 						}
+						if (results && results[0]) {
+							stagingCount = results[0].cnt || 0;
+							if (results[0].minval != null) {
+								naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+							}
+						}
+						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
 					});
-				});
-			}).catch(callback);
-		}).catch(callback);
+				} else {
+					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+					client.query(countSql, [], (countErr, countResults) => {
+						if (!countErr && countResults && countResults[0]) {
+							stagingCount = countResults[0].cnt || 0;
+						}
+						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
+					});
+				}
+			});
+		});
 	};
 
-	// ── Dim stubs (surface expected by load.js:224-316) ────────────────────
-	// importDimension: basic dim upsert not yet implemented (see NEXT_WORK_LIST.md §1e).
-	// bypassSlowlyChangingDimensions=true in all bot configs, so the scds arg will
-	// always be empty — but the upsert path itself still needs to be built before
-	// any dim queue runs through this connector.
-	client.importDimension = function(stream, table, sk, nk, scds, callback) {
-		callback(new Error('importDimension not yet implemented for Databricks connector'));
+	// ── Dim upsert ─────────────────────────────────────────────────────────
+	/**
+	 * Stage a dimension stream to S3, then MERGE INTO the Delta dim table.
+	 * bypassSlowlyChangingDimensions=true in all production configs — no SCD2 logic.
+	 * Sentinel values for new rows match the postgres bypass path:
+	 *   _current=true, _startdate='1900-01-01 00:00:00', _enddate='9999-01-01 00:00:00'.
+	 * Signature matches connectors/postgres/lib/dwconnect.js:363 so load.js works unchanged.
+	 */
+	client.importDimension = function(stream, table, sk, nk, scds, callback, tableDef) {
+		const nks = Array.isArray(nk) ? nk : [nk];
+		tableDef = tableDef || {};
+
+		const catalog = dbconfig.catalog;
+		const schema = dbconfig.schema || 'default';
+		const qualifiedTable = `${catalog}.${schema}.${client.escapeId(table).replace(/`/g, '')}`;
+
+		// Filter out __leo_delete__ markers: bypassSCD dims have no row-close logic
+		// in this connector, so delete markers are discarded rather than staged as
+		// data rows (which would be silent data corruption). Soft-closing
+		// (_enddate=auditdate WHERE _current=true) is the postgres bypass-path
+		// behavior but is deferred here — no dim queue currently generates deletes
+		// under bypassSlowlyChangingDimensions=true.
+		const dataStream = ls.through((obj, done) => {
+			if (obj.__leo_delete__) {
+				done();
+			} else {
+				done(null, obj);
+			}
+		});
+
+		const auditCol = columnConfig._auditdate;
+		const clusterKey = tableDef.clusterKey || null;
+
+		const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
+			const f = tableDef.structure[k];
+			return f === 'sk' || (f && f.sk);
+		});
+
+		const auditdate = dwClient.auditdate;
+		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
+
+		const enrichFn = obj => {
+			if (skField) {
+				obj[skField] = fingerprint64(nks.map(k => obj[k]));
+			}
+			obj[auditCol] = auditdateValue;
+		};
+
+		stageToS3(client, table, [stream, dataStream], dbconfig, enrichFn, auditdate, (err, staged) => {
+			if (err) return callback(err);
+
+			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
+			// _deleted is not an audit column for dims; _current/_startdate/_enddate
+			// are managed by the MERGE SQL (sentinel values on INSERT; preserved on UPDATE).
+			const auditCols = new Set([auditCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
+			const pruneCol = clusterKey || (nks.length === 1 ? nks[0] : null);
+			let stagingCount = 0;
+
+			const mergeCallback = (mergeErr) =>
+				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
+
+			let naturalKeyFilter = null;
+
+			if (pruneCol) {
+				const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+				const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
+				withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
+					if (qErr) {
+						logger.error('MIN query failed after retries, aborting importDimension:', qErr);
+						return mergeCallback(qErr);
+					}
+					if (results && results[0]) {
+						stagingCount = results[0].cnt || 0;
+						if (results[0].minval != null) {
+							naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+						}
+					}
+					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
+				});
+			} else {
+				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+				client.query(countSql, [], (countErr, countResults) => {
+					if (!countErr && countResults && countResults[0]) {
+						stagingCount = countResults[0].cnt || 0;
+					}
+					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
+				});
+			}
+		});
 	};
 
 	// insertMissingDimensions: intentional no-op. Under hashedSurrogateKeys=true,
@@ -337,8 +390,42 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 	async.series(tasks, callback);
 }
 
-function doMerge(client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
-	const mergeSql = sql.mergeFact(
+// Shared S3-staging pipeline: describeTable → enrich rows → stage to S3 → build staging clause.
+// Both importFact and importDimension call this; they differ only in their enrichFn and merge SQL.
+// pipelinePre is an array of streams to pipe before the enrichedStream, e.g. [rawStream] for dims
+// or [rawStream, filterStream] for facts.
+function stageToS3(client, table, pipelinePre, dbconfig, enrichFn, auditdate, callback) {
+	const schema = dbconfig.schema || 'default';
+
+	client.describeTable(table, schema).then(tableFields => {
+		const allCols = tableFields.map(f => f.column_name);
+		const columnDefs = tableFields.map(f => ({ name: f.column_name, type: reconstructType(f) }));
+		const fieldLookup = tableFields.reduce((acc, f) => {
+			acc[f.column_name.toLowerCase()] = f;
+			return acc;
+		}, {});
+
+		const enrichedStream = ls.through((obj, done) => {
+			enrichFn(obj);
+			done(null, obj);
+		});
+
+		client.ensureStagingLocation().then(() => {
+			const stagingPath = client.stagingS3Path(table, auditdate);
+			const s3Stage = client.streamToTableFromS3(table, { columnDefs, s3Path: stagingPath });
+
+			ls.pipe(...pipelinePre, enrichedStream, s3Stage, err => {
+				if (err) return callback(err);
+				const stagingSelect = client.buildStagingSelect(stagingPath.uri, columnDefs);
+				const stagingClause = `(\n${stagingSelect}\n)`;
+				callback(null, { stagingPath, stagingClause, allCols, fieldLookup });
+			});
+		}).catch(callback);
+	}).catch(callback);
+}
+
+function doMerge(mergeSqlFn, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
+	const mergeSql = mergeSqlFn(
 		qualifiedTable,
 		stagingClause,
 		nks,

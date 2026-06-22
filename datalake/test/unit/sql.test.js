@@ -1,7 +1,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { mapType, createTable, alterAddColumn, alterColumnType, mergeFact } = require('../../lib/sql.js');
+const { mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim } = require('../../lib/sql.js');
 
 const escapeId = name => '`' + String(name).toLowerCase().replace(/`/g, '') + '`';
 
@@ -198,6 +198,65 @@ describe('sql.js', () => {
 
 		it('handles composite natural keys', () => {
 			const m = mergeFact('cat.sch.f_test', '`staging_f_test`', ['a', 'b'], ['c'], columnConfig, null, null, escapeId);
+			expect(m).to.include('target.`a` = staging.`a` AND target.`b` = staging.`b`');
+		});
+	});
+
+	describe('mergeDim', () => {
+		const nks = ['retailer_id'];
+		const dataCols = ['name', 'status'];
+
+		it('emits MERGE INTO ... USING ... ON', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			expect(m).to.include('MERGE INTO cat.sch.d_account AS target');
+			expect(m).to.include('USING `staging_d_account` AS staging');
+			expect(m).to.include('ON (target.`retailer_id` = staging.`retailer_id`)');
+		});
+
+		it('MATCHED UPDATE includes data cols with COALESCE and _auditdate', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			expect(m).to.include('WHEN MATCHED THEN UPDATE SET');
+			expect(m).to.include('COALESCE(staging.`name`, target.`name`)');
+			expect(m).to.include('`_auditdate` = staging.`_auditdate`');
+		});
+
+		it('MATCHED UPDATE does NOT touch _startdate, _enddate, or _current', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			// Split on the UPDATE SET block to check only the matched section
+			const matchedBlock = m.split('WHEN NOT MATCHED')[0];
+			expect(matchedBlock).to.not.include('_startdate');
+			expect(matchedBlock).to.not.include('_enddate');
+			expect(matchedBlock).to.not.include('_current');
+		});
+
+		it('NOT MATCHED INSERT uses sentinel values for _current/_startdate/_enddate', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			expect(m).to.include('WHEN NOT MATCHED THEN INSERT');
+			expect(m).to.include('`_current`');
+			expect(m).to.include('`_startdate`');
+			expect(m).to.include('`_enddate`');
+			expect(m).to.include("true");
+			expect(m).to.include("'1900-01-01 00:00:00'");
+			expect(m).to.include("'9999-01-01 00:00:00'");
+		});
+
+		it('does NOT set _deleted in any clause', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			expect(m).to.not.include('_deleted');
+		});
+
+		it('adds clusterKey filter to ON clause when naturalKeyFilter provided', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, 'retailer_id', '1000', escapeId);
+			expect(m).to.include('AND target.`retailer_id` >= 1000');
+		});
+
+		it('omits clusterKey filter when naturalKeyFilter is null', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, 'retailer_id', null, escapeId);
+			expect(m).to.not.include('>=');
+		});
+
+		it('handles composite natural keys', () => {
+			const m = mergeDim('cat.sch.d_test', '`staging_d_test`', ['a', 'b'], ['c'], columnConfig, null, null, escapeId);
 			expect(m).to.include('target.`a` = staging.`a` AND target.`b` = staging.`b`');
 		});
 	});
