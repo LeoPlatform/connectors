@@ -138,6 +138,34 @@ Port the schema-mutation half of `connectors/postgres/lib/dwconnect.js` — on t
 - Also stub `importDimension`, `insertMissingDimensions`, `getDimensionColumn`, `linkDimensions` — these are surface methods `load.js` calls (verified at `connectors/common/datawarehouse/load.js:224–316`); initial impl can throw on unsupported paths and be filled as fact/dim coverage expands.
 **Done when:** Unit test (stubbed `connect` client): empty schema emits expected CREATE TABLE for `d_order`; cached schema missing one column emits one ADD COLUMN; unchanged schema emits no DDL.
 
+#### Step 6 extension — `linkDimensions` (pending)
+
+`load.js:305` calls `linkDimensions` for every table whose `dw_fields` contains at least one `"dimension"` field. This includes ALL tables in all three queues (`dim`, `quantity`, `supplier_catalog`) — not just dim tables. The stub must be replaced before any queue can deploy.
+
+**Approach: pre-stage enrichment; `linkDimensions` becomes a no-op.**
+`FARMFINGERPRINT64()` is Redshift SQL with no Databricks equivalent. Compute FK surrogate keys in Node.js inside the `importFact`/`importDimension` enrichFns, write them into the staging CSV before the MERGE, then make `linkDimensions` a structural no-op — same argument as `insertMissingDimensions`. Document in `porting-decisions.md`.
+
+**Two FK types:**
+
+| Type | Example | Destination column | Enrichment computation |
+|---|---|---|---|
+| Entity FK | `item_id` → `d_item` | `d_item` (BIGINT) | `fingerprint64([obj[sourceField]])` — same module as row SK |
+| Date FK | timestamp → `datetime` | `d_…_date` (INT) | `Math.floor((Date.UTC(y, m-1, d) - Date.UTC(1400, 0, 1)) / 86400000) + 10000` |
+| Time FK | timestamp → `datetime` | `d_…_time` (INT) | `h*3600 + m*60 + s + 10000` |
+
+Parse `[y,m,d]` and `[h,m,s]` by splitting the stored wall-clock string on space then `-`/`:`. Use `Date.UTC` — never `Date.parse` on a bare local string. Verified: reference date/time → 10000 ✓, 14:30:45 → 62245 ✓, 1-day gap = 86400000 ms ✓.
+
+**Null coalesce:** Redshift `FARMFINGERPRINT64(NULL)` propagates NULL → `COALESCE(..., 1)` = `1`. JS `fingerprint64` coerces null to `''` and hashes it (result: `-7286425919675154353` ≠ `1`). In the enrichFn, check `obj[source] == null` and write `'1'` explicitly; non-null values (including empty string) hash normally.
+
+**Multi-field NK:** No `"on"` field exists in any of the 31 in-scope dw_fields files across all three groups. Multi-field NK dimension links do not occur in production — implement single-field path only.
+
+**Files to change:**
+1. `lib/sql.js` — `createTable`: emit a FK column per `field.dimension` entry (BIGINT for entity, INT for date/time)
+2. `lib/dwconnect.js` — `changeTableStructure`: same ADD COLUMN check (FK columns must exist before `describeTable` includes them in `allCols` → staging CSV)
+3. `lib/dwconnect.js` — `importFact` and `importDimension` enrichFns: compute FK values for each `field.dimension` entry before writing to CSV
+4. `lib/dwconnect.js` — `linkDimensions`: replace error-throw with `done(null)` + comment
+5. `docs/porting-decisions.md`: add `linkDimensions` as an intentional no-op (work moved to enrichFn)
+
 ### Step 7 — `lib/dwconnect.js`: `importFact()` hot path
 
 **Caller context worth knowing first:** `general/lib/offload_to_redshift.js:165-247` overrides `client.importFact` — overriding the canonical implementation at `connectors/postgres/lib/dwconnect.js:128` which itself calls `client.streamToTable(...)` for the postgres branch and `client.streamToTableFromS3(...)` for the Redshift branch (`dwconnect.js:204` / `:434`). The S3-staging implementation lives at `connectors/postgres/lib/connect.js:576-…` and is the **primary in-repo reference** for the CSV+S3 staging pattern. (This is in-checkout only after rebasing onto the `development` branch — the package version `leo-connector-postgres@4.0.24-rc` that the Redshift loader actually consumes publishes from `development`, not `master`; per Grant Robinson, all pre-AWS-SDK-v3 connector work ships from `development`.) `item-dw/bots/redshift-loader/redshift-loader.ts:88-96, 582-604` is a confirming second reference — same `fast-csv` + `nonNull` + `ls.toS3` shape, useful for cross-checking parameter choices.
