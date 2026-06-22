@@ -157,13 +157,45 @@ BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpoi
 
 All §1d correctness bugs are fixed. §1e doc items are addressed. If picking up cold, the items are ordered by deployment readiness:
 
-**To deploy `supplier-catalog-dim` (fact-only, can go now):**
+**All three queues are blocked on `linkDimensions` (see item 4).** Every `supplier_catalog` fact table has `dimension` fields (`d_item`, `d_account`, `datetime`), so `load.js` calls `linkDimensions` for them too — and it currently throws. The "supplier-catalog-dim can go now" framing was wrong; that queue is blocked equally.
+
+**Once `linkDimensions` is resolved:**
 1. Write `offload_to_datalake.js` bot in `general/` — the library is ready; nothing runs without it.
 2. Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.
 
-**To deploy `dim` and `item-quantity-dim` (blocked on dim code):**
+**Current blocker (all queues):**
 3. ~~Implement `importDimension`~~ ✓ Done.
-4. Investigate `linkDimensions` — postgres has a `hashedSurrogateKeys` branch (line 810) but does not no-op entirely; assess what's actually needed before implementing.
+4. Implement `linkDimensions` support. Investigation complete — findings below.
+
+### `linkDimensions` — assessment (2026-06-22)
+
+**Not a no-op.** It populates FK surrogate-key columns (e.g., `d_item`, `d_account`, datetime surrogate pairs) in fact AND dimension tables after the MERGE. `load.js:305` calls it for every table with `links.length > 0`. All tables in every queue qualify.
+
+**Approach: pre-stage enrichment, then no-op `linkDimensions`.**
+`farmFingerPrint64()` is Redshift SQL; there is no Databricks equivalent that produces the same bit-values. The FK hash must be computed in Node.js (same `fingerprint64` module used for row SKs) and written into the staging CSV before the MERGE — exactly like `importFact` already does for the row's own SK. Once the staging CSV contains the FK columns, `linkDimensions` becomes a structural no-op (same argument as `insertMissingDimensions`). Document it in `porting-decisions.md`.
+
+**Two FK types — handle separately:**
+
+| Type | Source field example | Destination column | Computation |
+|---|---|---|---|
+| Entity FK | `item_id` → `d_item` | `d_item` (BIGINT) | `fingerprint64([obj[sourceField]])` |
+| Date/time FK | timestamp → `datetime` | `d_order_date_date` (INT) + `d_order_date_time` (INT) | Days since 1400-01-01 + 10000; seconds-since-midnight + 10000 |
+
+Entity FK is straightforward. Date/time FK is the high-risk part — the SQL arithmetic (`t.source::date - '1400-01-01'::date + 10000`, `EXTRACT(EPOCH FROM source::time) + 10000`) uses wall-clock semantics tied to the TIMESTAMP_NTZ posture. The JS equivalent must reproduce this bit-for-bit and must be verified against known Redshift output before shipping.
+
+**Files to change:**
+
+1. `lib/sql.js` — `createTable`: add a FK column per `field.dimension` entry (BIGINT for entity, INT for date/time pair)
+2. `lib/dwconnect.js` — `changeTableStructure`: same ADD COLUMN check (FK columns must exist in the Delta table before `describeTable` includes them in `allCols` → staging CSV)
+3. `lib/dwconnect.js` — `importFact` and `importDimension` enrichFns: compute FK values for each `field.dimension` entry before writing to CSV
+4. `lib/dwconnect.js` — `linkDimensions`: replace error-throw with `done(null)` + comment
+5. `docs/porting-decisions.md`: add `linkDimensions` as an intentional no-op (work moved to enrichFn)
+
+**Open questions to resolve before implementing:**
+
+- **Null coalesce discrepancy**: Redshift's `FARMFINGERPRINT64(NULL)` returns NULL, so `COALESCE(FARMFINGERPRINT64(t.source), 1)` = `1` when the source field is null. But `fingerprint64([null])` in Node.js returns a hash of `''` (not null, not 1). Match Redshift by checking `obj[source] == null` and outputting `'1'` in the enrichFn.
+- **Date/time arithmetic**: Verify that JS `Math.round((Date.parse(v) - Date.parse('1400-01-01T00:00:00Z')) / 86400000) + 10000` produces the same integer as Redshift's `date_col - '1400-01-01'::date + 10000` for the same wall-clock inputs. The non-redshift `EXTRACT(EPOCH FROM source::time)` branch (line 804 postgres) is what applies here — check it against Redshift's output with a known timestamp.
+- **Multi-field NK ordering**: If `link.source` is an array (multi-field NK dimension), the hash inputs must be ordered identically to the dimension's own SK. Check whether any in-scope table (all three queues) actually has a multi-NK dimension link — if none do, scope this out explicitly. The postgres hashed branch at line 811 only renders `farmFingerPrint64(t.${link.source})` as a scalar, which produces broken SQL for arrays, suggesting this combination may never exist in production.
 
 **Blocked on infra/fixture inputs (don't pull forward):**
 - Step 9 CI catalog cloning workflows
