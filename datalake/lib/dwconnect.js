@@ -256,14 +256,27 @@ module.exports = function(dbconfig, options) {
 	};
 
 	// ── Dim stubs (surface expected by load.js:224-316) ────────────────────
+	// importDimension: basic dim upsert not yet implemented (see NEXT_WORK_LIST.md §1e).
+	// bypassSlowlyChangingDimensions=true in all bot configs, so the scds arg will
+	// always be empty — but the upsert path itself still needs to be built before
+	// any dim queue runs through this connector.
 	client.importDimension = function(stream, table, sk, nk, scds, callback) {
 		callback(new Error('importDimension not yet implemented for Databricks connector'));
 	};
 
+	// insertMissingDimensions: intentional no-op. Under hashedSurrogateKeys=true,
+	// postgres/lib/dwconnect.js:680 immediately calls callback(null) for the same
+	// reason — hashed surrogate keys make stub placeholder rows unnecessary, because
+	// any FK reference that arrives before its dimension row will compute the same
+	// hash and merge correctly when the dim row appears. This connector always uses
+	// hashedSurrogateKeys, so this is a deliberate no-op, not a deferred feature.
 	client.insertMissingDimensions = function(usedTables, tableConfig, tableSks, tableNks, callback) {
-		callback(new Error('insertMissingDimensions not yet implemented for Databricks connector'));
+		callback(null);
 	};
 
+	// linkDimensions: FK-update queries not yet implemented (see NEXT_WORK_LIST.md §1e).
+	// Unlike insertMissingDimensions, postgres does real work here regardless of
+	// hashedSurrogateKeys — no no-op shortcut applies.
 	client.linkDimensions = function(table, links, nk, done) {
 		done(new Error('linkDimensions not yet implemented for Databricks connector'));
 	};

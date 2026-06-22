@@ -59,11 +59,15 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 - ~~**[Bug] `count` returned to the orchestrator is wrong.**~~ ✓ Fixed — `stagingCount` captured from MIN query's `cnt` (pruneCol path) or a separate `SELECT CAST(COUNT(*) AS INT)` (no-pruneCol path); `doMerge` simplified to `client.query(mergeSql, [], callback)`. Unit-tested on both paths. Integration-tested: `loads 100 records via importFact` now asserts `tableInfo.count === 100` and passes against live Databricks.
 
-- ~~**[Doc] Outdated `streamToTableFromS3` comment.**~~ ✓ Done (commit pending) — was actually in [dwconnect.js:207-209](../lib/dwconnect.js#L207-L209), not connect.js. Updated the rationale to "Sessions are pooled, so the MIN and MERGE queries may run on different acquires — a session-scoped temp view from one acquire is not guaranteed visible to the next. Inlining avoids that."
+- ~~**[Doc] Outdated `streamToTableFromS3` comment.**~~ ✓ Done — was actually in [dwconnect.js:207-209](../lib/dwconnect.js#L207-L209), not connect.js. Updated the rationale to "Sessions are pooled, so the MIN and MERGE queries may run on different acquires — a session-scoped temp view from one acquire is not guaranteed visible to the next. Inlining avoids that."
 
-### 1e. Remaining documentation drift
+### 1e. Remaining dimension gaps
 
-- **[Doc] Dim path: `createTable` adds SCD2 cols, `importDimension` is a stub.** [datalake/lib/dwconnect.js:240-250](../lib/dwconnect.js#L240-L250) and [lib/sql.js:101-106](../lib/sql.js#L101-L106). Known defer (BUILD_PLAN Step 7 is fact-only), but a reader of the schema will see `_startdate/_enddate/_current` columns with no writer — surprise factor. Either document inline or accept that the BUILD_PLAN doc is sufficient.
+- **[Fixed] `insertMissingDimensions` was throwing instead of no-op.** Under `hashedSurrogateKeys=true`, `postgres/lib/dwconnect.js:680` immediately calls `callback(null)` — stub placeholder rows aren't needed because any FK reference computes the same hash and merges correctly when the dim row arrives. The datalake stub was incorrectly throwing. Fixed: now `callback(null)` with an explanatory comment. See [porting-decisions.md](porting-decisions.md).
+
+- **[Doc addressed] `_startdate/_enddate/_current` columns are never written.** `createTable` adds these for dim tables to mirror the postgres schema, but SCD is bypassed in all production configs (`bypassSlowlyChangingDimensions=true`, no `scds` fields in any `dw_fields`). These columns will be null until a dim upsert path is built. Clarified in the `sql.js` JSDoc.
+
+- **[Gap] `importDimension` and `linkDimensions` are not yet implemented.** `importDimension` needs the basic dim-upsert path (fact-style MERGE without SCD — `bypassSlowlyChangingDimensions=true` is guaranteed). `linkDimensions` needs the FK-update query logic from postgres (no `hashedSurrogateKeys` shortcut applies). Until these are built, any batch containing dim tables will fail at `importDimension`. File a task before running a dim queue through this connector.
 
 ---
 
@@ -147,9 +151,9 @@ BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpoi
 
 ## Quick-action triage for next session
 
-If picking up cold, the highest-value-per-effort items are likely:
+All §1d correctness bugs are fixed. If picking up cold, the highest-value-per-effort items are likely:
 
-1. **The three §1d bugs** (flushDeletes/MIN error swallowing, wrong `count`). All small, all real, all could mask production failures. Verify the `count` claim against actual `fetchAll()` output before fixing.
-2. **Step 8 smoke test** — small, locks in the bot-side contract.
+1. **Step 8 smoke test** — `test/unit/load.smoke.test.js` missing; small, locks in the bot-side wiring contract.
+2. **§1e doc note** — dim `createTable` adds SCD2 columns (`_startdate/_enddate/_current`) with no writer yet; either add an inline comment or accept that BUILD_PLAN is sufficient context.
 
-Heavier items (Step 9 CI workflows, Step 12 equivalence) are blocked on infra/fixture inputs and are better picked up when those are ready.
+Heavier items (Step 9 CI workflows, Step 12 equivalence, offload_to_datalake.js bot) are blocked on infra/fixture inputs and are better picked up when those are ready.

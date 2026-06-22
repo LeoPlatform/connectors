@@ -73,9 +73,11 @@ function colDef(name, rawType, escapeId) {
 /**
  * Generate CREATE TABLE IF NOT EXISTS DDL for a dw_fields table definition.
  * Always appends _auditdate TIMESTAMP_NTZ. Facts also get _deleted BOOLEAN;
- * dimensions instead get the SCD2 columns _startdate / _enddate / _current —
- * matching the dim/fact split in ../postgres/lib/dwconnect.js (createTable
- * branches at the `if (definition.isDimension)` block).
+ * dimensions instead get _startdate / _enddate / _current — mirrored from the
+ * postgres connector for schema parity (createTable branches at the same
+ * `if (definition.isDimension)` block). Note: SCD is bypassed in all production
+ * bot configs (bypassSlowlyChangingDimensions=true, no `scds` fields in any
+ * dw_fields), so these columns will be null until dim upsert is implemented.
  * Appends CLUSTER BY (clusterKey) when clusterKey is set.
  *
  * @param {string} qualifiedTable  - fully-qualified table name (catalog.schema.table)
