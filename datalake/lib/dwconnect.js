@@ -20,6 +20,7 @@ module.exports = function(dbconfig, options) {
 		_current: '_current',
 		_deleted: '_deleted',
 		_enddate: '_enddate',
+		_rescued_data: '_rescued_data',
 		_startdate: '_startdate',
 		dimColumnTransform: (column, field) => {
 			field = field || {};
@@ -86,6 +87,10 @@ module.exports = function(dbconfig, options) {
 
 				if (!fieldLookup[columnConfig._auditdate]) {
 					missingFields[columnConfig._auditdate] = { type: 'timestamp' };
+				}
+
+				if (!fieldLookup[columnConfig._rescued_data]) {
+					missingFields[columnConfig._rescued_data] = { type: 'string' };
 				}
 
 				if (Object.keys(missingFields).length) {
@@ -182,7 +187,7 @@ module.exports = function(dbconfig, options) {
 			if (err) return callback(err);
 
 			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
-			const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+			const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 			const pruneCol = clusterKey || (ids.length === 1 ? ids[0] : null);
 			let stagingCount = 0;
@@ -279,7 +284,7 @@ module.exports = function(dbconfig, options) {
 			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
 			// _deleted is not an audit column for dims; _current/_startdate/_enddate
 			// are managed by the MERGE SQL (sentinel values on INSERT; preserved on UPDATE).
-			const auditCols = new Set([auditCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate]);
+			const auditCols = new Set([auditCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
 			const pruneCol = clusterKey || (nks.length === 1 ? nks[0] : null);
 			let stagingCount = 0;

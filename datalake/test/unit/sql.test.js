@@ -8,6 +8,7 @@ const escapeId = name => '`' + String(name).toLowerCase().replace(/`/g, '') + '`
 const columnConfig = {
 	_auditdate: '_auditdate',
 	_deleted: '_deleted',
+	_rescued_data: '_rescued_data',
 	_startdate: '_startdate',
 	_enddate: '_enddate',
 	_current: '_current',
@@ -87,16 +88,17 @@ describe('sql.js', () => {
 			expect(ddl).to.include('`archived` BOOLEAN');
 		});
 
-		it('dimension: appends _auditdate + SCD2 audit cols, no _deleted', () => {
+		it('dimension: appends _auditdate + SCD2 audit cols + _rescued_data, no _deleted', () => {
 			const ddl = createTable('cat.sch.d_order', dOrderDef, columnConfig, escapeId);
 			expect(ddl).to.include('`_auditdate` TIMESTAMP_NTZ');
 			expect(ddl).to.include('`_startdate` TIMESTAMP_NTZ');
 			expect(ddl).to.include('`_enddate` TIMESTAMP_NTZ');
 			expect(ddl).to.include('`_current` BOOLEAN');
+			expect(ddl).to.include('`_rescued_data` STRING');
 			expect(ddl).to.not.include('`_deleted`');
 		});
 
-		it('fact: appends _auditdate + _deleted, no SCD2 cols', () => {
+		it('fact: appends _auditdate + _deleted + _rescued_data, no SCD2 cols', () => {
 			const fOrderItemDef = {
 				isDimension: false,
 				structure: {
@@ -108,6 +110,7 @@ describe('sql.js', () => {
 			const ddl = createTable('cat.sch.f_order_item', fOrderItemDef, columnConfig, escapeId);
 			expect(ddl).to.include('`_auditdate` TIMESTAMP_NTZ');
 			expect(ddl).to.include('`_deleted` BOOLEAN');
+			expect(ddl).to.include('`_rescued_data` STRING');
 			expect(ddl).to.not.include('`_startdate`');
 			expect(ddl).to.not.include('`_enddate`');
 			expect(ddl).to.not.include('`_current`');
@@ -175,10 +178,18 @@ describe('sql.js', () => {
 			expect(m).to.include('COALESCE(staging.`channel`, target.`channel`)');
 		});
 
-		it('sets _deleted=false and _auditdate in UPDATE', () => {
+		it('sets _deleted=false, _auditdate, and _rescued_data in UPDATE', () => {
 			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
 			expect(m).to.include('`_deleted` = false');
 			expect(m).to.include('`_auditdate` = staging.`_auditdate`');
+			expect(m).to.include('`_rescued_data` = staging.`_rescued_data`');
+		});
+
+		it('includes _rescued_data in INSERT', () => {
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const insertBlock = m.split('WHEN NOT MATCHED')[1];
+			expect(insertBlock).to.include('`_rescued_data`');
+			expect(insertBlock).to.include('staging.`_rescued_data`');
 		});
 
 		it('emits WHEN NOT MATCHED INSERT', () => {
@@ -213,11 +224,19 @@ describe('sql.js', () => {
 			expect(m).to.include('ON (target.`retailer_id` = staging.`retailer_id`)');
 		});
 
-		it('MATCHED UPDATE includes data cols with COALESCE and _auditdate', () => {
+		it('MATCHED UPDATE includes data cols with COALESCE, _auditdate, and _rescued_data', () => {
 			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
 			expect(m).to.include('WHEN MATCHED THEN UPDATE SET');
 			expect(m).to.include('COALESCE(staging.`name`, target.`name`)');
 			expect(m).to.include('`_auditdate` = staging.`_auditdate`');
+			expect(m).to.include('`_rescued_data` = staging.`_rescued_data`');
+		});
+
+		it('NOT MATCHED INSERT includes _rescued_data from staging', () => {
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const insertBlock = m.split('WHEN NOT MATCHED')[1];
+			expect(insertBlock).to.include('`_rescued_data`');
+			expect(insertBlock).to.include('staging.`_rescued_data`');
 		});
 
 		it('MATCHED UPDATE does NOT touch _startdate, _enddate, or _current', () => {

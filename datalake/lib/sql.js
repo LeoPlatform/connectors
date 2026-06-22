@@ -111,6 +111,7 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 	} else {
 		cols.push(`${escapeId(columnConfig._deleted)} BOOLEAN`);
 	}
+	cols.push(`${escapeId(columnConfig._rescued_data)} STRING`);
 
 	let sql = `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA`;
 
@@ -155,6 +156,7 @@ function alterColumnType(qualifiedTable, columnName, newRawType, escapeId) {
 function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, escapeId) {
 	const ad = escapeId(columnConfig._auditdate);
 	const del = escapeId(columnConfig._deleted);
+	const rd = escapeId(columnConfig._rescued_data);
 
 	const nkMatch = nks.map(k => `target.${escapeId(k)} = staging.${escapeId(k)}`).join(' AND ');
 
@@ -166,8 +168,9 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
 	const updateSets = dataCols.map(c => `${escapeId(c)} = COALESCE(staging.${escapeId(c)}, target.${escapeId(c)})`);
 	updateSets.push(`${del} = false`);
 	updateSets.push(`${ad} = staging.${ad}`);
+	updateSets.push(`${rd} = staging.${rd}`);
 
-	const allCols = [...nks, ...dataCols, columnConfig._auditdate, columnConfig._deleted];
+	const allCols = [...nks, ...dataCols, columnConfig._auditdate, columnConfig._deleted, columnConfig._rescued_data];
 	const insertCols = allCols.map(c => escapeId(c)).join(', ');
 	const insertVals = allCols.map(c => `staging.${escapeId(c)}`).join(', ');
 
@@ -210,6 +213,7 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
  */
 function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, escapeId) {
 	const ad = escapeId(columnConfig._auditdate);
+	const rd = escapeId(columnConfig._rescued_data);
 
 	const nkMatch = nks.map(k => `target.${escapeId(k)} = staging.${escapeId(k)}`).join(' AND ');
 
@@ -221,9 +225,10 @@ function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, natu
 	// MATCHED: update only data cols + _auditdate; leave _startdate/_enddate/_current intact.
 	const updateSets = dataCols.map(c => `${escapeId(c)} = COALESCE(staging.${escapeId(c)}, target.${escapeId(c)})`);
 	updateSets.push(`${ad} = staging.${ad}`);
+	updateSets.push(`${rd} = staging.${rd}`);
 
-	// NOT MATCHED: staging provides nks + dataCols + _auditdate; sentinel values hard-coded.
-	const payloadCols = [...nks, ...dataCols, columnConfig._auditdate];
+	// NOT MATCHED: staging provides nks + dataCols + _auditdate + _rescued_data; sentinel values hard-coded.
+	const payloadCols = [...nks, ...dataCols, columnConfig._auditdate, columnConfig._rescued_data];
 	const insertCols = [
 		...payloadCols.map(c => escapeId(c)),
 		escapeId(columnConfig._current),

@@ -340,6 +340,7 @@ module.exports = function(config) {
 				`  multiLine => 'true',`,
 				`  nullValue => '\\\\N',`,
 				`  mode => 'PERMISSIVE',`,
+				`  rescuedDataColumn => '_rescued_data',`,
 				`  schema => '${schemaStr}'`,
 				`)`,
 			].join('\n');

@@ -145,8 +145,8 @@ SESSION_REUSE_PLAN.md follow-up section. Current implementation creates a new `D
 ### [Defer] Strict mode (`ansi_mode = true`)
 BUILD_PLAN Step 3 rationale: kept lenient for Redshift `ACCEPTINVCHARS`/`ACCEPTANYDATE` parity during coexistence. Modernization choice to revisit after Redshift retires.
 
-### [Defer] `rescuedDataColumn`
-BUILD_PLAN Step 7.2 rationale: the malformed-record column would diverge from Redshift output. Revisit post-coexistence.
+### [Done] `rescuedDataColumn`
+Enabled. `_rescued_data STRING` is added to every table by `createTable` and by the startup schema reconciliation loop for existing tables. `buildStagingSelect` passes `rescuedDataColumn => '_rescued_data'` to `read_files()`. Both `mergeFact` and `mergeDim` include it in UPDATE SET (overwrites on each merge — null when record was clean) and INSERT. The column is on Databricks tables only; consumers doing cross-pipeline `SELECT *` comparisons will see it on the Databricks side and not on Redshift. If that divergence is a problem, drop the column — the connector degrades gracefully back to silent-null behavior.
 
 ### [Defer] Auto Loader
 BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpointing; Auto Loader would duplicate state. Revisit only if `read_files` proves unreliable at scale.

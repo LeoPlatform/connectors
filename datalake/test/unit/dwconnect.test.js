@@ -245,6 +245,7 @@ describe('dwconnect.js', () => {
 				{ column_name: 'channel', data_type: 'STRING' },
 				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
 				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+				{ column_name: '_rescued_data', data_type: 'STRING' },
 			];
 
 			const connectStub = sinon.stub().returns(makeClientStub({ d_order: existingSchema }));
