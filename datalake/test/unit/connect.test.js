@@ -487,28 +487,37 @@ describe('connect.js', () => {
 		});
 
 		describe('stagingS3Path', () => {
-			it('builds {bucket, key, uri} deterministically from inputs', () => {
+			it('builds {bucket, key, uri} with correct structure and random suffix', () => {
 				const p = realConnect.stagingS3Path('bkt', 'prefix/sub', 'f_order', "'2026-03-15T14:30:00'");
 				expect(p.bucket).to.equal('bkt');
-				expect(p.key).to.equal('prefix/sub/f_order/2026-03-15T14-30-00.csv');
-				expect(p.uri).to.equal('s3://bkt/prefix/sub/f_order/2026-03-15T14-30-00.csv');
+				// key: {prefix}/{table}/{auditdate}-{8hex}.csv
+				expect(p.key).to.match(/^prefix\/sub\/f_order\/2026-03-15T14-30-00-[0-9a-f]{8}\.csv$/);
+				expect(p.uri).to.match(/^s3:\/\/bkt\/prefix\/sub\/f_order\/2026-03-15T14-30-00-[0-9a-f]{8}\.csv$/);
 			});
 
 			it('strips a trailing slash from the prefix', () => {
 				const p = realConnect.stagingS3Path('bkt', 'prefix/sub/', 't', "'2026-01-01T00:00:00'");
-				expect(p.key).to.equal('prefix/sub/t/2026-01-01T00-00-00.csv');
+				expect(p.key).to.match(/^prefix\/sub\/t\/2026-01-01T00-00-00-[0-9a-f]{8}\.csv$/);
 			});
 
 			it('strips surrounding single quotes and replaces colons in the auditdate', () => {
 				const p = realConnect.stagingS3Path('b', 'p', 't', "'2026-03-15T14:30:00.123Z'");
-				// colons → dashes; quotes stripped; rest preserved
-				expect(p.key).to.equal('p/t/2026-03-15T14-30-00.123Z.csv');
+				// colons → dashes; quotes stripped; rest preserved; random suffix appended
+				expect(p.key).to.match(/^p\/t\/2026-03-15T14-30-00\.123Z-[0-9a-f]{8}\.csv$/);
 			});
 
 			it('two parallel callers with different tables produce distinct paths', () => {
 				const auditdate = "'2026-03-15T14:30:00'";
 				const a = realConnect.stagingS3Path('b', 'p', 'f_order', auditdate);
 				const b = realConnect.stagingS3Path('b', 'p', 'f_order_item', auditdate);
+				expect(a.key).to.not.equal(b.key);
+				expect(a.uri).to.not.equal(b.uri);
+			});
+
+			it('two parallel callers with the same table produce distinct paths', () => {
+				const auditdate = "'2026-03-15T14:30:00'";
+				const a = realConnect.stagingS3Path('b', 'p', 'f_order', auditdate);
+				const b = realConnect.stagingS3Path('b', 'p', 'f_order', auditdate);
 				expect(a.key).to.not.equal(b.key);
 				expect(a.uri).to.not.equal(b.uri);
 			});
