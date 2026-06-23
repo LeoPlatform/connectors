@@ -150,17 +150,10 @@ BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpoi
 
 ## Quick-action triage for next session
 
-All §1d correctness bugs are fixed. §1e doc items are addressed. If picking up cold, the items are ordered by deployment readiness:
+All §1d correctness bugs are fixed. §1e items are addressed. Next items by deployment readiness:
 
-**All three queues are blocked on `linkDimensions` (see item 4).** Every `supplier_catalog` fact table has `dimension` fields (`d_item`, `d_account`, `datetime`), so `load.js` calls `linkDimensions` for them too — and it currently throws. The "supplier-catalog-dim can go now" framing was wrong; that queue is blocked equally.
-
-**Once `linkDimensions` is resolved:**
 1. Write `offload_to_datalake.js` bot in `general/` — the library is ready; nothing runs without it.
 2. Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.
-
-**Current blocker (all queues):**
-3. ~~Implement `importDimension`~~ ✓ Done.
-4. Implement `linkDimensions` — approach, formulas, and file list in BUILD_PLAN Step 6 extension.
 
 **Blocked on infra/fixture inputs (don't pull forward):**
 - Step 9 CI catalog cloning workflows
