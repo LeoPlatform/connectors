@@ -10,6 +10,7 @@ const csv = require('fast-csv');
 // `leo-streams` npm package is a lighter sibling without toS3; we don't import it.
 const ls = require('leo-sdk').streams;
 const naiveIsoNow = require('./audit_timestamp.js');
+const crypto = require('crypto');
 
 // ── Config helpers ────────────────────────────────────────────────────────────
 function clamp(val, min, max, defaultVal) {
@@ -478,16 +479,16 @@ function ensureStagingLocation(client, config) {
 // Pure: compute the per-call staging S3 path from (bucket, prefix, table,
 // auditdate). The caller owns the resulting identifier — same shape as
 // postgres' `qualifiedStagingTable`, just with an S3 file as the staging
-// artifact instead of a temp table. Two parallel importFact calls naturally
-// produce distinct paths (different `table`), so the identifier carries no
-// cross-call hazard.
+// artifact instead of a temp table. The random suffix ensures uniqueness
+// across concurrent same-table imports.
 function stagingS3Path(s3Bucket, s3Prefix, table, auditdate) {
 	if (!s3Bucket || !s3Prefix) {
 		throw new Error('stagingS3Path: s3Bucket/s3Prefix unresolved — call client.ensureStagingLocation() first');
 	}
 	const cleanAuditDate = String(auditdate || "'" + naiveIsoNow() + "'")
 		.replace(/'/g, '').replace(/:/g, '-');
-	const key = `${String(s3Prefix).replace(/\/$/, '')}/${table}/${cleanAuditDate}.csv`;
+	const uniqueSuffix = crypto.randomBytes(4).toString('hex');
+	const key = `${String(s3Prefix).replace(/\/$/, '')}/${table}/${cleanAuditDate}-${uniqueSuffix}.csv`;
 	return {
 		bucket: s3Bucket,
 		key,
