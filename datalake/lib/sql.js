@@ -167,8 +167,8 @@ function alterColumnType(qualifiedTable, columnName, newRawType, escapeId) {
  * @param {string[]} nks            - natural key column names
  * @param {string[]} dataCols       - non-NK, non-audit data columns
  * @param {object} columnConfig     - audit column name overrides
- * @param {string|null} clusterKey  - column used for MERGE pruning filter (or null)
- * @param {string|null} naturalKeyFilter - literal value for WHERE target.clusterKey >= ? (or null)
+ * @param {string|null} clusterKey  - reserved, ignored (was incorrectly used as MERGE ON filter)
+ * @param {string|null} naturalKeyFilter - reserved, ignored (was incorrectly used as MERGE ON filter)
  * @param {function} escapeId       - identifier quoting function
  * @returns {string} MERGE SQL
  */
@@ -178,11 +178,6 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
 	const rd = escapeId(columnConfig._rescued_data);
 
 	const nkMatch = nks.map(k => `target.${escapeId(k)} = staging.${escapeId(k)}`).join(' AND ');
-
-	let clusterPredicate = '';
-	if (clusterKey != null && naturalKeyFilter != null) {
-		clusterPredicate = `\n  AND target.${escapeId(clusterKey)} >= ${naturalKeyFilter}`;
-	}
 
 	const updateSets = dataCols.map(c => `${escapeId(c)} = COALESCE(staging.${escapeId(c)}, target.${escapeId(c)})`);
 	updateSets.push(`${del} = false`);
@@ -196,7 +191,7 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
 	return [
 		`MERGE INTO ${target} AS target`,
 		`USING ${staging} AS staging`,
-		`ON (${nkMatch}${clusterPredicate})`,
+		`ON (${nkMatch})`,
 		`WHEN MATCHED THEN UPDATE SET`,
 		`  ${updateSets.join(',\n  ')}`,
 		`WHEN NOT MATCHED THEN INSERT (${insertCols})`,
@@ -225,8 +220,8 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
  * @param {string[]} nks            - natural key column names
  * @param {string[]} dataCols       - non-NK, non-audit data columns
  * @param {object} columnConfig     - audit column name overrides
- * @param {string|null} clusterKey  - column used for MERGE pruning filter (or null)
- * @param {string|null} naturalKeyFilter - literal value for WHERE target.clusterKey >= ? (or null)
+ * @param {string|null} clusterKey  - reserved, ignored (was incorrectly used as MERGE ON filter)
+ * @param {string|null} naturalKeyFilter - reserved, ignored (was incorrectly used as MERGE ON filter)
  * @param {function} escapeId       - identifier quoting function
  * @returns {string} MERGE SQL
  */
@@ -235,11 +230,6 @@ function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, natu
 	const rd = escapeId(columnConfig._rescued_data);
 
 	const nkMatch = nks.map(k => `target.${escapeId(k)} = staging.${escapeId(k)}`).join(' AND ');
-
-	let clusterPredicate = '';
-	if (clusterKey != null && naturalKeyFilter != null) {
-		clusterPredicate = `\n  AND target.${escapeId(clusterKey)} >= ${naturalKeyFilter}`;
-	}
 
 	// MATCHED: update only data cols + _auditdate; leave _startdate/_enddate/_current intact.
 	const updateSets = dataCols.map(c => `${escapeId(c)} = COALESCE(staging.${escapeId(c)}, target.${escapeId(c)})`);
@@ -264,7 +254,7 @@ function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, natu
 	return [
 		`MERGE INTO ${target} AS target`,
 		`USING ${staging} AS staging`,
-		`ON (${nkMatch}${clusterPredicate})`,
+		`ON (${nkMatch})`,
 		`WHEN MATCHED THEN UPDATE SET`,
 		`  ${updateSets.join(',\n  ')}`,
 		`WHEN NOT MATCHED THEN INSERT (${insertCols})`,

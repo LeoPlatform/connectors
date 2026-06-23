@@ -268,14 +268,10 @@ describe('sql.js', () => {
 			expect(m).to.include('WHEN NOT MATCHED THEN INSERT');
 		});
 
-		it('adds clusterKey filter to ON clause when naturalKeyFilter provided', () => {
+		it('does NOT add clusterKey filter to ON clause (regression: would duplicate rows with old cluster keys)', () => {
 			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, 'id', '1000', escapeId);
-			expect(m).to.include('AND target.`id` >= 1000');
-		});
-
-		it('omits clusterKey filter when naturalKeyFilter is null', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, 'id', null, escapeId);
 			expect(m).to.not.include('>=');
+			expect(m).to.include('ON (target.`id` = staging.`id`)');
 		});
 
 		it('handles composite natural keys', () => {
@@ -335,14 +331,10 @@ describe('sql.js', () => {
 			expect(m).to.not.include('_deleted');
 		});
 
-		it('adds clusterKey filter to ON clause when naturalKeyFilter provided', () => {
+		it('does NOT add clusterKey filter to ON clause (regression: would duplicate rows with old cluster keys)', () => {
 			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, 'retailer_id', '1000', escapeId);
-			expect(m).to.include('AND target.`retailer_id` >= 1000');
-		});
-
-		it('omits clusterKey filter when naturalKeyFilter is null', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, 'retailer_id', null, escapeId);
 			expect(m).to.not.include('>=');
+			expect(m).to.include('ON (target.`retailer_id` = staging.`retailer_id`)');
 		});
 
 		it('handles composite natural keys', () => {

@@ -271,28 +271,26 @@ describe('importFact — orchestration', () => {
 		expect(minQuery).to.not.include('MIN(`id`)');
 	});
 
-	it('single-NK prune filter lands in the MERGE predicate even without clusterKey', async () => {
+	it('prune filter is NOT injected into the MERGE ON clause (regression: would duplicate rows with old cluster keys)', async () => {
 		const ctx = setup({ tableFields: factTableFields, minVal: 42 });
 		await runToCompletion(ctx, 'f_order_item', ['id']); // no clusterKey — pruneCol falls back to single NK
 		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
 		expect(merge, 'expected a MERGE INTO query').to.exist;
-		expect(merge).to.include('>= 42');
+		expect(merge).to.not.include('>=');
 	});
 
-	it('numeric prune column produces unquoted naturalKeyFilter in the MERGE predicate', async () => {
+	it('naturalKeyFilter is computed but NOT injected into MERGE ON (numeric case)', async () => {
 		const ctx = setup({ tableFields: factTableFields, minVal: 12345 });
 		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'id' });
 		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge).to.include('>= 12345');
-		expect(merge).to.not.include(">= '12345'");
+		expect(merge).to.not.include('>=');
 	});
 
-	it('non-numeric prune column produces quoted naturalKeyFilter', async () => {
-		// `created_at` is TIMESTAMP_NTZ — values must be quoted to parse.
+	it('naturalKeyFilter is computed but NOT injected into MERGE ON (timestamp case)', async () => {
 		const ctx = setup({ tableFields: factTableFields, minVal: '2026-03-15 14:30:00' });
 		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'created_at' });
 		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge).to.include(">= '2026-03-15 14:30:00'");
+		expect(merge).to.not.include('>=');
 	});
 
 	it('skips prune query for composite NKs when no clusterKey is set', async () => {
