@@ -572,14 +572,20 @@ describe('connect.js', () => {
 	});
 
 	describe('connect() — acquires from pool', () => {
-		it('calls pool.acquire()', async () => {
+		it('calls pool.acquire() and returns a wrapper with working release()', async () => {
 			const wrapper = { dead: false, release: () => {} };
 			poolStub.acquire.resolves(wrapper);
 
 			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
 			const conn = await client.connect();
 			expect(poolStub.acquire.calledOnce).to.be.true;
-			expect(conn).to.equal(wrapper);
+			// conn is a thin wrapper — not the raw pool resource — so release() works
+			expect(conn).to.not.equal(wrapper);
+			expect(conn.dead).to.equal(wrapper.dead);
+			// release() must call pool.release with the original wrapper reference
+			conn.release();
+			expect(poolStub.release.calledOnce).to.be.true;
+			expect(poolStub.release.firstCall.args[0]).to.equal(wrapper);
 		});
 	});
 

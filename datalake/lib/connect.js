@@ -183,7 +183,10 @@ module.exports = function(config) {
 		// wrapper's release() returns it to the pool (no-op on the session itself).
 		connect: async (_opts) => {
 			await ensureConnected();
-			return pool.acquire();
+			const wrapper = await pool.acquire();
+			return Object.assign({}, wrapper, {
+				release: () => pool.release(wrapper).catch(() => {}),
+			});
 		},
 
 		disconnect: async () => drainPool(),
