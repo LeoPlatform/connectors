@@ -235,4 +235,26 @@ describe('importDimension — orchestration', () => {
 		expect(typeof enriched._id).to.equal('string');
 		expect(enriched._id).to.match(/^-?\d+$/);
 	});
+
+	it('enrichedStream computes entity FK hash for dimension field in dim table', async () => {
+		const ctx = setup({
+			tableFields: [
+				...dimTableFields,
+				{ column_name: 'account_id', data_type: 'INT' },
+				{ column_name: 'd_account', data_type: 'BIGINT' },
+			],
+		});
+		const tableDef = {
+			structure: {
+				'retailer_id': { nk: true, type: 'bigint' },
+				'account_id': { type: 'integer', dimension: 'd_account' },
+			},
+		};
+		await runToCompletion(ctx, 'd_item', ['retailer_id'], tableDef);
+		const enrichedCb = ctx.throughCallbacks[1];
+		let enriched;
+		enrichedCb({ retailer_id: 1, account_id: 7 }, (err, obj) => { enriched = obj; });
+		const fingerprint64 = require('../../lib/surrogate_key.js');
+		expect(enriched.d_account).to.equal(fingerprint64([7]));
+	});
 });

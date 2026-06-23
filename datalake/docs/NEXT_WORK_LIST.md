@@ -69,7 +69,7 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 - ~~**[Gap] `importDimension` not yet implemented.**~~ ✓ Implemented — bypassSCD dim upsert using shared `stageToS3` helper + `sql.mergeDim`. Sentinel values for new rows match postgres bypass path (`_current=true`, `_startdate='1900-01-01 00:00:00'`, `_enddate='9999-01-01 00:00:00'`). `__leo_delete__` markers filtered from staging path; soft-close deferred (no dim queue generates deletes under `bypassSlowlyChangingDimensions=true`). 13 unit tests added. `importFact` refactored to share the same `stageToS3` helper with no behavior change. `linkDimensions` still unimplemented — see item below.
 
-- **[Gap] `linkDimensions` not yet implemented.** FK-update query logic from postgres (no `hashedSurrogateKeys` shortcut applies). Needed before `dim`/`item-quantity-dim` queues can fully run. Assess `postgres/lib/dwconnect.js:810` before implementing.
+- ~~**[Gap] `linkDimensions` not yet implemented.**~~ ✓ Implemented — FK surrogate-key values pre-computed in `importFact`/`importDimension` enrichFns (`buildFkEnrichers`) and written into staging CSV before MERGE. `linkDimensions` is now a no-op. `sql.js` `createTable` and `changeTableStructure` both emit/check FK columns. Date/time surrogate keys use JS wall-clock math (`dateSk`/`timeSk`) rather than SQL (no Databricks `FARMFINGERPRINT64`). See `docs/porting-decisions.md`. 20 unit tests added. All 188 unit tests pass.
 
 ---
 

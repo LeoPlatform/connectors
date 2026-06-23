@@ -401,4 +401,80 @@ describe('importFact — orchestration', () => {
 		expect(typeof enriched._id).to.equal('string');
 		expect(enriched._id).to.match(/^-?\d+$/);
 	});
+
+	it('enrichedStream computes entity FK hash for dimension field', async () => {
+		const ctx = setup({
+			tableFields: [
+				{ column_name: 'id', data_type: 'BIGINT' },
+				{ column_name: 'item_id', data_type: 'INT' },
+				{ column_name: 'd_item', data_type: 'BIGINT' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+			],
+		});
+		const tableDef = {
+			structure: {
+				'id': { nk: true, type: 'integer' },
+				'item_id': { type: 'integer', dimension: 'd_item' },
+			},
+		};
+		await runToCompletion(ctx, 'f_order_item', ['id'], tableDef);
+		const enrichedCb = ctx.throughCallbacks[1];
+		let enriched;
+		enrichedCb({ id: 1, item_id: 99 }, (err, obj) => { enriched = obj; });
+		// d_item = fingerprint64(['99']) — a signed 64-bit decimal string
+		expect(typeof enriched.d_item).to.equal('string');
+		expect(enriched.d_item).to.match(/^-?\d+$/);
+		// Must match fingerprint64 of the same value
+		const fingerprint64 = require('../../lib/surrogate_key.js');
+		expect(enriched.d_item).to.equal(fingerprint64([99]));
+	});
+
+	it('enrichedStream writes "1" for null entity FK', async () => {
+		const ctx = setup({
+			tableFields: [
+				{ column_name: 'id', data_type: 'BIGINT' },
+				{ column_name: 'item_id', data_type: 'INT' },
+				{ column_name: 'd_item', data_type: 'BIGINT' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+			],
+		});
+		const tableDef = {
+			structure: {
+				'id': { nk: true, type: 'integer' },
+				'item_id': { type: 'integer', dimension: 'd_item' },
+			},
+		};
+		await runToCompletion(ctx, 'f_order_item', ['id'], tableDef);
+		const enrichedCb = ctx.throughCallbacks[1];
+		let enriched;
+		enrichedCb({ id: 1, item_id: null }, (err, obj) => { enriched = obj; });
+		expect(enriched.d_item).to.equal('1');
+	});
+
+	it('enrichedStream computes _date and _time for datetime dimension field', async () => {
+		const ctx = setup({
+			tableFields: [
+				{ column_name: 'id', data_type: 'BIGINT' },
+				{ column_name: 'occurred_at', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: 'd_occurred_at_date', data_type: 'INT' },
+				{ column_name: 'd_occurred_at_time', data_type: 'INT' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+			],
+		});
+		const tableDef = {
+			structure: {
+				'id': { nk: true, type: 'integer' },
+				'occurred_at': { type: 'timestamp', dimension: 'datetime' },
+			},
+		};
+		await runToCompletion(ctx, 'f_order_item', ['id'], tableDef);
+		const enrichedCb = ctx.throughCallbacks[1];
+		let enriched;
+		enrichedCb({ id: 1, occurred_at: '1400-01-01T14:30:45' }, (err, obj) => { enriched = obj; });
+		expect(enriched.d_occurred_at_date).to.equal(10000); // 1400-01-01 → offset 0 + 10000
+		expect(enriched.d_occurred_at_time).to.equal(62245); // 14*3600+30*60+45+10000
+	});
 });

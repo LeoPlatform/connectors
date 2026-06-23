@@ -101,6 +101,25 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 		}
 		if (!field.type) return;
 		cols.push(colDef(key, field.type, escapeId));
+
+		// FK surrogate-key column for dimension links
+		if (field.dimension && typeof columnConfig.dimColumnTransform === 'function') {
+			const dim = field.dimension;
+			const dest = columnConfig.dimColumnTransform(key, field);
+			if (columnConfig.useSurrogateDateKeys &&
+				(dim === 'd_datetime' || dim === 'datetime' || dim === 'dim_datetime')) {
+				cols.push(`${escapeId(dest + '_date')} INT`);
+				cols.push(`${escapeId(dest + '_time')} INT`);
+			} else if (columnConfig.useSurrogateDateKeys &&
+					(dim === 'd_date' || dim === 'date' || dim === 'dim_date')) {
+				cols.push(`${escapeId(dest + '_date')} INT`);
+			} else if (columnConfig.useSurrogateDateKeys &&
+					(dim === 'd_time' || dim === 'time' || dim === 'dim_time')) {
+				cols.push(`${escapeId(dest + '_time')} INT`);
+			} else {
+				cols.push(`${escapeId(dest)} BIGINT`);
+			}
+		}
 	});
 
 	cols.push(`${escapeId(columnConfig._auditdate)} TIMESTAMP_NTZ`);

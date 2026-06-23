@@ -52,6 +52,15 @@ The datalake connector is a fork of the postgres connector adapted for Databrick
 - **Location:** `lib/dwconnect.js` — `insertMissingDimensions`
 - **Why kept:** Same behavior as `postgres/lib/dwconnect.js:680`, which immediately calls `callback(null)` under `hashedSurrogateKeys=true`. Hashed surrogate keys make stub placeholder rows unnecessary: any FK reference that arrives before its dimension row will compute the same hash, and the dim row will merge correctly when it eventually appears. The datalake connector always uses hashed surrogate keys, so this no-op applies unconditionally. `load.js:246` calls this function for every batch and propagates its error — throwing here breaks all batches; the no-op is correct and intentional.
 
+### `linkDimensions` is a no-op (work moved to enrichFn, not deferred)
+
+- **Location:** `lib/dwconnect.js` — `linkDimensions`
+- **Looks like:** Immediate `done(null)` — same shape as `insertMissingDimensions`.
+- **Why kept this way:** Postgres `linkDimensions` runs a post-MERGE `UPDATE` using `FARMFINGERPRINT64()` in SQL. Databricks SQL has no `FARMFINGERPRINT64` equivalent. To preserve hash-output parity with the dimension row SK (both computed via `fingerprint64` in `lib/surrogate_key.js`), FK surrogate-key values are instead computed in Node.js inside the `importFact` / `importDimension` enrichFns (`buildFkEnrichers`) and written into the staging CSV before the MERGE. The MERGE then populates the FK columns directly, making a post-MERGE SQL update unnecessary.
+- **This is not the same as `insertMissingDimensions`.** `insertMissingDimensions` is a no-op because postgres also skips it under `hashedSurrogateKeys=true`. `linkDimensions` does real work in postgres regardless — the datalake no-op is a platform-forced divergence, not a shared pattern.
+- **Do not add a SQL UPDATE path here.** The staging CSV already carries the computed FK values; a redundant UPDATE would overwrite them with the same values but introduce a second round-trip and break the "enrichFn owns FK columns" invariant. If this needs revisiting (e.g. for composite-NK dimensions), extend `buildFkEnrichers` in the enrichFn, not `linkDimensions`.
+- **Reference:** `docs/BUILD_PLAN.md` §Step 6 extension.
+
 ## Items not on this list
 
 If a reviewer flags something not listed here, it isn't covered by this doc — judge it on its own merits. The list is a closed set, not a presumption of intentionality for everything else.

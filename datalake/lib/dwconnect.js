@@ -83,6 +83,24 @@ module.exports = function(dbconfig, options) {
 					if (!(f in fieldLookup)) {
 						missingFields[f] = typeof field === 'string' ? { type: field } : field;
 					}
+					// FK columns for dimension links
+					if (field && typeof field === 'object' && field.dimension) {
+						const dim = field.dimension;
+						const dest = columnConfig.dimColumnTransform(f, field);
+						if (columnConfig.useSurrogateDateKeys &&
+							(dim === 'd_datetime' || dim === 'datetime' || dim === 'dim_datetime')) {
+							if (!(dest + '_date' in fieldLookup)) missingFields[dest + '_date'] = { type: 'integer' };
+							if (!(dest + '_time' in fieldLookup)) missingFields[dest + '_time'] = { type: 'integer' };
+						} else if (columnConfig.useSurrogateDateKeys &&
+								(dim === 'd_date' || dim === 'date' || dim === 'dim_date')) {
+							if (!(dest + '_date' in fieldLookup)) missingFields[dest + '_date'] = { type: 'integer' };
+						} else if (columnConfig.useSurrogateDateKeys &&
+								(dim === 'd_time' || dim === 'time' || dim === 'dim_time')) {
+							if (!(dest + '_time' in fieldLookup)) missingFields[dest + '_time'] = { type: 'integer' };
+						} else if (!(dest in fieldLookup)) {
+							missingFields[dest] = { type: 'bigint' };
+						}
+					}
 				});
 
 				if (!fieldLookup[columnConfig._auditdate]) {
@@ -172,10 +190,12 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
+			fkEnrich(obj);
 			obj[auditCol] = auditdateValue;
 			obj[delCol] = false;
 		};
@@ -271,10 +291,12 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
+			fkEnrich(obj);
 			obj[auditCol] = auditdateValue;
 		};
 
@@ -332,11 +354,14 @@ module.exports = function(dbconfig, options) {
 		callback(null);
 	};
 
-	// linkDimensions: FK-update queries not yet implemented (see NEXT_WORK_LIST.md §1e).
-	// Unlike insertMissingDimensions, postgres does real work here regardless of
-	// hashedSurrogateKeys — no no-op shortcut applies.
+	// linkDimensions: FK surrogate-key values are pre-computed in the importFact /
+	// importDimension enrichFns (via buildFkEnrichers) and written into the staging CSV
+	// before the MERGE — no post-MERGE SQL update is needed. This diverges from postgres,
+	// where FARMFINGERPRINT64() in an UPDATE handles this; Databricks SQL has no
+	// FARMFINGERPRINT64 equivalent, so the computation moves to Node.js. See
+	// docs/porting-decisions.md and docs/BUILD_PLAN.md §Step 6 extension.
 	client.linkDimensions = function(table, links, nk, done) {
-		done(new Error('linkDimensions not yet implemented for Databricks connector'));
+		done(null);
 	};
 
 	return client;
@@ -487,6 +512,79 @@ function withRetry(fn, opts, callback) {
 	attempt();
 }
 
+// ── FK surrogate-key helpers ───────────────────────────────────────────────
+// These mirror the FK computations postgres linkDimensions does in SQL using
+// FARMFINGERPRINT64 / date arithmetic. Databricks has no FARMFINGERPRINT64 SQL
+// function, so the work moves to Node.js inside importFact/importDimension enrichFns.
+
+// Reference timestamp for surrogate date-key arithmetic (ms since Unix epoch).
+// Date.UTC avoids any server-local TZ shift on the constant.
+const _DATE_1400_UTC_MS = Date.UTC(1400, 0, 1);
+
+// Wall-clock string → surrogate date key: days since 1400-01-01 + 10000.
+// Parses by splitting on space or T rather than round-tripping through Date
+// constructor, which would apply the server's local TZ to an offset-free string.
+function dateSk(wallClock) {
+	if (wallClock == null) return 1;
+	const dateStr = String(wallClock).split(/[ T]/)[0];
+	const parts = dateStr.split('-');
+	if (parts.length < 3) return 1;
+	const y = parseInt(parts[0], 10), mo = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+	if (isNaN(y) || isNaN(mo) || isNaN(d)) return 1;
+	return Math.floor((Date.UTC(y, mo - 1, d) - _DATE_1400_UTC_MS) / 86400000) + 10000;
+}
+
+// Wall-clock string → surrogate time key: seconds since midnight + 10000.
+function timeSk(wallClock) {
+	if (wallClock == null) return 1;
+	const timePart = String(wallClock).split(/[ T]/)[1];
+	if (!timePart) return 1;
+	const parts = timePart.split(':');
+	if (parts.length < 3) return 1;
+	const h = parseInt(parts[0], 10), m = parseInt(parts[1], 10), s = parseInt(parts[2], 10);
+	if (isNaN(h) || isNaN(m) || isNaN(s)) return 1;
+	return h * 3600 + m * 60 + s + 10000;
+}
+
+// Build a per-object enrichment function that sets FK surrogate-key columns.
+// Called once at importFact/importDimension construction time; the returned
+// function is invoked on every staged row before CSV write.
+//
+// Null coalesce: Redshift COALESCE(FARMFINGERPRINT64(NULL), 1) = 1. JS fingerprint64
+// coerces null to '' and hashes it (result ≠ 1). Explicitly write '1' for null inputs.
+function buildFkEnrichers(structure, columnConfig) {
+	if (!structure) return () => {};
+	const fns = [];
+	Object.keys(structure).forEach(f => {
+		const field = structure[f];
+		if (!field || typeof field !== 'object' || !field.dimension) return;
+		const dim = field.dimension;
+		const dest = columnConfig.dimColumnTransform(f, field);
+		if (columnConfig.useSurrogateDateKeys &&
+			(dim === 'd_datetime' || dim === 'datetime' || dim === 'dim_datetime')) {
+			fns.push(obj => {
+				const v = obj[f];
+				obj[dest + '_date'] = dateSk(v);
+				obj[dest + '_time'] = timeSk(v);
+			});
+		} else if (columnConfig.useSurrogateDateKeys &&
+				(dim === 'd_date' || dim === 'date' || dim === 'dim_date')) {
+			fns.push(obj => { obj[dest + '_date'] = dateSk(obj[f]); });
+		} else if (columnConfig.useSurrogateDateKeys &&
+				(dim === 'd_time' || dim === 'time' || dim === 'dim_time')) {
+			fns.push(obj => { obj[dest + '_time'] = timeSk(obj[f]); });
+		} else {
+			fns.push(obj => {
+				const v = obj[f];
+				obj[dest] = v == null ? '1' : fingerprint64([v]);
+			});
+		}
+	});
+	return obj => fns.forEach(fn => fn(obj));
+}
+
 // Exposed for unit testing of the type-aware naturalKeyFilter quoting and retry.
 module.exports.literalForType = literalForType;
 module.exports.withRetry = withRetry;
+module.exports.dateSk = dateSk;
+module.exports.timeSk = timeSk;

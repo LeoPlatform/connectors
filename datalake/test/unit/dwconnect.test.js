@@ -136,6 +136,153 @@ describe('dwconnect.js', () => {
 		});
 	});
 
+	describe('dateSk / timeSk — surrogate date/time key computation', () => {
+		const { dateSk, timeSk } = require('../../lib/dwconnect.js');
+
+		it('dateSk: reference date 1400-01-01 → 10000', () => {
+			expect(dateSk('1400-01-01T00:00:00')).to.equal(10000);
+		});
+
+		it('dateSk: one day after reference → 10001', () => {
+			expect(dateSk('1400-01-02T00:00:00')).to.equal(10001);
+		});
+
+		it('dateSk: accepts space-separated wall-clock format', () => {
+			expect(dateSk('1400-01-01 00:00:00')).to.equal(10000);
+		});
+
+		it('dateSk: null → 1 (coalesce fallback)', () => {
+			expect(dateSk(null)).to.equal(1);
+		});
+
+		it('dateSk: undefined → 1', () => {
+			expect(dateSk(undefined)).to.equal(1);
+		});
+
+		it('timeSk: midnight → 10000', () => {
+			expect(timeSk('2024-01-15T00:00:00')).to.equal(10000);
+		});
+
+		it('timeSk: 14:30:45 → 62245', () => {
+			// 14*3600 + 30*60 + 45 + 10000 = 50400 + 1800 + 45 + 10000 = 62245
+			expect(timeSk('2024-01-15T14:30:45')).to.equal(62245);
+		});
+
+		it('timeSk: accepts space-separated wall-clock format', () => {
+			expect(timeSk('2024-01-15 14:30:45')).to.equal(62245);
+		});
+
+		it('timeSk: null → 1', () => {
+			expect(timeSk(null)).to.equal(1);
+		});
+	});
+
+	describe('changeTableStructure — FK columns for dimension links', () => {
+		function makeFactoryWithSchema(existingSchema) {
+			const connectStub = sinon.stub().returns(makeClientStub({ f_order_item: existingSchema }));
+			const factory = proxyquire('../../lib/dwconnect.js', {
+				'./connect.js': connectStub,
+				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
+				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
+				'./sql.js': require('../../lib/sql.js'),
+				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
+			});
+			const client = factory({ catalog: 'cat', schema: 'sch' });
+			client.describeTables = sinon.stub().resolves({});
+			client.describeTable = sinon.stub().resolves(existingSchema);
+			const capturedQueries = [];
+			client.query = sinon.stub().callsFake((sql, params, cb) => {
+				capturedQueries.push(sql);
+				if (typeof cb === 'function') cb(null, []);
+				else if (typeof params === 'function') params(null, []);
+			});
+			return { client, capturedQueries };
+		}
+
+		it('adds entity FK column when dimension link column is missing', async () => {
+			const existingSchema = [
+				{ column_name: 'id', data_type: 'INT' },
+				{ column_name: 'item_id', data_type: 'INT' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+				{ column_name: '_rescued_data', data_type: 'STRING' },
+			];
+			const { client, capturedQueries } = makeFactoryWithSchema(existingSchema);
+			const def = {
+				isDimension: false,
+				structure: {
+					'id': { nk: true, type: 'integer' },
+					'item_id': { type: 'integer', dimension: 'd_item' },
+				},
+			};
+			await client.changeTableStructure({ f_order_item: def });
+			const addCols = capturedQueries.filter(q => q.includes('ADD COLUMN'));
+			expect(addCols.some(q => q.includes('d_item'))).to.be.true;
+		});
+
+		it('adds _date and _time INT columns for datetime dimension link', async () => {
+			const existingSchema = [
+				{ column_name: 'id', data_type: 'INT' },
+				{ column_name: 'occurred_at', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+				{ column_name: '_rescued_data', data_type: 'STRING' },
+			];
+			const { client, capturedQueries } = makeFactoryWithSchema(existingSchema);
+			const def = {
+				isDimension: false,
+				structure: {
+					'id': { nk: true, type: 'integer' },
+					'occurred_at': { type: 'timestamp', dimension: 'datetime' },
+				},
+			};
+			await client.changeTableStructure({ f_order_item: def });
+			const addCols = capturedQueries.filter(q => q.includes('ADD COLUMN'));
+			expect(addCols.some(q => q.includes('d_occurred_at_date'))).to.be.true;
+			expect(addCols.some(q => q.includes('d_occurred_at_time'))).to.be.true;
+		});
+
+		it('skips FK ADD COLUMN when FK column already exists', async () => {
+			const existingSchema = [
+				{ column_name: 'id', data_type: 'INT' },
+				{ column_name: 'item_id', data_type: 'INT' },
+				{ column_name: 'd_item', data_type: 'BIGINT' },
+				{ column_name: '_auditdate', data_type: 'TIMESTAMP_NTZ' },
+				{ column_name: '_deleted', data_type: 'BOOLEAN' },
+				{ column_name: '_rescued_data', data_type: 'STRING' },
+			];
+			const { client, capturedQueries } = makeFactoryWithSchema(existingSchema);
+			const def = {
+				isDimension: false,
+				structure: {
+					'id': { nk: true, type: 'integer' },
+					'item_id': { type: 'integer', dimension: 'd_item' },
+				},
+			};
+			await client.changeTableStructure({ f_order_item: def });
+			const addCols = capturedQueries.filter(q => q.includes('ADD COLUMN') && q.includes('d_item'));
+			expect(addCols).to.have.length(0);
+		});
+	});
+
+	describe('linkDimensions — no-op', () => {
+		it('calls done(null) without error', done => {
+			const connectStub = sinon.stub().returns(makeClientStub());
+			const factory = proxyquire('../../lib/dwconnect.js', {
+				'./connect.js': connectStub,
+				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
+				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
+				'./sql.js': require('../../lib/sql.js'),
+				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
+			});
+			const client = factory({ catalog: 'cat', schema: 'sch' });
+			client.linkDimensions('f_order_item', [], ['id'], err => {
+				expect(err).to.not.exist;
+				done();
+			});
+		});
+	});
+
 	describe('literalForType — type-aware naturalKeyFilter quoting', () => {
 		// Mirrors the dim-vs-fact branching in ../postgres/lib/dwconnect.js
 		// naturalKeyFilter: numeric column types render as unquoted literals

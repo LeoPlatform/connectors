@@ -145,6 +145,77 @@ describe('sql.js', () => {
 			const ddl = createTable('cat.sch.f_test', def, columnConfig, escapeId);
 			expect(ddl).to.include('DECIMAL(18,0)');
 		});
+
+		describe('FK columns for dimension links', () => {
+			const dimColumnTransform = (col, field) => {
+				if (field && field.dim_column) return field.dim_column;
+				return `d_${col.replace(/_id$/, '').replace(/^d_/, '')}`;
+			};
+			const ccWithDim = Object.assign({}, columnConfig, {
+				dimColumnTransform,
+				useSurrogateDateKeys: true,
+			});
+
+			it('entity FK: emits BIGINT column named via dimColumnTransform', () => {
+				const def = {
+					isDimension: false,
+					structure: {
+						'item_id': { type: 'integer', dimension: 'd_item' },
+					},
+				};
+				const ddl = createTable('cat.sch.f_test', def, ccWithDim, escapeId);
+				expect(ddl).to.include('`d_item` BIGINT');
+			});
+
+			it('datetime FK: emits _date INT and _time INT columns', () => {
+				const def = {
+					isDimension: false,
+					structure: {
+						'occurred_at': { type: 'timestamp', dimension: 'datetime' },
+					},
+				};
+				const ddl = createTable('cat.sch.f_test', def, ccWithDim, escapeId);
+				expect(ddl).to.include('`d_occurred_at_date` INT');
+				expect(ddl).to.include('`d_occurred_at_time` INT');
+				expect(ddl).to.not.include('`d_occurred_at` ');
+			});
+
+			it('d_date FK: emits _date INT column only', () => {
+				const def = {
+					isDimension: false,
+					structure: {
+						'order_date': { type: 'timestamp', dimension: 'd_date' },
+					},
+				};
+				const ddl = createTable('cat.sch.f_test', def, ccWithDim, escapeId);
+				expect(ddl).to.include('`d_order_date_date` INT');
+				expect(ddl).to.not.include('`d_order_date_time`');
+			});
+
+			it('d_time FK: emits _time INT column only', () => {
+				const def = {
+					isDimension: false,
+					structure: {
+						'created_time': { type: 'timestamp', dimension: 'd_time' },
+					},
+				};
+				const ddl = createTable('cat.sch.f_test', def, ccWithDim, escapeId);
+				expect(ddl).to.include('`d_created_time_time` INT');
+				expect(ddl).to.not.include('`d_created_time_date`');
+			});
+
+			it('skips FK columns when dimColumnTransform is absent from columnConfig', () => {
+				const def = {
+					isDimension: false,
+					structure: {
+						'item_id': { type: 'integer', dimension: 'd_item' },
+					},
+				};
+				// columnConfig without dimColumnTransform — FK columns are silently omitted
+				const ddl = createTable('cat.sch.f_test', def, columnConfig, escapeId);
+				expect(ddl).to.not.include('`d_item`');
+			});
+		});
 	});
 
 	describe('alterAddColumn', () => {
