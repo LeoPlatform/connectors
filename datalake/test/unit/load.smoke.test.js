@@ -9,6 +9,7 @@
 // This guards the load.js → dwconnect.js dispatch wiring: if importFact's signature,
 // the MIN query, or the MERGE callback path drift, this test breaks before production does.
 
+const fs = require('fs');
 const { expect } = require('chai');
 const { Readable, Writable } = require('stream');
 const sinon = require('sinon');
@@ -71,6 +72,11 @@ describe('load.js smoke — offline wiring guard', function() {
 	let mergeQueryCount;
 
 	before(function(done) {
+		// combine.js (leo-connector-common) hardcodes /tmp/leo_dw_* for sort scratch.
+		// Skip the suite rather than fail in environments where /tmp/ is not writable.
+		try { fs.writeFileSync('/tmp/leo_dw_smoke_probe', ''); fs.unlinkSync('/tmp/leo_dw_smoke_probe'); }
+		catch (e) { return this.skip(); }
+
 		insertMissingDimensionsCalls = [];
 		dropTempTablesCalls = 0;
 		minQueryCount = 0;
