@@ -581,14 +581,63 @@ describe('connect.js', () => {
 	});
 
 	describe('connect() — acquires from pool', () => {
-		it('calls pool.acquire()', async () => {
-			const wrapper = { dead: false, release: () => {} };
+		it('calls pool.acquire() and returns a wrapper with working release()', async () => {
+			const wrapper = { dead: false, query: sinon.stub(), release: () => {} };
 			poolStub.acquire.resolves(wrapper);
 
 			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
 			const conn = await client.connect();
 			expect(poolStub.acquire.calledOnce).to.be.true;
-			expect(conn).to.equal(wrapper);
+			// conn is a thin wrapper — not the raw pool resource — so release() works
+			expect(conn).to.not.equal(wrapper);
+			expect(conn.dead).to.equal(wrapper.dead);
+			// release() on a healthy wrapper calls pool.release with the original reference
+			conn.release();
+			expect(poolStub.release.calledOnce).to.be.true;
+			expect(poolStub.release.firstCall.args[0]).to.equal(wrapper);
+			expect(poolStub.destroy.called).to.be.false;
+		});
+
+		it('marks wrapper dead and calls pool.destroy on release() after a connection-class error', (done) => {
+			const wrapper = { dead: false, query: sinon.stub(), release: () => {} };
+			poolStub.acquire.resolves(wrapper);
+			// Simulate a connection-class error from the session query
+			const connErr = new Error('socket hang up');
+			wrapper.query.callsFake((_sql, _params, cb) => cb(connErr));
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.connect().then(conn => {
+				conn.query('SELECT 1', [], (err) => {
+					expect(err).to.equal(connErr);
+					expect(wrapper.dead).to.be.true;
+					// release() must destroy rather than return the broken wrapper
+					conn.release();
+					expect(poolStub.destroy.calledOnce).to.be.true;
+					expect(poolStub.destroy.firstCall.args[0]).to.equal(wrapper);
+					expect(poolStub.release.called).to.be.false;
+					done();
+				});
+			}).catch(done);
+		});
+
+		it('calls pool.release (not destroy) on release() after a non-connection query error', (done) => {
+			const wrapper = { dead: false, query: sinon.stub(), release: () => {} };
+			poolStub.acquire.resolves(wrapper);
+			// Simulate a query-class error (syntax error — not a connection failure)
+			const queryErr = new Error('[Databricks][SQL] syntax error');
+			wrapper.query.callsFake((_sql, _params, cb) => cb(queryErr));
+
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.connect().then(conn => {
+				conn.query('BAD SQL', [], (err) => {
+					expect(err).to.equal(queryErr);
+					expect(wrapper.dead).to.be.false;
+					conn.release();
+					expect(poolStub.release.calledOnce).to.be.true;
+					expect(poolStub.destroy.called).to.be.false;
+					done();
+				});
+			}).catch(done);
 		});
 	});
 
