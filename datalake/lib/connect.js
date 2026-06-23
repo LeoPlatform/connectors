@@ -327,8 +327,16 @@ module.exports = function(config) {
 		// Build the read_files() SELECT for use inline in MIN / MERGE queries.
 		// columnDefs is `[{name, type}, ...]` — types must match the target table so
 		// MERGE's COALESCE(staging.x, target.x) sees consistent types on both sides.
+		//
+		// _rescued_data is excluded from the positional schema: Databricks treats
+		// rescuedDataColumn as a non-positional catch-all appended to the result.
+		// Including it in the schema string displaces the columns that follow it
+		// (they read as extra/unrecognized and land in _rescued_data as "_cN" keys).
+		// Databricks appends _rescued_data automatically via rescuedDataColumn; the
+		// staging SELECT * still exposes it for the MERGE UPDATE/INSERT clauses.
 		buildStagingSelect: (s3Uri, columnDefs) => {
-			const schemaStr = columnDefs.map(c => `${c.name} ${c.type}`).join(', ');
+			const stagingCols = columnDefs.filter(c => c.name !== '_rescued_data');
+			const schemaStr = stagingCols.map(c => `${c.name} ${c.type}`).join(', ');
 			return [
 				`SELECT * FROM read_files(`,
 				`  '${s3Uri}',`,
@@ -500,7 +508,8 @@ function doStreamToTableFromS3(client, table, opts) {
 		const path = stagingS3Path(s3Bucket, s3Prefix, table, opts.auditdate || client.auditdate);
 		s3Key = path.key;
 	}
-	const columns = columnDefs.map(c => c.name);
+	// Exclude _rescued_data from positional CSV columns — same reason as buildStagingSelect.
+	const columns = columnDefs.filter(c => c.name !== '_rescued_data').map(c => c.name);
 
 	// Pre-compute which columns target TIMESTAMP_NTZ so the transform can strip
 	// offset markers from incoming values. read_files in PERMISSIVE mode nulls any
