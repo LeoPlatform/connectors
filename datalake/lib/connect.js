@@ -179,13 +179,39 @@ module.exports = function(config) {
 
 		// ── Connection ────────────────────────────────────────────────────────
 		// connect() acquires a pooled session wrapper and returns it. Callers that
-		// need a raw session (e.g. the existing unit tests) can call this; the
-		// wrapper's release() returns it to the pool (no-op on the session itself).
+		// need a raw session can call this; the checkout's release() returns it to
+		// the pool, or destroys it if a connection-class error was seen during use.
 		connect: async (_opts) => {
 			await ensureConnected();
 			const wrapper = await pool.acquire();
 			return Object.assign({}, wrapper, {
-				release: () => pool.release(wrapper).catch(() => {}),
+				// Classify errors so connection failures mark the wrapper dead.
+				// Do NOT pool.destroy/release here — caller drives connection lifetime.
+				query: (sql, paramsOrCb, cbOrOpts, opts) => {
+					let params, cb;
+					if (typeof paramsOrCb === 'function') {
+						cb = paramsOrCb;
+						params = [];
+						opts = cbOrOpts;
+					} else {
+						params = paramsOrCb || [];
+						cb = cbOrOpts;
+					}
+					wrapper.query(sql, params, (err, rows, fields) => {
+						if (err && isConnectionError(err)) {
+							wrapper.dead = true;
+						}
+						cb(err, rows, fields);
+					}, opts);
+				},
+				// Destroy dead wrappers rather than returning broken sessions to the pool.
+				release: () => {
+					if (wrapper.dead) {
+						pool.destroy(wrapper).catch(() => {});
+					} else {
+						pool.release(wrapper).catch(() => {});
+					}
+				},
 			});
 		},
 
