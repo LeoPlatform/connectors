@@ -270,14 +270,15 @@ module.exports = function(dbconfig, options) {
 		const schema = dbconfig.schema || 'default';
 		const qualifiedTable = `${catalog}.${schema}.${client.escapeId(table).replace(/`/g, '')}`;
 
-		// Filter out __leo_delete__ markers: bypassSCD dims have no row-close logic
-		// in this connector, so delete markers are discarded rather than staged as
-		// data rows (which would be silent data corruption). Soft-closing
-		// (_enddate=auditdate WHERE _current=true) is the postgres bypass-path
-		// behavior but is deferred here — no dim queue currently generates deletes
-		// under bypassSlowlyChangingDimensions=true.
-		const dataStream = ls.through((obj, done) => {
+		// Collect __leo_delete__ markers for soft-close after staging.
+		// id-marked deletes are also pushed to staging (mirrors postgres importDimension).
+		const deleteRecords = [];
+		const dataStream = ls.through((obj, done, push) => {
 			if (obj.__leo_delete__) {
+				if (obj.__leo_delete__ === 'id') {
+					push(obj);
+				}
+				deleteRecords.push(obj);
 				done();
 			} else {
 				done(null, obj);
@@ -318,37 +319,41 @@ module.exports = function(dbconfig, options) {
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
-			let naturalKeyFilter = null;
+			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, done), {}, (flushErr) => {
+				if (flushErr) return mergeCallback(flushErr);
 
-			if (pruneCol) {
-				const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-				const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
-				withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-					if (qErr) {
-						logger.error('MIN query failed after retries, aborting importDimension:', qErr);
-						return mergeCallback(qErr);
-					}
-					if (results && results[0]) {
-						stagingCount = results[0].cnt || 0;
-						if (results[0].minval != null) {
-							naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+				let naturalKeyFilter = null;
+
+				if (pruneCol) {
+					const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+					const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
+					withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
+						if (qErr) {
+							logger.error('MIN query failed after retries, aborting importDimension:', qErr);
+							return mergeCallback(qErr);
 						}
-					}
-					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
-				});
-			} else {
-				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-				withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
-					if (countErr) {
-						logger.error('COUNT query failed after retries, aborting importDimension:', countErr);
-						return mergeCallback(countErr);
-					}
-					if (countResults && countResults[0]) {
-						stagingCount = countResults[0].cnt || 0;
-					}
-					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
-				});
-			}
+						if (results && results[0]) {
+							stagingCount = results[0].cnt || 0;
+							if (results[0].minval != null) {
+								naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
+							}
+						}
+						withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
+					});
+				} else {
+					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
+					withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
+						if (countErr) {
+							logger.error('COUNT query failed after retries, aborting importDimension:', countErr);
+							return mergeCallback(countErr);
+						}
+						if (countResults && countResults[0]) {
+							stagingCount = countResults[0].cnt || 0;
+						}
+						withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
+					});
+				}
+			});
 		});
 	};
 
@@ -422,6 +427,28 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 	const tasks = Object.keys(byField).map(field => done => {
 		const ids = byField[field].map(v => typeof v === 'string' ? `'${v.replace(/'/g, "\\'")}'` : v).join(',');
 		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids})`;
+		client.query(updateSql, [], done);
+	});
+
+	async.series(tasks, callback);
+}
+
+function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, callback) {
+	if (!deleteRecords.length) return callback();
+
+	const byField = {};
+	deleteRecords.forEach(obj => {
+		const field = obj.__leo_delete__;
+		const id = obj.__leo_delete_id__;
+		if (id !== undefined) {
+			if (!byField[field]) byField[field] = [];
+			byField[field].push(id);
+		}
+	});
+
+	const tasks = Object.keys(byField).map(field => done => {
+		const ids = byField[field].map(v => typeof v === 'string' ? `'${v.replace(/'/g, "\\'")}'` : v).join(',');
+		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids}) AND \`${columnConfig._current}\` = true`;
 		client.query(updateSql, [], done);
 	});
 

@@ -42,6 +42,7 @@ describe('importDimension — orchestration', () => {
 					if (opts.failCountQuery) return finalCb(new Error('COUNT query failed'));
 					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
 				}
+				if (sql.startsWith('UPDATE') && opts.failDimDeleteUpdate) return finalCb(new Error('UPDATE failed'));
 				return finalCb(null, []);
 			}),
 		};
@@ -174,20 +175,75 @@ describe('importDimension — orchestration', () => {
 		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
-	it('dataStream callback filters __leo_delete__ markers from the staging path', async () => {
+	it('dataStream callback collects non-id __leo_delete__ markers without staging them', async () => {
 		const ctx = setup({ tableFields: dimTableFields });
 		const runP = runToCompletion(ctx, 'd_account', ['retailer_id']);
 		await runP;
 		// throughCallbacks[0] is the dataStream delete filter
 		const dataStreamCb = ctx.throughCallbacks[0];
 		const forwarded = [];
-		dataStreamCb({ __leo_delete__: 'retailer_id', __leo_delete_id__: 42 }, (err, obj) => {
-			if (obj !== undefined) forwarded.push(obj);
-		});
+		const noop = () => {};
+		// Non-id delete: should NOT be forwarded to staging (push not called)
+		dataStreamCb({ __leo_delete__: 'retailer_id', __leo_delete_id__: 42 }, noop, obj => forwarded.push(obj));
+		// Normal object: should flow through via done(null, obj)
 		dataStreamCb({ retailer_id: 1, name: 'Acme' }, (err, obj) => {
 			if (obj !== undefined) forwarded.push(obj);
-		});
+		}, noop);
 		expect(forwarded).to.deep.equal([{ retailer_id: 1, name: 'Acme' }]);
+	});
+
+	it('dataStream callback pushes id-marked deletes to staging', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		await runToCompletion(ctx, 'd_account', ['retailer_id']);
+		const dataStreamCb = ctx.throughCallbacks[0];
+		const pushed = [];
+		dataStreamCb(
+			{ __leo_delete__: 'id', __leo_delete_id__: 42 },
+			() => {},
+			obj => pushed.push(obj)
+		);
+		expect(pushed).to.deep.equal([{ __leo_delete__: 'id', __leo_delete_id__: 42 }]);
+	});
+
+	it('issues a dim soft-close UPDATE for __leo_delete__ records before MERGE', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		// Inject a delete record by calling the dataStream callback before the pipeline completes
+		ctx.throughCallbacks[0](
+			{ __leo_delete__: 'retailer_id', __leo_delete_id__: 42 },
+			() => {},
+			() => {}
+		);
+		ctx.completePipeline();
+		await p;
+		const updateQuery = ctx.queryHistory.find(q => q.startsWith('UPDATE'));
+		expect(updateQuery, 'expected UPDATE query for dim soft-close').to.exist;
+		expect(updateQuery).to.include('`_enddate`');
+		expect(updateQuery).to.include('`retailer_id`');
+		expect(updateQuery).to.include('42');
+		expect(updateQuery).to.include('`_current` = true');
+	});
+
+	it('flushDimDeletes error propagates and skips MERGE', async () => {
+		const ctx = setup({ tableFields: dimTableFields, failDimDeleteUpdate: true });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		ctx.throughCallbacks[0](
+			{ __leo_delete__: 'retailer_id', __leo_delete_id__: 42 },
+			() => {},
+			() => {}
+		);
+		ctx.completePipeline();
+		let caught;
+		try {
+			await p;
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught, 'expected error from UPDATE failure').to.exist;
+		expect(caught.message).to.equal('UPDATE failed');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
 	it('returns staging cnt as result.count (single NK — pruneCol path)', async () => {
