@@ -7,7 +7,7 @@
 
 const { Readable } = require('stream');
 const { expect } = require('chai');
-const { getConfig, checkNonprod } = require('./helpers/databricks.js');
+const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 const { TABLE, tableDef, makeRecords } = require('./helpers/test_fact.js');
 const dwconnectFactory = require('../../lib/dwconnect.js');
 
@@ -16,7 +16,7 @@ let dbconfig;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host);
+	checkAllowedHost(dbconfig.host);
 });
 
 describe('Idempotency: same batch twice', function() {

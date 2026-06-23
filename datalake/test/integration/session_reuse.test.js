@@ -14,7 +14,7 @@
 // Skips when ~/.databrickscfg [dev-cup] (or env override) is unavailable.
 
 const { expect } = require('chai');
-const { getConfig, checkNonprod } = require('./helpers/databricks.js');
+const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 const connectFactory = require('../../lib/connect.js');
 
 let dbconfig;
@@ -23,7 +23,7 @@ let client;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host);
+	checkAllowedHost(dbconfig.host);
 });
 
 describe('Session pooling and STATEMENT_TIMEOUT', function() {

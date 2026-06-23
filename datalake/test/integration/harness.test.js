@@ -8,7 +8,7 @@
 // isolation is per-branch catalog, not per-run UUID schema.
 
 const { expect } = require('chai');
-const { getConfig, checkNonprod } = require('./helpers/databricks.js');
+const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 
 let dbconfig;
 let client;
@@ -16,7 +16,7 @@ let client;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host);
+	checkAllowedHost(dbconfig.host);
 });
 
 describe('Integration harness', function() {

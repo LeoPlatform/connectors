@@ -169,6 +169,7 @@ The shared audit-timestamp helper [`lib/audit_timestamp.js`](lib/audit_timestamp
 Run in this order; all must pass before considering work complete:
 1. `npm run lint` — eslint
 2. `npm test` — mocha unit tests
+3. `npm run test:int-local` — integration tests against the dev Databricks workspace (requires `~/.databrickscfg [dev-cup]`); uses the `public_stage_local` isolation schema via `LEO_LOCAL=true`
 
 Note: this connector is plain JavaScript (matches all siblings in `connectors/`). There is no TypeScript compilation step.
 

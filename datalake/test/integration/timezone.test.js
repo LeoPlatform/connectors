@@ -15,7 +15,7 @@
 
 const { Readable } = require('stream');
 const { expect } = require('chai');
-const { getConfig, checkNonprod } = require('./helpers/databricks.js');
+const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 const connectFactory = require('../../lib/connect.js');
 const { stagingS3Path } = require('../../lib/connect.js');
 
@@ -25,7 +25,7 @@ let client;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host);
+	checkAllowedHost(dbconfig.host);
 });
 
 describe('Timezone handling', function() {

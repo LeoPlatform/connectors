@@ -5,7 +5,11 @@
 // Resolution order per field:
 //   1. Environment variable (DATABRICKS_HOST, DATABRICKS_CLIENT_ID, etc.) — explicit override
 //   2. ~/.databrickscfg [<profile>] — default `dev-cup`, override via DATABRICKS_CONFIG_PROFILE
-//   3. Locked defaults below (catalog, schema, warehouse HTTP path, region, S3 bucket/prefix)
+//   3. Per-workspace defaults auto-selected by host (see DEFAULTS_BY_HOST below)
+//
+// Local developer isolation: set LEO_LOCAL=true to use the `public_stage_local` schema
+// and matching S3 prefix instead of the shared `public_stage`. Follows the same leo-config
+// convention bots use. Individual env vars still override any field.
 //
 // If neither env nor profile yields host + auth (token OR client_id/client_secret),
 // `getConfig()` returns null and the caller should `this.skip()` so `npm run test:int`
@@ -22,30 +26,41 @@ const path = require('path');
 
 const DEFAULT_PROFILE = 'dev-cup';
 
-// Locked defaults — BUILD_PLAN.md §"Open questions" #3 (resolved 2026-05-26).
-// s3Bucket = `datalake-dev-641864320185-us-east-1` — the main data-lake bucket the
-// existing offload bot writes to (data-lake-ingestion-bots/serverless.yml) and the
-// catalog's `datalake-dev-external-location` covers. NOT `datalake-stage-dev-...`
-// which is a separate Databricks-only staging bucket.
-//
+// Per-environment defaults keyed by host fragment.
 // s3Prefix follows BUILD_PLAN.md §6: per-schema under `stage/data/internal/rithum/`.
-const DEFAULTS = {
-	path: '/sql/1.0/warehouses/5d84579f11466e3f',
-	catalog: 'de_cup_dev_us',
-	schema: 'public_stage_local',
-	region: 'us-east-1',
-	s3Bucket: 'datalake-dev-641864320185-us-east-1',
-	s3Prefix: 'stage/data/internal/rithum/public_stage_local',
+// Both workspaces default to the shared `public_stage` schema. Set LEO_LOCAL=true to use
+// the `public_stage_local` isolation schema instead (same leo-config convention bots use).
+// Catalog naming: `de_cup_{env}_us` convention.
+// All fields are still overridable by env var (see getConfig()).
+const DEFAULTS_BY_HOST = {
+	'dbc-0b0acbc9-467a': { // dev workspace (Dsco test)
+		path: '/sql/1.0/warehouses/5d84579f11466e3f',
+		catalog: 'de_cup_dev_us',
+		schema: 'public_stage',
+		region: 'us-east-1',
+		s3Bucket: 'datalake-dev-641864320185-us-east-1',
+		s3Prefix: 'stage/data/internal/rithum/public_stage',
+	},
+	'dbc-903fa4be-915e': { // preprod workspace (Dsco staging)
+		path: '/sql/1.0/warehouses/767c382814eb7b30',
+		catalog: 'de_cup_preprod_us',
+		schema: 'public_stage',
+		region: 'us-east-1',
+		s3Bucket: 'datalake-preprod-641864320185-us-east-1',
+		s3Prefix: 'stage/data/internal/rithum/public_stage',
+	},
 };
+const DEV_DEFAULTS = DEFAULTS_BY_HOST['dbc-0b0acbc9-467a'];
 
-// Nonprod safety guard: refuse to run against prod resources.
-const NONPROD_HOST_ALLOWLIST = [
-	'dbc-0b0acbc9-467a.cloud.databricks.com',
+// Safety guard: refuse to run against prod. Only dev and preprod are allowed.
+const ALLOWED_HOSTS = [
+	'dbc-0b0acbc9-467a.cloud.databricks.com', // dev
+	'dbc-903fa4be-915e.cloud.databricks.com', // preprod
 ];
 
-function checkNonprod(host) {
-	if (!NONPROD_HOST_ALLOWLIST.some(h => host.includes(h))) {
-		throw new Error(`SAFETY: DATABRICKS_HOST "${host}" is not in nonprod allowlist. Refusing to run integration tests against a non-dev workspace.`);
+function checkAllowedHost(host) {
+	if (!ALLOWED_HOSTS.some(h => host.includes(h))) {
+		throw new Error(`SAFETY: DATABRICKS_HOST "${host}" is not in the allowed-host list. Refusing to run integration tests against this workspace (prod is blocked).`);
 	}
 }
 
@@ -98,19 +113,25 @@ function getConfig() {
 		return null; // caller should this.skip()
 	}
 
+	const envKey = Object.keys(DEFAULTS_BY_HOST).find(k => host.includes(k));
+	const envDefaults = DEFAULTS_BY_HOST[envKey] || DEV_DEFAULTS;
+	const isLocal = process.env.LEO_LOCAL === 'true';
+	const defaultSchema = isLocal ? envDefaults.schema + '_local' : envDefaults.schema;
+	const defaultS3Prefix = isLocal ? envDefaults.s3Prefix + '_local' : envDefaults.s3Prefix;
+
 	return {
 		host,
-		path: process.env.DATABRICKS_HTTP_PATH || DEFAULTS.path,
+		path: process.env.DATABRICKS_HTTP_PATH || envDefaults.path,
 		token: token || undefined,
 		clientId: clientId || undefined,
 		clientSecret: clientSecret || undefined,
-		catalog: process.env.DATABRICKS_CATALOG || DEFAULTS.catalog,
-		schema: process.env.DATABRICKS_SCHEMA || DEFAULTS.schema,
-		region: process.env.AWS_REGION || DEFAULTS.region,
-		s3Bucket: process.env.DATALAKE_S3_BUCKET || DEFAULTS.s3Bucket,
-		s3Prefix: process.env.DATALAKE_S3_PREFIX || DEFAULTS.s3Prefix,
+		catalog: process.env.DATABRICKS_CATALOG || envDefaults.catalog,
+		schema: process.env.DATABRICKS_SCHEMA || defaultSchema,
+		region: process.env.AWS_REGION || envDefaults.region,
+		s3Bucket: process.env.DATALAKE_S3_BUCKET || envDefaults.s3Bucket,
+		s3Prefix: process.env.DATALAKE_S3_PREFIX || defaultS3Prefix,
 		profileName,
 	};
 }
 
-module.exports = { getConfig, checkNonprod, DEFAULTS };
+module.exports = { getConfig, checkAllowedHost, ALLOWED_HOSTS, DEFAULTS_BY_HOST };

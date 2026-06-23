@@ -10,7 +10,7 @@
 
 const { Readable } = require('stream');
 const { expect } = require('chai');
-const { getConfig, checkNonprod } = require('./helpers/databricks.js');
+const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 const { TABLE, tableDef, makeRecords } = require('./helpers/test_fact.js');
 const fingerprint64 = require('../../lib/surrogate_key.js');
 const dwconnectFactory = require('../../lib/dwconnect.js');
@@ -21,7 +21,7 @@ let client;
 before(function() {
 	dbconfig = getConfig();
 	if (!dbconfig) return this.skip();
-	checkNonprod(dbconfig.host);
+	checkAllowedHost(dbconfig.host);
 });
 
 describe('Round-trip: 100-event fact load', function() {

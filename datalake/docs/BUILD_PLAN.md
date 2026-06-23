@@ -15,7 +15,7 @@ Locked decisions:
 
 ## Status — 2026-05-30
 
-**Steps 1–11 complete and passing locally.** `npm test` (143) + `npm run test:int` (23) green against `dbc-0b0acbc9-467a.cloud.databricks.com` / catalog `de_cup_dev_us` / schema `public_stage_local`. Step 12 (equivalence script) deferred per advisor scope.
+**Steps 1–11 complete and passing locally.** `npm test` (143) + `npm run test:int-local` (23) green against `dbc-0b0acbc9-467a.cloud.databricks.com` / catalog `de_cup_dev_us` / schema `public_stage_local`. Step 12 (equivalence script) deferred per advisor scope.
 
 **Latent connector bugs surfaced and fixed during integration testing** (none were caught by unit tests because they stub the SDK):
 1. `executeStatement({parameters: …})` is not a real option name in `@databricks/sql` v1.8 — bind params were being silently ignored. Switched to `ordinalParameters`.
@@ -28,7 +28,7 @@ Locked decisions:
 
 **Auth + AWS plumbing for local dev** (resolves open questions #3, #6):
 - `lib/connect.js` now supports OAuth M2M (`authType: 'databricks-oauth'` + `oauthClientId`/`oauthClientSecret`) in addition to PAT.
-- Test helper `test/integration/helpers/databricks.js` is **profile-first**: reads `~/.databrickscfg [dev-cup]` for host + client_id + client_secret, applies locked defaults for warehouse HTTP path / catalog / schema / region / S3 bucket / S3 prefix, accepts env-var overrides per field. `npm run test:int` Just Works on the developer's laptop with no env setup.
+- Test helper `test/integration/helpers/databricks.js` is **profile-first**: reads `~/.databrickscfg [dev-cup]` for host + client_id + client_secret, auto-selects per-workspace defaults for warehouse HTTP path / catalog / schema / region / S3 bucket / S3 prefix, accepts env-var overrides per field. `npm run test:int-local` (sets `LEO_LOCAL=true`) uses the `public_stage_local` isolation schema; `npm run test:int` uses the shared `public_stage` schema.
 
 **Cross-account S3 write (resolved via bucket policy, not assume-role):**
 Local AWS identity (`dsco-aws-poweruser` in account 220162591379) needs to PutObject to the DE-account staging bucket. Earlier attempts used `sts:AssumeRole` in the test helper, but that violated the Dsco convention that developers shouldn't need per-resource credential handling. **Resolution:** added a bucket-policy grant in `data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py` (`_create_dsco_developer_resource_policy`, dev+test only) that mirrors the `de-ingestion-bot-{env}-role` S3 surface onto `arn:aws:iam::220162591379:role/dsco-aws-poweruser`. The connector and the test helper now use the standard AWS credential chain — no assume-role, no special profiles, no env-var manipulation.
