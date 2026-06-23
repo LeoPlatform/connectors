@@ -75,8 +75,8 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 ## 2. BUILD_PLAN.md items not yet implemented
 
-### [Gap] Step 8 — `test/unit/load.smoke.test.js` (offline smoke through real `load.js`)
-BUILD_PLAN Step 8 calls for a unit test that pipes a 100-event in-memory stream through `connectors/common/datawarehouse/load.js` with a stubbed connect+S3, asserting the expected call sequence. **Not present** (no `load.smoke.test.js` under `test/unit/`). Useful as a wiring guard for the bot integration.
+### ~~[Gap] Step 8 — `test/unit/load.smoke.test.js` (offline smoke through real `load.js`)~~ ✓ Done
+6 unit tests added. Pipes 100 synthetic events through the real `load.js` (including `combine.js` sort-and-dedup) into the real `lib/dwconnect.js importFact`, with `connect.js` and S3 stubbed at the `connect.js` boundary. Asserts the expected call sequence: `streamToTableFromS3`, MIN prune query, MERGE INTO, `insertMissingDimensions`, `dropTempTables`. 194 unit tests pass, lint clean.
 
 ### [Gap] Step 9 — CI workflow scaffolding (per-branch cloned catalog)
 BUILD_PLAN Step 9 calls for two GitHub Actions workflows paralleling `data-lake-datapipelines`: `create-catalog.yml` on branch `create` and `destroy-catalog.yml` on branch `delete`, both using `chub-engineering/commercehub-actions/data-lake/shallow_clone` / `destroy`. **Not present** in `.github/workflows/`. Implication: today's integration tests only run locally against `de_cup_dev_us` / `public_stage_local`; CI doesn't validate against a per-branch isolated catalog.
@@ -153,7 +153,7 @@ BUILD_PLAN Step 7.2 rationale: RStreams already provides exactly-once + checkpoi
 All §1d correctness bugs are fixed. §1e items are addressed. Next items by deployment readiness:
 
 1. Write `offload_to_datalake.js` bot in `general/` — the library is ready; nothing runs without it.
-2. Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.
+2. ~~Step 8 smoke test (`test/unit/load.smoke.test.js`) — small regression guard before wiring the bot.~~ ✓ Done.
 
 **Blocked on infra/fixture inputs (don't pull forward):**
 - Step 9 CI catalog cloning workflows
