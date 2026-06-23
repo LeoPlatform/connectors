@@ -217,7 +217,7 @@ module.exports = function(dbconfig, options) {
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
-			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, done), {}, (flushErr) => {
+			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
 				let naturalKeyFilter = null;
 
@@ -319,7 +319,7 @@ module.exports = function(dbconfig, options) {
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
-			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, done), {}, (flushErr) => {
+			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
 
 				let naturalKeyFilter = null;
@@ -410,15 +410,16 @@ function literalForType(value, dataType, escapeValueNoToLower) {
 	return escapeValueNoToLower(String(value));
 }
 
-function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, callback) {
+function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, callback) {
 	if (!deleteRecords.length) return callback();
 
-	// Group deletes by the column being deleted
+	// Group deletes by the column being deleted; skip records whose __leo_delete__
+	// value is not a real column (mirrors postgres deletesSetup colLookup[field] gate).
 	const byField = {};
 	deleteRecords.forEach(obj => {
 		const field = obj.__leo_delete__;
 		const id = obj.__leo_delete_id__;
-		if (id !== undefined) {
+		if (id !== undefined && fieldLookup[field.toLowerCase()]) {
 			if (!byField[field]) byField[field] = [];
 			byField[field].push(id);
 		}
@@ -433,14 +434,15 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 	async.series(tasks, callback);
 }
 
-function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, callback) {
+function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, fieldLookup, callback) {
 	if (!deleteRecords.length) return callback();
 
+	// Same column-existence gate as flushDeletes and postgres deletesSetup.
 	const byField = {};
 	deleteRecords.forEach(obj => {
 		const field = obj.__leo_delete__;
 		const id = obj.__leo_delete_id__;
-		if (id !== undefined) {
+		if (id !== undefined && fieldLookup[field.toLowerCase()]) {
 			if (!byField[field]) byField[field] = [];
 			byField[field].push(id);
 		}

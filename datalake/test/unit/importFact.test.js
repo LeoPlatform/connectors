@@ -365,6 +365,16 @@ describe('importFact — orchestration', () => {
 		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
+	it('skips flushDeletes UPDATE when __leo_delete__ names a non-existent column', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		ctx.throughCallbacks[0]({ __leo_delete__: 'bogus_column', __leo_delete_id__: 99 }, () => {});
+		await new Promise(setImmediate);
+		ctx.completePipeline();
+		await p;
+		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
+	});
+
 	it('propagates a MIN query error and skips MERGE', async () => {
 		const ctx = setup({ tableFields: factTableFields, failMinQuery: true });
 		let caught;

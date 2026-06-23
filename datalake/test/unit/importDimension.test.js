@@ -246,6 +246,20 @@ describe('importDimension — orchestration', () => {
 		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
+	it('skips flushDimDeletes UPDATE when __leo_delete__ names a non-existent column', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		ctx.throughCallbacks[0](
+			{ __leo_delete__: 'bogus_column', __leo_delete_id__: 99 },
+			() => {},
+			() => {}
+		);
+		ctx.completePipeline();
+		await p;
+		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
+	});
+
 	it('returns staging cnt as result.count (single NK — pruneCol path)', async () => {
 		const ctx = setup({ tableFields: dimTableFields, cnt: 42 });
 		const result = await runToCompletion(ctx, 'd_account', ['retailer_id']);
