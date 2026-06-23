@@ -15,6 +15,9 @@ module.exports = class Dol extends parent {
 		query = sqlstring.format(query, queryIds);
 		logger.debug('Formatted Domain Query', query);
 
+		// inRowMode:true — leo-connector-common's mapResults (common/dol.js:492) requires
+		// positional array rows so it can slice sections demarcated by `prefix_` sentinel
+		// columns. connect.js converts Databricks object rows to arrays to satisfy this.
 		this.client.query(query, (err, results, fields) => {
 			this.processDomainQuery(domainObject, domains, done, err, results, fields);
 		}, {
@@ -26,6 +29,7 @@ module.exports = class Dol extends parent {
 		query = sqlstring.format(query, queryIds);
 		logger.debug('Formatted Join Query', query);
 
+		// inRowMode:true — same reason as buildDomainQuery above.
 		this.client.query(query, (err, results, fields) => {
 			this.processJoinQuery(joinObject, name, domains, done, err, results, fields);
 		}, {

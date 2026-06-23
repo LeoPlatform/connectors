@@ -281,6 +281,79 @@ describe('connect.js', () => {
 		});
 	});
 
+	describe('createSessionClient.query() — inRowMode', () => {
+		async function makeWrapper(fetchAllResult) {
+			const operation = {
+				fetchAll: sinon.stub().resolves(fetchAllResult),
+				close: sinon.stub().resolves(),
+			};
+			databricksStub._session.executeStatement = sinon.stub().resolves(operation);
+			// connectFactory must be called first so createPool registers the factory
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			return createFn();
+		}
+
+		it('returns object rows by default (no opts)', async () => {
+			const rows = [{ a: 1, b: 2 }, { a: 3, b: 4 }];
+			const wrapper = await makeWrapper(rows);
+			await new Promise((resolve, reject) => {
+				wrapper.query('SELECT 1', [], (err, result, fields) => {
+					if (err) return reject(err);
+					expect(result).to.deep.equal(rows);
+					expect(fields.map(f => f.name)).to.deep.equal(['a', 'b']);
+					resolve();
+				});
+			});
+		});
+
+		it('returns array rows when inRowMode:true', async () => {
+			const rows = [{ a: 1, b: 2 }, { a: 3, b: 4 }];
+			const wrapper = await makeWrapper(rows);
+			await new Promise((resolve, reject) => {
+				wrapper.query('SELECT 1', [], (err, result, fields) => {
+					if (err) return reject(err);
+					expect(result).to.deep.equal([[1, 2], [3, 4]]);
+					expect(fields.map(f => f.name)).to.deep.equal(['a', 'b']);
+					resolve();
+				}, { inRowMode: true });
+			});
+		});
+
+		it('threads opts through client.query() 3-arg call form (callback second)', (done) => {
+			const rows = [{ x: 10 }, { x: 20 }];
+			const operation = {
+				fetchAll: sinon.stub().resolves(rows),
+				close: sinon.stub().resolves(),
+			};
+			databricksStub._session.executeStatement = sinon.stub().resolves(operation);
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+
+			createFn().then(wrapper => {
+				poolStub.acquire.resolves(wrapper);
+				client.query('SELECT x', (err, result, fields) => {
+					expect(err).to.be.null;
+					expect(result).to.deep.equal([[10], [20]]);
+					expect(fields.map(f => f.name)).to.deep.equal(['x']);
+					done();
+				}, { inRowMode: true });
+			}).catch(done);
+		});
+
+		it('returns empty array without error when fetchAll returns []', async () => {
+			const wrapper = await makeWrapper([]);
+			await new Promise((resolve, reject) => {
+				wrapper.query('SELECT 1', [], (err, result, fields) => {
+					if (err) return reject(err);
+					expect(result).to.deep.equal([]);
+					expect(fields).to.deep.equal([]);
+					resolve();
+				}, { inRowMode: true });
+			});
+		});
+	});
+
 	describe('pool.validate() — dead-flag check', () => {
 		it('validate returns true when dead=false', async () => {
 			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });

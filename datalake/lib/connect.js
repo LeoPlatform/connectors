@@ -197,6 +197,7 @@ module.exports = function(config) {
 			if (typeof paramsOrCb === 'function') {
 				cb = paramsOrCb;
 				params = [];
+				opts = cbOrOpts;
 			} else {
 				params = paramsOrCb || [];
 				cb = cbOrOpts;
@@ -379,7 +380,7 @@ function createSessionClient(session, _parentCache, _config) {
 		_session: session,
 		dead: false,
 
-		query: async (sql, paramsOrCb, cbOrOpts, _opts) => {
+		query: async (sql, paramsOrCb, cbOrOpts, opts) => {
 			let params, cb;
 			if (typeof paramsOrCb === 'function') {
 				cb = paramsOrCb;
@@ -394,9 +395,22 @@ function createSessionClient(session, _parentCache, _config) {
 				// passed `parameters:` which is not a recognized option — binds were silently ignored.
 				const execOpts = params.length ? { ordinalParameters: params } : {};
 				const operation = await session.executeStatement(sql, execOpts);
-				const result = await operation.fetchAll();
+				const rawResult = await operation.fetchAll();
 				await operation.close();
-				const fields = result.length ? Object.keys(result[0]).map(name => ({ name })) : [];
+				const fields = rawResult.length ? Object.keys(rawResult[0]).map(name => ({ name })) : [];
+				// inRowMode: leo-connector-common's mapResults (common/dol.js:492) requires
+				// positional array rows so it can call r.slice(start, end) to extract
+				// sub-object sections demarcated by `prefix_` sentinel columns. In postgres
+				// this is free — pg's rowMode:'array' never builds objects in the driver.
+				// Here, @databricks/sql fetchAll() always returns object rows, so we do an
+				// extra object→array conversion just to satisfy the common contract.
+				// The round-trip is: Databricks objects → arrays (here) → mapResults → objects.
+				// Field order comes from Object.keys(rawResult[0]), which the Databricks SQL
+				// driver preserves in SELECT column order — that ordering must match what
+				// mapResults reads from the `fields` array.
+				const result = (opts && opts.inRowMode && rawResult.length)
+					? rawResult.map(row => fields.map(f => row[f.name]))
+					: rawResult;
 				cb(null, result, fields);
 			} catch (err) {
 				cb(err);

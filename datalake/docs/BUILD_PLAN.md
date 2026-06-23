@@ -89,6 +89,7 @@ Lock separator + null-rendering against the Redshift `FARMFINGERPRINT64()` conve
 
 ### Step 5 — `lib/dol.js` and `lib/sql.js` (DDL/DML generation)
 - `lib/dol.js`: near-verbatim port of `connectors/postgres/lib/dol.js` (83 lines — superset of the redshift version; extends `leo-connector-common/dol`); absorb identifier-quoting differences via `client.escapeId`. Note: this is the consumer-side query builder, not on the publishing critical path — but cheap to port now.
+  - **`inRowMode` round-trip**: `buildDomainQuery`/`buildJoinQuery` pass `inRowMode: true` because `leo-connector-common`'s `mapResults` requires positional array rows (it calls `r.slice(start, end)` to extract sections demarcated by `prefix_` sentinel columns). In postgres this is free — pg's `rowMode:'array'` never builds objects in the driver. With `@databricks/sql`, `fetchAll()` always returns objects, so `connect.js createSessionClient.query()` converts them to arrays (Databricks objects → arrays → `mapResults` → objects). This is pure compatibility overhead; the conversion happens in `connect.js` and callers don't need to know about it.
 - `lib/sql.js` (new, pure functions):
   - `createTable(...)` → `CREATE TABLE IF NOT EXISTS … USING DELTA`. Type mapping (audit of all cloned dw_fields found only these scalar types — **no `super`/`json` columns exist in scope**):
 
