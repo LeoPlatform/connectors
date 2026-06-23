@@ -1,6 +1,6 @@
 # Datalake connector — work list (next session)
 
-Consolidates three sources reviewed 2026-05-29:
+Consolidates three sources reviewed 2026-06-22:
 
 1. Refreshed datalake-vs-postgres divergence review (post session-reuse, commit `b62d3b8`).
 2. [BUILD_PLAN.md](BUILD_PLAN.md) items not yet implemented.
@@ -130,11 +130,6 @@ Out of scope. Reopen when explicitly scoped.
 
 ### [Defer] `streamToTable` (non-S3 direct-write path)
 [datalake/lib/connect.js:349-351](../lib/connect.js#L349-L351) throws. Postgres has a non-Redshift branch that uses direct COPY; datalake doesn't need it — all paths go through S3 staging. Keep as `throw` for interface parity.
-
-### [Defer] Dimension code paths — `importDimension` and `linkDimensions`
-`insertMissingDimensions` is a deliberate no-op (see §1e and porting-decisions.md). `importDimension` and `linkDimensions` are still unimplemented stubs. BUILD_PLAN Step 7 covers fact tables only; `bypassSlowlyChangingDimensions: true` in all configs.
-
-**This is not indefinitely deferrable.** The `dim` and `item-quantity-dim` queues contain both dim and fact tables — any batch will fail at `importDimension` for dim rows. Only `supplier-catalog-dim` is entirely fact-table (`f_item_change_event` only) and can be deployed today without this work. Reopen when deploying either of the other two queues.
 
 ### [Defer] `alterColumnType` wiring
 Per [porting-decisions.md](porting-decisions.md): postgres also doesn't wire it. Defer indefinitely; only file a ticket if a dw_fields type evolution actually needs it.
