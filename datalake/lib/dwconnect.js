@@ -235,7 +235,7 @@ module.exports = function(dbconfig, options) {
 								naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
 							}
 						}
-						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
+						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
 					});
 				} else {
 					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
@@ -334,7 +334,7 @@ module.exports = function(dbconfig, options) {
 							naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
 						}
 					}
-					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, done), {}, mergeCallback);
+					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
 				});
 			} else {
 				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;

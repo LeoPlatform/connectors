@@ -131,6 +131,14 @@ describe('importDimension — orchestration', () => {
 		expect(minQuery).to.include('`retailer_id`');
 	});
 
+	it('single-NK prune filter lands in the MERGE predicate even without clusterKey', async () => {
+		const ctx = setup({ tableFields: dimTableFields, minVal: 99 });
+		await runToCompletion(ctx, 'd_account', ['retailer_id']); // no clusterKey — pruneCol falls back to single NK
+		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
+		expect(merge, 'expected a MERGE INTO query').to.exist;
+		expect(merge).to.include('>= 99');
+	});
+
 	it('prefers tableDef.clusterKey over nk as the prune column', async () => {
 		const ctx = setup({ tableFields: dimTableFields });
 		await runToCompletion(ctx, 'd_account', ['retailer_id'], { clusterKey: 'name' });

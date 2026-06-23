@@ -271,10 +271,15 @@ describe('importFact — orchestration', () => {
 		expect(minQuery).to.not.include('MIN(`id`)');
 	});
 
+	it('single-NK prune filter lands in the MERGE predicate even without clusterKey', async () => {
+		const ctx = setup({ tableFields: factTableFields, minVal: 42 });
+		await runToCompletion(ctx, 'f_order_item', ['id']); // no clusterKey — pruneCol falls back to single NK
+		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
+		expect(merge, 'expected a MERGE INTO query').to.exist;
+		expect(merge).to.include('>= 42');
+	});
+
 	it('numeric prune column produces unquoted naturalKeyFilter in the MERGE predicate', async () => {
-		// mergeFact only emits the cluster predicate when tableDef.clusterKey is
-		// set (without it, importFact still runs the MIN query but the literal
-		// has nowhere to land in the SQL).
 		const ctx = setup({ tableFields: factTableFields, minVal: 12345 });
 		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'id' });
 		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
