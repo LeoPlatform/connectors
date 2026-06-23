@@ -66,7 +66,6 @@ describe('Schema evolution: add column mid-flight', function() {
 
 	it('loads 10 more rows with extra_col set; prior rows show null', async function() {
 		if (!dbconfig) return this.skip();
-		client.clearSchemaCache(); // pick up the new column for staging columnDefs
 		const extraRecords = [];
 		for (let i = 101; i <= 110; i++) {
 			extraRecords.push(Object.assign({}, makeRecords(i)[i - 1], {

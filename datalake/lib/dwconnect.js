@@ -121,7 +121,10 @@ module.exports = function(dbconfig, options) {
 							[], addDone
 						);
 					});
-					async.series(addTasks, done);
+					async.series(addTasks, (err) => {
+						if (!err) client.clearSchemaCache();
+						done(err);
+					});
 				} else {
 					done();
 				}
