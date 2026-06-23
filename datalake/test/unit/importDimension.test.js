@@ -39,6 +39,7 @@ describe('importDimension — orchestration', () => {
 					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
 				}
 				if (sql.indexOf('SELECT CAST(COUNT(') === 0) {
+					if (opts.failCountQuery) return finalCb(new Error('COUNT query failed'));
 					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
 				}
 				return finalCb(null, []);
@@ -205,6 +206,19 @@ describe('importDimension — orchestration', () => {
 		}
 		expect(caught, 'expected an error from MIN query').to.exist;
 		expect(caught.message).to.equal('MIN query failed');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+	});
+
+	it('propagates a COUNT query error and skips MERGE (composite NK path)', async () => {
+		const ctx = setup({ tableFields: dimTableFields, failCountQuery: true });
+		let caught;
+		try {
+			await runToCompletion(ctx, 'd_account', ['retailer_id', 'name']);
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught, 'expected an error from COUNT query').to.exist;
+		expect(caught.message).to.equal('COUNT query failed');
 		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 

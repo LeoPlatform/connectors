@@ -239,8 +239,12 @@ module.exports = function(dbconfig, options) {
 					});
 				} else {
 					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-					client.query(countSql, [], (countErr, countResults) => {
-						if (!countErr && countResults && countResults[0]) {
+					withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
+						if (countErr) {
+							logger.error('COUNT query failed after retries, aborting importFact:', countErr);
+							return mergeCallback(countErr);
+						}
+						if (countResults && countResults[0]) {
 							stagingCount = countResults[0].cnt || 0;
 						}
 						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
@@ -334,8 +338,12 @@ module.exports = function(dbconfig, options) {
 				});
 			} else {
 				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-				client.query(countSql, [], (countErr, countResults) => {
-					if (!countErr && countResults && countResults[0]) {
+				withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
+					if (countErr) {
+						logger.error('COUNT query failed after retries, aborting importDimension:', countErr);
+						return mergeCallback(countErr);
+					}
+					if (countResults && countResults[0]) {
 						stagingCount = countResults[0].cnt || 0;
 					}
 					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
