@@ -102,7 +102,7 @@ All needed before the Step 9 CI workflows can authenticate.
 External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
 
 ### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
-Without this bot in `general/`, nothing runs in production. The connector library is complete for fact tables; dim tables additionally need `importDimension` and `linkDimensions` (see §3 Dimension code paths). Shortest deployment path: write the bot, run it against `supplier-catalog-dim` first (fact-only queue), then add dim queue support once `importDimension` is implemented.
+Without this bot in `general/`, nothing runs in production. The connector library is complete for both fact and dim tables (`importDimension` and `linkDimensions` are implemented in `lib/dwconnect.js`). Shortest deployment path: write the bot and run it against `supplier-catalog-dim` to validate end-to-end.
 
 ### [Gap] BUILD_PLAN risk #5 — Operational monitors / alerts
 CloudWatch alarms, Datadog monitors, dashboards, PagerDuty services watching Redshift pipeline health need Databricks counterparts before Redshift retires. Inventory not started.
