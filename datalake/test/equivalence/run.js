@@ -13,7 +13,6 @@
 // Coverage set requirements (from BUILD_PLAN.md Step 12):
 //   - ≥1 d_* and ≥1 f_* table
 //   - Type coverage: varchar→STRING, timestamp→TIMESTAMP_NTZ, int/bigint, boolean
-//   - ≥1 fact with clusterKey set (exercises naturalKeyFilter MERGE pruning path)
 //   - Mix of single-column and composite natural keys
 //   - Must be a subset of tables the captured dim-queue fixture actually populates
 //

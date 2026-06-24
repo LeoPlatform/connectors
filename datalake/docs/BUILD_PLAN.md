@@ -106,28 +106,14 @@ Lock separator + null-rendering against the Redshift `FARMFINGERPRINT64()` conve
     | `decimal` (no precision) | `DECIMAL(18,0)` | **Explicit — match Redshift's default. Do NOT rely on Databricks' default of `DECIMAL(10,0)`.** |
     | `decimal(p,s)` | `DECIMAL(p,s)` | Pass through verbatim |
 
-    Always append `_auditdate TIMESTAMP_NTZ`, `_deleted BOOLEAN`. If `clusterKey`, append `CLUSTER BY (clusterKey)`. All identifiers emitted via `client.escapeId` (lowercase + backtick-quoted, per Step 3).
+    Always append `_auditdate TIMESTAMP_NTZ`, `_deleted BOOLEAN`, and `CLUSTER BY AUTO` (Databricks chooses clustering columns from observed query patterns via Predictive Optimization). All identifiers emitted via `client.escapeId` (lowercase + backtick-quoted, per Step 3).
   - `alterAddColumn(...)`, `alterColumnType(...)` (Databricks only widens; throw on narrowing).
-  - `mergeFact(target, staging, nks, columnConfig, naturalKeyFilter)` → `MERGE INTO … USING … ON <nk match> [AND target.<clusterKey> >= <naturalKeyFilter>] WHEN MATCHED THEN UPDATE SET … WHEN NOT MATCHED THEN INSERT …`. UPDATE sets each data column to `COALESCE(staging.x, target.x)`, `_deleted=false`, `_auditdate=<auditdate>`.
+  - `mergeFact(target, staging, nks, columnConfig, escapeId)` → `MERGE INTO … USING … ON <nk match> WHEN MATCHED THEN UPDATE SET … WHEN NOT MATCHED THEN INSERT …`. UPDATE sets each data column to `COALESCE(staging.x, target.x)`, `_deleted=false`, `_auditdate=<auditdate>`.
 
-  **`clusterKey` has two paired purposes** (per [Configuration Migration Analysis](https://www.notion.so/351e0f2aafae8128b7baed05f6a5adbc); coordinate field-name with DPLAT-442 / John Cronin):
-  1. **Physical layout** — `CLUSTER BY (clusterKey)` in `createTable` (already covered above).
-  2. **MERGE pruning** — `dwconnect.importFact` computes `MIN(clusterKey)` across the staged batch and passes it to `mergeFact` as `naturalKeyFilter`. The added predicate `AND target.<clusterKey> >= <min>` lets Delta skip files (and Redshift skip blocks) whose max for that column falls below the batch's min. Without this, MERGE scans the entire target.
+  **Physical layout — `CLUSTER BY AUTO`:** Every table is created with `CLUSTER BY AUTO`. With Predictive Optimization enabled on the catalog and a recent DBR / serverless SQL Warehouse, Databricks chooses clustering columns from observed query patterns — for MERGE-heavy connector workloads this converges on the natural key without any human hint. Existing tables created with explicit `CLUSTER BY` should be migrated via `ALTER TABLE … CLUSTER BY AUTO` (one-time DDL from a notebook).
 
-  **"Meaningful ordering within a batch" — what it means in practice:** the pruning helps only when the staged batch's clusterKey values cluster in a *narrow range high in the table's history*. Two things have to be true:
-  - **Density** — values within one batch span a small fraction of the table's overall range (otherwise `MIN` ≈ table min, and the filter prunes nothing).
-  - **Time-correlation with arrival** — newer events have higher clusterKey values, and batches arrive roughly in time order. Then `MIN(batch)` is far above the table's min and skips most historical files.
-
-  Examples:
-  - ✅ `order_id` on `f_order_item` (auto-increment BIGINT): a batch of recent order events sits in a narrow high range; prunes nearly all historical files.
-  - ✅ Event-time column on an append-only fact (e.g., the activity-timestamp column on `f_order_item_activity` — confirm exact column name in the table's `dw_fields` before using): same logic.
-  - ❌ `account_id`, `retailer_id`: any batch touches many accounts; `MIN` is small and stable; no pruning value.
-  - ❌ Categorical columns (status, country_code): no monotonic growth.
-
-  **Fallback** when `clusterKey` is absent (per memory): if the natural key itself has the same properties (single monotonic NK column like `order_id`), use `MIN(nk)`; otherwise emit no filter — never invent ordering.
-
-  `mergeFact` itself should treat `naturalKeyFilter` as opaque: if `null`/`undefined`, omit the extra predicate; otherwise inject it literally as `AND target.<clusterKeyCol> >= <value>`. The decision about *whether* to compute the filter lives in `dwconnect.importFact`, keeping `sql.js` pure.
-**Done when:** Snapshot tests cover createTable on `d_order.json`, alterAddColumn, mergeFact on an `f_*` table (with and without `naturalKeyFilter`), every row of the type-mapping table above (`varchar(n)`→`STRING`, `timestamp`→`TIMESTAMP_NTZ`, `timestamptz`→`TIMESTAMP`, `decimal` no-precision→`DECIMAL(18,0)`, `boolean`→`BOOLEAN`, etc.), identifier lowercasing via `escapeId`, `clusterKey` present/absent.
+  **MERGE scan — no manual pruning:** file-skipping on Delta tables happens via Photon's transaction-log column min/max statistics, driven by clustering. The manual `MIN(staging_col) >= target_col` predicate the postgres connector uses for Redshift SORTKEY-based block skipping is not needed (and was removed from this connector — see porting-decisions.md).
+**Done when:** Snapshot tests cover createTable on `d_order.json`, alterAddColumn, mergeFact on an `f_*` table, every row of the type-mapping table above (`varchar(n)`→`STRING`, `timestamp`→`TIMESTAMP_NTZ`, `timestamptz`→`TIMESTAMP`, `decimal` no-precision→`DECIMAL(18,0)`, `boolean`→`BOOLEAN`, etc.), identifier lowercasing via `escapeId`, `CLUSTER BY AUTO` present on all created tables.
 
 ### Step 6 — `lib/dwconnect.js`: factory + schema mutation
 Port the schema-mutation half of `connectors/postgres/lib/dwconnect.js` — on the `development` branch the relevant functions are scattered: `dropTempTables` at line 99, `importDimension` at 363, `insertMissingDimensions` at 679, `linkDimensions` at 742, `changeTableStructure` at 848, `createTable` at 915 (file is 1284 lines total):
@@ -255,7 +241,6 @@ Two complementary checks must both pass before DoD is satisfied:
 **Table coverage set is TBD — do not invent.** The script asserts equivalence on a list of tables drawn from what the captured fixture populates. Lock the list before running; minimum criteria:
 - ≥1 `d_*` and ≥1 `f_*` (dim and fact code paths exercised)
 - Type coverage across `varchar(n)→STRING`, `timestamp→TIMESTAMP_NTZ`, integer/bigint, boolean
-- ≥1 fact with a `clusterKey` set, so the `naturalKeyFilter` MERGE-pruning path (Step 5) is actually exercised — otherwise that path is silently untested
 - Mix of single-column and composite natural keys
 - Must be a subset of tables the captured `dim`-queue fixture actually populates
 

@@ -116,15 +116,9 @@ describe('sql.js', () => {
 			expect(ddl).to.not.include('`_current`');
 		});
 
-		it('appends CLUSTER BY when clusterKey set', () => {
-			const def = Object.assign({}, dOrderDef, { clusterKey: 'id' });
-			const ddl = createTable('cat.sch.f_order_item', def, columnConfig, escapeId);
-			expect(ddl).to.include('CLUSTER BY (`id`)');
-		});
-
-		it('omits CLUSTER BY when clusterKey absent', () => {
+		it('always appends CLUSTER BY AUTO', () => {
 			const ddl = createTable('cat.sch.d_order', dOrderDef, columnConfig, escapeId);
-			expect(ddl).to.not.include('CLUSTER BY');
+			expect(ddl).to.include('CLUSTER BY AUTO');
 		});
 
 		it('lowercases all identifiers via escapeId', () => {
@@ -237,45 +231,39 @@ describe('sql.js', () => {
 		const dataCols = ['channel', 'cost', 'archived'];
 
 		it('emits MERGE INTO ... USING ... ON', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('MERGE INTO cat.sch.f_order AS target');
 			expect(m).to.include('USING `staging_f_order` AS staging');
 			expect(m).to.include('ON (target.`id` = staging.`id`)');
 		});
 
 		it('emits WHEN MATCHED UPDATE with COALESCE', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('WHEN MATCHED THEN UPDATE SET');
 			expect(m).to.include('COALESCE(staging.`channel`, target.`channel`)');
 		});
 
 		it('sets _deleted=false, _auditdate, and _rescued_data in UPDATE', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('`_deleted` = false');
 			expect(m).to.include('`_auditdate` = staging.`_auditdate`');
 			expect(m).to.include('`_rescued_data` = staging.`_rescued_data`');
 		});
 
 		it('includes _rescued_data in INSERT', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, escapeId);
 			const insertBlock = m.split('WHEN NOT MATCHED')[1];
 			expect(insertBlock).to.include('`_rescued_data`');
 			expect(insertBlock).to.include('staging.`_rescued_data`');
 		});
 
 		it('emits WHEN NOT MATCHED INSERT', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('WHEN NOT MATCHED THEN INSERT');
 		});
 
-		it('does NOT add clusterKey filter to ON clause (regression: would duplicate rows with old cluster keys)', () => {
-			const m = mergeFact('cat.sch.f_order', '`staging_f_order`', nks, dataCols, columnConfig, 'id', '1000', escapeId);
-			expect(m).to.not.include('>=');
-			expect(m).to.include('ON (target.`id` = staging.`id`)');
-		});
-
 		it('handles composite natural keys', () => {
-			const m = mergeFact('cat.sch.f_test', '`staging_f_test`', ['a', 'b'], ['c'], columnConfig, null, null, escapeId);
+			const m = mergeFact('cat.sch.f_test', '`staging_f_test`', ['a', 'b'], ['c'], columnConfig, escapeId);
 			expect(m).to.include('target.`a` = staging.`a` AND target.`b` = staging.`b`');
 		});
 	});
@@ -285,14 +273,14 @@ describe('sql.js', () => {
 		const dataCols = ['name', 'status'];
 
 		it('emits MERGE INTO ... USING ... ON', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('MERGE INTO cat.sch.d_account AS target');
 			expect(m).to.include('USING `staging_d_account` AS staging');
 			expect(m).to.include('ON (target.`retailer_id` = staging.`retailer_id`)');
 		});
 
 		it('MATCHED UPDATE includes data cols with COALESCE, _auditdate, and _rescued_data', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('WHEN MATCHED THEN UPDATE SET');
 			expect(m).to.include('COALESCE(staging.`name`, target.`name`)');
 			expect(m).to.include('`_auditdate` = staging.`_auditdate`');
@@ -300,14 +288,14 @@ describe('sql.js', () => {
 		});
 
 		it('NOT MATCHED INSERT includes _rescued_data from staging', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			const insertBlock = m.split('WHEN NOT MATCHED')[1];
 			expect(insertBlock).to.include('`_rescued_data`');
 			expect(insertBlock).to.include('staging.`_rescued_data`');
 		});
 
 		it('MATCHED UPDATE does NOT touch _startdate, _enddate, or _current', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			// Split on the UPDATE SET block to check only the matched section
 			const matchedBlock = m.split('WHEN NOT MATCHED')[0];
 			expect(matchedBlock).to.not.include('_startdate');
@@ -316,7 +304,7 @@ describe('sql.js', () => {
 		});
 
 		it('NOT MATCHED INSERT uses sentinel values for _current/_startdate/_enddate', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.include('WHEN NOT MATCHED THEN INSERT');
 			expect(m).to.include('`_current`');
 			expect(m).to.include('`_startdate`');
@@ -327,18 +315,12 @@ describe('sql.js', () => {
 		});
 
 		it('does NOT set _deleted in any clause', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, escapeId);
 			expect(m).to.not.include('_deleted');
 		});
 
-		it('does NOT add clusterKey filter to ON clause (regression: would duplicate rows with old cluster keys)', () => {
-			const m = mergeDim('cat.sch.d_account', '`staging_d_account`', nks, dataCols, columnConfig, 'retailer_id', '1000', escapeId);
-			expect(m).to.not.include('>=');
-			expect(m).to.include('ON (target.`retailer_id` = staging.`retailer_id`)');
-		});
-
 		it('handles composite natural keys', () => {
-			const m = mergeDim('cat.sch.d_test', '`staging_d_test`', ['a', 'b'], ['c'], columnConfig, null, null, escapeId);
+			const m = mergeDim('cat.sch.d_test', '`staging_d_test`', ['a', 'b'], ['c'], columnConfig, escapeId);
 			expect(m).to.include('target.`a` = staging.`a` AND target.`b` = staging.`b`');
 		});
 	});

@@ -7,7 +7,7 @@
 // Databricks SQL layer (connect.js) and S3 staging stubbed at the connect.js boundary.
 //
 // This guards the load.js → dwconnect.js dispatch wiring: if importFact's signature,
-// the MIN query, or the MERGE callback path drift, this test breaks before production does.
+// the COUNT query, or the MERGE callback path drift, this test breaks before production does.
 
 const fs = require('fs');
 const { expect } = require('chai');
@@ -24,7 +24,6 @@ const TABLE = 'f_smoke_test';
 const tableDef = {
 	identifier: TABLE,
 	isDimension: false,
-	clusterKey: 'id',
 	structure: {
 		id:       { type: 'bigint', nk: true },
 		name:     { type: 'varchar(100)' },
@@ -68,7 +67,7 @@ describe('load.js smoke — offline wiring guard', function() {
 	let connectClientStub;
 	let insertMissingDimensionsCalls;
 	let dropTempTablesCalls;
-	let minQueryCount;
+	let countQueryCount;
 	let mergeQueryCount;
 
 	before(function(done) {
@@ -79,7 +78,7 @@ describe('load.js smoke — offline wiring guard', function() {
 
 		insertMissingDimensionsCalls = [];
 		dropTempTablesCalls = 0;
-		minQueryCount = 0;
+		countQueryCount = 0;
 		mergeQueryCount = 0;
 
 		connectClientStub = {
@@ -100,11 +99,8 @@ describe('load.js smoke — offline wiring guard', function() {
 			buildStagingSelect: sinon.stub().returns('SELECT * FROM smoke_staging'),
 			query: sinon.stub().callsFake((sql, _params, cb) => {
 				const done = typeof cb === 'function' ? cb : (typeof _params === 'function' ? _params : () => {});
-				if (/SELECT MIN\(/.test(sql)) {
-					minQueryCount++;
-					return done(null, [{ minval: 1, cnt: 100 }]);
-				}
 				if (/SELECT CAST\(COUNT/.test(sql)) {
+					countQueryCount++;
 					return done(null, [{ cnt: 100 }]);
 				}
 				if (/^MERGE INTO/.test(sql)) {
@@ -157,8 +153,8 @@ describe('load.js smoke — offline wiring guard', function() {
 		expect(connectClientStub.streamToTableFromS3.firstCall.args[0]).to.equal(TABLE);
 	});
 
-	it('runs the MIN prune query against the staging clause', () => {
-		expect(minQueryCount, 'MIN query count').to.equal(1);
+	it('runs the COUNT query against the staging clause', () => {
+		expect(countQueryCount, 'COUNT query count').to.equal(1);
 	});
 
 	it('runs the MERGE INTO query', () => {

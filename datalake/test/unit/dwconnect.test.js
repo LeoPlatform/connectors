@@ -283,39 +283,6 @@ describe('dwconnect.js', () => {
 		});
 	});
 
-	describe('literalForType — type-aware naturalKeyFilter quoting', () => {
-		// Mirrors the dim-vs-fact branching in ../postgres/lib/dwconnect.js
-		// naturalKeyFilter: numeric column types render as unquoted literals
-		// (so >= compares numerically), everything else quoted.
-		const { literalForType } = require('../../lib/dwconnect.js');
-		const escape = v => typeof v === 'string' ? `'${v.replace(/'/g, "\\'")}'` : v;
-
-		it('numeric types render unquoted', () => {
-			expect(literalForType(12345, 'BIGINT', escape)).to.equal('12345');
-			expect(literalForType(7, 'INT', escape)).to.equal('7');
-			expect(literalForType(42, 'INTEGER', escape)).to.equal('42');
-			expect(literalForType('99.5', 'DECIMAL', escape)).to.equal('99.5');
-			expect(literalForType(1.5, 'DOUBLE', escape)).to.equal('1.5');
-		});
-
-		it('string and timestamp types render quoted', () => {
-			expect(literalForType('abc', 'STRING', escape)).to.equal("'abc'");
-			expect(literalForType('2026-01-01 00:00:00', 'TIMESTAMP_NTZ', escape))
-				.to.equal("'2026-01-01 00:00:00'");
-			expect(literalForType('2026-01-01', 'DATE', escape)).to.equal("'2026-01-01'");
-		});
-
-		it('case-insensitive on type name', () => {
-			expect(literalForType(1, 'bigint', escape)).to.equal('1');
-			expect(literalForType('x', 'string', escape)).to.equal("'x'");
-		});
-
-		it('unknown type falls back to quoted (safe default)', () => {
-			expect(literalForType('x', '', escape)).to.equal("'x'");
-			expect(literalForType('x', undefined, escape)).to.equal("'x'");
-		});
-	});
-
 	describe('withRetry — bounded idempotent retry', () => {
 		const { withRetry } = require('../../lib/dwconnect.js');
 

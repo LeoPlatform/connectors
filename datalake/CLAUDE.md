@@ -11,7 +11,6 @@ This connector handles ingestion of retailer platform event data from RStreams q
 - **`dw_fields` JSON** — schema definition driving field mapping, types, natural keys (`nk`), surrogate keys (`sk`), and grouping. Stored in DynamoDB `${Stage}DW-Fields`; source of truth is the JSON files in each producer repo.
 - **`identifier`** — table name (e.g., `d_order`, `f_order_item`); `d_` prefix = dimension (one row per entity), `f_` prefix = fact (one row per event/activity)
 - **`groups`** — queue routing (e.g., `"dim"`, `"quantity"`); determines which loader group processes this table
-- **`clusterKey`** — optional field for Databricks physical layout hint (`CLUSTER BY`); no effect on Redshift by default (see Coding Rules)
 - **Surrogate keys** — FarmFingerprint64 hashes of the natural key, computed in Node.js via `farmhash-modern` and written into the staging CSV
 - **ETL pattern** (transformation before load): RStreams enrichments (change detection e.g. item-old-new → modified-product, record shaping e.g. modified-product → dimension) feed into offload (staging records to S3, mounting as a relation in Databricks, merging into live tables via DML MERGE)
 
@@ -88,7 +87,6 @@ The publishing/offload path does **not** go through `leo-connector-redshift`. Th
 When porting a function from `../postgres/`, **preserve every branch** in the original — don't silently flatten conditional logic to "simplify" the Databricks version. The bugs from doing that are exactly the kind that pass unit tests, slip past code review, and corrupt data at runtime months later. Concrete patterns to watch for:
 
 - **Dim vs fact branching.** Many postgres helpers gate behavior on `definition.isDimension` — e.g., `createTable` adds `_deleted` only for facts and `_startdate`/`_enddate`/`_current` only for dims. Mirror the branch; don't unconditionally apply one side's columns.
-- **Type-aware literal rendering.** `naturalKeyFilter` (and similar MIN/MAX bound literals) branches on the column's type — numeric columns render unquoted, string/timestamp quoted. Always quoting works in the happy path and produces silently wrong MERGE predicates when the column is numeric. Look up the column type from `describeTable` results.
 - **Configuration gates.** Postgres often gates a feature on `config.hashedSurrogateKeys`, `config.version`, etc. If the datalake side only supports one branch today, keep the conditional and `throw` (or no-op) the unsupported branch — don't delete it. Future contributors need to see the shape.
 - **Validate with a postgres-side grep, not the unit tests.** The unit-test fixtures in this repo were written alongside the port and can encode the same flattening bug — a passing test proves consistency with the test, not with the postgres source. When in doubt, `grep -n "<helper>" ../postgres/lib/dwconnect.js` and read the surrounding 30–50 lines.
 
@@ -107,7 +105,6 @@ Separately: some review-flagged patterns *should* match postgres and were kept o
 **Never:**
 - Release changes that impact the running Redshift pipeline as side effects. The publishing-path code (`../postgres/` — especially `lib/dwconnect.js` — plus `../common/datawarehouse/`, `../../general/lib/offload_to_redshift.js`, and the offload bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. `../redshift/` is consumer-only (used by `report/`) and is not on the publishing path. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
 - Use Redshift-specific SQL syntax in new code (`GETDATE()`, `TOP N`, `DISTKEY`/`SORTKEY` in DDL, `FARMFINGERPRINT64()`)
-- Add `clusterKey` behavior that affects Redshift — `clusterKey` must have no effect on Redshift by default (see below)
 - Add npm dependencies without asking first
 - Write SQL stored procedures
 - Commit credentials or Databricks tokens
@@ -115,7 +112,6 @@ Separately: some review-flagged patterns *should* match postgres and were kept o
 
 **Ask before:**
 - Adding a new top-level field to dw_fields (coordinate with DPLAT-442 / John Cronin — same field, same DynamoDB record; must be safe for the Redshift loader to silently ignore)
-- Enabling `clusterKey` as a Redshift SORTKEY override (disabled by default; requires explicit decision)
 - Changing staging or merge semantics in a way that would require any Redshift-side change to remain safe
 - Changing how surrogate keys are computed (output must remain identical to `FARMFINGERPRINT64()`)
 
@@ -127,9 +123,6 @@ The Redshift pipeline (`general/`, `offload_to_redshift.js`, `leo-connector-post
 - The datalake connector is a new package — it does not replace or wrap the Redshift connector; both exist independently
 - Datalake-side bots are new Lambda functions alongside (not replacing) the existing Redshift loader bots
 - Any code merged to `main` that touches shared config must leave the Redshift pipeline in a valid, deployable state
-
-**`clusterKey` field — Databricks only by default:**
-`clusterKey` in dw_fields drives Databricks `CLUSTER BY` for liquid clustering. The Redshift connector ignores it entirely (unknown fields are silently ignored by the DynamoDB scan). The option to also use it as a Redshift SORTKEY override may be implemented but **must be off by default** and gated behind an explicit configuration flag — never activated as a side effect of adding the field.
 
 ## Timestamp handling — preserving legacy no-TZ semantics
 

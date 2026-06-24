@@ -18,7 +18,6 @@ const tableDef = {
 		quantity: 'int',
 	},
 	isDimension: false,
-	clusterKey: 'id',
 };
 
 // Deterministic record generator. Counter-based — no PRNG so results are reproducible.
