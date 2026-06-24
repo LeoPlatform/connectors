@@ -2,3 +2,5 @@ node_modules
 .idea
 archive
 .DS_Store
+coverage
+.nyc_output
