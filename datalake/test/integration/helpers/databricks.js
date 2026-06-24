@@ -20,6 +20,13 @@
 // data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py
 // (_create_dsco_developer_resource_policy) — no per-developer assume-role needed.
 
+// leo-sdk@7 reads its S3 region from process.env.Resources (a CloudFormation-injected
+// JSON blob), not from AWS_REGION. Translate the standard env var here, at module-load
+// time, before any connector module requires leo-sdk and its config chain runs.
+if (!process.env.Resources) {
+	process.env.Resources = JSON.stringify({ Region: process.env.AWS_REGION || 'us-east-1' });
+}
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
