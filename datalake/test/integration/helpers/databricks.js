@@ -119,8 +119,6 @@ function getConfig() {
 	const defaultSchema = isLocal ? envDefaults.schema + '_local' : envDefaults.schema;
 	const defaultS3Prefix = isLocal ? envDefaults.s3Prefix + '_local' : envDefaults.s3Prefix;
 
-	const region = process.env.AWS_REGION || envDefaults.region;
-
 	return {
 		host,
 		path: process.env.DATABRICKS_HTTP_PATH || envDefaults.path,
@@ -129,7 +127,7 @@ function getConfig() {
 		clientSecret: clientSecret || undefined,
 		catalog: process.env.DATABRICKS_CATALOG || envDefaults.catalog,
 		schema: process.env.DATABRICKS_SCHEMA || defaultSchema,
-		region,
+		region: process.env.AWS_REGION || envDefaults.region,
 		s3Bucket: process.env.DATALAKE_S3_BUCKET || envDefaults.s3Bucket,
 		s3Prefix: process.env.DATALAKE_S3_PREFIX || defaultS3Prefix,
 		profileName,
