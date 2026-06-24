@@ -264,6 +264,9 @@ module.exports = function(config) {
 					if (schema && schema[qualifiedTable]) {
 						return resolve(schema[qualifiedTable]);
 					}
+					// String sentinel, not an Error — callers (dwconnect.js) check
+					// `err === 'NO_SCHEMA_FOUND'`; matches the postgres connector contract
+					// (connectors/postgres/lib/connect.js:67 rejects the same string).
 					reject('NO_SCHEMA_FOUND');
 				}).catch(reject);
 			});

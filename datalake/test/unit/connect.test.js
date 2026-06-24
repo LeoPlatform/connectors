@@ -57,20 +57,22 @@ function makeGenericPoolStub(poolStub) {
 }
 
 function makeConnectFactory(databricksStub, genericPoolStub) {
+	lsStreamsStub = {
+		pipeline: sinon.stub(),
+		through: sinon.stub(),
+		toS3: sinon.stub(),
+	};
+	csvStub = { createWriteStream: sinon.stub() };
 	return proxyquire('../../lib/connect.js', {
 		'@databricks/sql': databricksStub,
 		'generic-pool': genericPoolStub,
 		'leo-logger': () => ({ info: () => {}, debug: () => {}, error: () => {} }),
-		'leo-sdk': {
-			streams: {
-				pipeline: sinon.stub(),
-				through: sinon.stub(),
-				toS3: sinon.stub(),
-			},
-		},
-		'fast-csv': { createWriteStream: sinon.stub() },
+		'leo-sdk': { streams: lsStreamsStub },
+		'fast-csv': csvStub,
 	});
 }
+
+let lsStreamsStub, csvStub;
 
 describe('connect.js', () => {
 	let connectFactory, databricksStub, poolStub, genericPoolStub;
@@ -161,6 +163,11 @@ describe('connect.js', () => {
 			});
 			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
 			await createFn();
+		});
+
+		it('poolMax falls back to 10 when given a non-numeric value', () => {
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's', poolMax: 'notanumber' });
+			expect(genericPoolStub.createPool.firstCall.args[1].max).to.equal(10);
 		});
 
 		it('socketTimeout is pinned above statementTimeoutSeconds * 1000', () => {
@@ -351,6 +358,35 @@ describe('connect.js', () => {
 					resolve();
 				}, { inRowMode: true });
 			});
+		});
+
+		it('handles 3-arg call (callback as second arg, no params array)', async () => {
+			const rows = [{ a: 1 }];
+			const op = { fetchAll: sinon.stub().resolves(rows), close: sinon.stub().resolves() };
+			databricksStub._session.executeStatement = sinon.stub().resolves(op);
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			const wrapper = await createFn();
+			await new Promise((resolve, reject) => {
+				wrapper.query('SELECT 1', (err, result) => {
+					if (err) return reject(err);
+					expect(result).to.deep.equal(rows);
+					expect(databricksStub._session.executeStatement.firstCall.args[1]).to.deep.equal({});
+					resolve();
+				});
+			});
+		});
+
+		it('calls cb(err) when executeStatement rejects', async () => {
+			const execError = new Error('Session error');
+			databricksStub._session.executeStatement = sinon.stub().rejects(execError);
+			connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			const createFn = genericPoolStub.createPool.firstCall.args[0].create;
+			const wrapper = await createFn();
+			const err = await new Promise(resolve => {
+				wrapper.query('SELECT 1', [], resolve);
+			});
+			expect(err).to.equal(execError);
 		});
 	});
 
@@ -577,10 +613,29 @@ describe('connect.js', () => {
 				expect(realConnect.isConnectionError(null)).to.be.false;
 				expect(realConnect.isConnectionError(undefined)).to.be.false;
 			});
+
+			it('returns true for transport error and connection closed messages', () => {
+				expect(realConnect.isConnectionError(new Error('transport error occurred'))).to.be.true;
+				expect(realConnect.isConnectionError(new Error('connection closed by server'))).to.be.true;
+			});
 		});
 	});
 
 	describe('connect() — acquires from pool', () => {
+		it('supports 3-arg callback form (callback as second arg, no params)', (done) => {
+			const wrapper = { dead: false, query: sinon.stub().callsFake((s, p, cb) => cb(null, [{ x: 1 }], [])), release: () => {} };
+			poolStub.acquire.resolves(wrapper);
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'c', schema: 's' });
+			client.connect().then(conn => {
+				conn.query('SELECT 1', (err, rows) => {
+					expect(err).to.be.null;
+					expect(rows).to.deep.equal([{ x: 1 }]);
+					expect(wrapper.query.firstCall.args[1]).to.deep.equal([]);
+					done();
+				});
+			}).catch(done);
+		});
+
 		it('calls pool.acquire() and returns a wrapper with working release()', async () => {
 			const wrapper = { dead: false, query: sinon.stub(), release: () => {} };
 			poolStub.acquire.resolves(wrapper);
@@ -638,6 +693,205 @@ describe('connect.js', () => {
 					done();
 				});
 			}).catch(done);
+		});
+	});
+
+	describe('describeTable', () => {
+		it('resolves from schema cache when populated', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			const cachedCols = [{ column_name: 'id', data_type: 'BIGINT' }];
+			client.setSchemaCache({ 'sch.my_table': cachedCols });
+			const result = await client.describeTable('my_table', 'sch');
+			expect(result).to.deep.equal(cachedCols);
+		});
+
+		it('calls describeTables and resolves with the matching table columns', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			const rows = [{ table_name: 'my_table', column_name: 'id', data_type: 'BIGINT', numeric_precision: null, numeric_scale: null, is_nullable: 'YES' }];
+			client.query = sinon.stub().callsFake((sql, params, cb) => cb(null, rows));
+			const result = await client.describeTable('my_table', 'sch');
+			expect(result).to.deep.equal(rows);
+		});
+
+		it('rejects with NO_SCHEMA_FOUND when table is absent from schema', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			client.query = sinon.stub().callsFake((sql, params, cb) => cb(null, []));
+			let caught;
+			try { await client.describeTable('missing_table', 'sch'); } catch (e) { caught = e; }
+			expect(caught).to.equal('NO_SCHEMA_FOUND');
+		});
+	});
+
+	describe('describeTables', () => {
+		it('resolves from cache when schema cache has entries', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			const cached = { 'sch.t1': [{ column_name: 'id' }] };
+			client.setSchemaCache(cached);
+			const result = await client.describeTables('sch');
+			expect(result).to.deep.equal(cached);
+		});
+
+		it('queries information_schema and groups columns by table_name', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			const rows = [
+				{ table_name: 't1', column_name: 'id',   data_type: 'BIGINT', numeric_precision: null, numeric_scale: null },
+				{ table_name: 't1', column_name: 'name', data_type: 'STRING', numeric_precision: null, numeric_scale: null },
+				{ table_name: 't2', column_name: 'x',    data_type: 'INT',    numeric_precision: null, numeric_scale: null },
+			];
+			client.query = sinon.stub().callsFake((sql, params, cb) => cb(null, rows));
+			const result = await client.describeTables('sch');
+			expect(result['sch.t1']).to.have.length(2);
+			expect(result['sch.t2']).to.have.length(1);
+			expect(client.query.firstCall.args[0]).to.include('information_schema.columns');
+			expect(client.query.firstCall.args[1]).to.deep.equal(['sch']);
+		});
+
+		it('propagates query error', async () => {
+			const client = connectFactory({ host: 'h', path: '/p', token: 't', catalog: 'cat', schema: 'sch' });
+			const dbErr = new Error('permission denied');
+			client.query = sinon.stub().callsFake((sql, params, cb) => cb(dbErr));
+			let caught;
+			try { await client.describeTables('sch'); } catch (e) { caught = e; }
+			expect(caught).to.equal(dbErr);
+		});
+	});
+
+	describe('escape / escapeValue / escapeValueNoToLower', () => {
+		it('escape wraps in single quotes and escapes embedded single quotes', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(client.escape('foo')).to.equal("'foo'");
+			expect(client.escape("it's")).to.equal("'it\\'s'");
+		});
+
+		it('escape returns non-string values unchanged', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(client.escape(42)).to.equal(42);
+			expect(client.escape(null)).to.equal(null);
+		});
+
+		it('escapeValue lowercases and wraps in single quotes', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(client.escapeValue('FooBar')).to.equal("'foobar'");
+		});
+
+		it('escapeValueNoToLower preserves case', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(client.escapeValueNoToLower('FooBar')).to.equal("'FooBar'");
+		});
+
+		it('escapeValue and escapeValueNoToLower return non-string values unchanged', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(client.escapeValue(null)).to.equal(null);
+			expect(client.escapeValue(42)).to.equal(42);
+			expect(client.escapeValueNoToLower(null)).to.equal(null);
+			expect(client.escapeValueNoToLower(0)).to.equal(0);
+		});
+	});
+
+	describe('buildStagingSelect', () => {
+		it('returns SELECT * FROM read_files with the schema string', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			const sql = client.buildStagingSelect('s3://bkt/key.csv', [{ name: 'id', type: 'BIGINT' }, { name: 'name', type: 'STRING' }]);
+			expect(sql).to.include('SELECT * FROM read_files(');
+			expect(sql).to.include("'s3://bkt/key.csv'");
+			expect(sql).to.include('id BIGINT, name STRING');
+		});
+
+		it('excludes _rescued_data from the positional schema string', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			const sql = client.buildStagingSelect('s3://b/k', [{ name: 'id', type: 'BIGINT' }, { name: '_rescued_data', type: 'STRING' }]);
+			// _rescued_data must not appear in the schema => '...' clause
+			const schemaMatch = sql.match(/schema => '([^']+)'/);
+			expect(schemaMatch).to.exist;
+			expect(schemaMatch[1]).to.equal('id BIGINT');
+			expect(schemaMatch[1]).to.not.include('_rescued_data');
+		});
+
+		it('sets sep to pipe, nullValue to \\\\N, and mode to PERMISSIVE', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			const sql = client.buildStagingSelect('s3://b/k', [{ name: 'x', type: 'INT' }]);
+			expect(sql).to.include("sep => '|'");
+			expect(sql).to.include("nullValue => '\\\\N'");
+			expect(sql).to.include("mode => 'PERMISSIVE'");
+		});
+	});
+
+	describe('stagingS3Path client wrapper', () => {
+		it('delegates to module stagingS3Path using client.s3Bucket/s3Prefix', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			client.s3Bucket = 'mybkt';
+			client.s3Prefix = 'myprefix';
+			const path = client.stagingS3Path('my_table', "'2026-01-01T00:00:00'");
+			expect(path.bucket).to.equal('mybkt');
+			expect(path.key).to.match(/^myprefix\/my_table\/2026-01-01T00-00-00-[0-9a-f]{8}\.csv$/);
+			expect(path.uri).to.match(/^s3:\/\/mybkt\//);
+		});
+	});
+
+	describe('streamToTableFromS3 / streamToTable', () => {
+		it('streamToTable throws not-implemented', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			expect(() => client.streamToTable()).to.throw(/not implemented/);
+		});
+
+		it('throws when columnDefs is missing', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'bkt', s3Prefix: 'pre' });
+			expect(() => client.streamToTableFromS3('t', {})).to.throw('columnDefs required');
+		});
+
+		it('calls csv.createWriteStream with pipe delimiter and ls.pipeline/toS3', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'bkt', s3Prefix: 'pre' });
+			const s3Path = { bucket: 'bkt', key: 'pre/t/x.csv', uri: 's3://bkt/pre/t/x.csv' };
+			const columnDefs = [{ name: 'id', type: 'BIGINT' }, { name: 'name', type: 'STRING' }];
+			client.streamToTableFromS3('t', { columnDefs, s3Path });
+			expect(csvStub.createWriteStream.calledOnce).to.be.true;
+			const csvOpts = csvStub.createWriteStream.firstCall.args[0];
+			expect(csvOpts.headers).to.be.false;
+			expect(csvOpts.delimiter).to.equal('|');
+			expect(lsStreamsStub.pipeline.calledOnce).to.be.true;
+			expect(lsStreamsStub.toS3.calledWith('bkt', 'pre/t/x.csv')).to.be.true;
+		});
+
+		it('transform strips Z offset from TIMESTAMP_NTZ columns and applies nonNull', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'bkt', s3Prefix: 'pre' });
+			const columnDefs = [
+				{ name: 'created_at', type: 'TIMESTAMP_NTZ' },
+				{ name: 'label', type: 'STRING' },
+				{ name: 'count', type: 'BIGINT' },
+			];
+			client.streamToTableFromS3('t', { columnDefs, s3Path: { bucket: 'bkt', key: 'k', uri: 's3://bkt/k' } });
+			const transformFn = csvStub.createWriteStream.firstCall.args[0].transform;
+			const done = sinon.stub();
+			transformFn({ created_at: '2026-01-01T00:00:00Z', label: null, count: 5 }, done);
+			expect(done.firstCall.args[0]).to.be.null;
+			expect(done.firstCall.args[1]).to.deep.equal(['2026-01-01T00:00:00', '\\N', 5]);
+		});
+
+		it('throws when neither s3Path nor bucket/prefix is available', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			const columnDefs = [{ name: 'id', type: 'BIGINT' }];
+			expect(() => client.streamToTableFromS3('t', { columnDefs })).to.throw(/s3Bucket\/s3Prefix unresolved/);
+		});
+
+		it('uses opts.s3Bucket/s3Prefix when s3Path not provided', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			client.s3Bucket = 'bkt';
+			client.s3Prefix = 'pre';
+			client.auditdate = "'2026-01-01T00:00:00'";
+			const columnDefs = [{ name: 'id', type: 'BIGINT' }];
+			client.streamToTableFromS3('t', { columnDefs });
+			expect(lsStreamsStub.toS3.firstCall.args[0]).to.equal('bkt');
+			expect(lsStreamsStub.toS3.firstCall.args[1]).to.match(/^pre\/t\//);
+		});
+
+		it('transform excludes _rescued_data from column output', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's', s3Bucket: 'bkt', s3Prefix: 'pre' });
+			const columnDefs = [{ name: 'id', type: 'BIGINT' }, { name: '_rescued_data', type: 'STRING' }];
+			client.streamToTableFromS3('t', { columnDefs, s3Path: { bucket: 'bkt', key: 'k', uri: 's3://bkt/k' } });
+			const transformFn = csvStub.createWriteStream.firstCall.args[0].transform;
+			const done = sinon.stub();
+			transformFn({ id: 42, _rescued_data: '{"x":1}' }, done);
+			expect(done.firstCall.args[1]).to.deep.equal([42]);
 		});
 	});
 
