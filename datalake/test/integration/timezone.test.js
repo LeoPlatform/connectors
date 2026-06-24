@@ -73,13 +73,12 @@ describe('Timezone handling', function() {
 
 		after(async function() {
 			if (!dbconfig || !stagingPath) return;
-			const s3 = new (require('aws-sdk')).S3({ region: dbconfig.region });
-			await new Promise((resolve) => {
-				s3.deleteObject({
-					Bucket: stagingPath.bucket,
-					Key: stagingPath.key,
-				}, () => resolve());
-			});
+			const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+			const s3 = new S3Client({ region: dbconfig.region });
+			await s3.send(new DeleteObjectCommand({
+				Bucket: stagingPath.bucket,
+				Key: stagingPath.key,
+			})).catch(() => {});
 		});
 
 		it('naked ISO local — preserved as wall-clock', function() {
