@@ -173,10 +173,6 @@ describe('importFact — orchestration', () => {
 				if (opts.failFlushDeletes && /^UPDATE\s/i.test(sql)) {
 					return finalCb(new Error('flush delete failed'));
 				}
-				if (sql.indexOf('SELECT CAST(COUNT(') === 0) {
-					if (opts.failCountQuery) return finalCb(new Error('COUNT query failed'));
-					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
-				}
 				return finalCb(null, []);
 			}),
 		};
@@ -251,13 +247,6 @@ describe('importFact — orchestration', () => {
 		expect(merge).to.include('cat.sch.f_order_item');
 	});
 
-	it('runs a SELECT COUNT query before MERGE', async () => {
-		const ctx = setup({ tableFields: factTableFields });
-		await runToCompletion(ctx, 'f_order_item', ['id']);
-		const countQuery = ctx.queryHistory.find(q => q.indexOf('SELECT CAST(COUNT(') === 0);
-		expect(countQuery, 'expected a COUNT query').to.exist;
-	});
-
 	it('normalizes a single non-array id to an array', async () => {
 		const ctx = setup({ tableFields: factTableFields });
 		await runToCompletion(ctx, 'f_order_item', 'id');
@@ -293,11 +282,35 @@ describe('importFact — orchestration', () => {
 		expect(forwarded).to.deep.equal([{ id: 1, qty: 5 }]);
 	});
 
-	it('returns staging cnt as result.count', async () => {
-		const ctx = setup({ tableFields: factTableFields, cnt: 77 });
-		const result = await runToCompletion(ctx, 'f_order_item', ['id']);
-		expect(result).to.exist;
-		expect(result.count).to.equal(77);
+	it('result.count reflects the number of rows enriched through staging', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		await new Promise(setImmediate);
+		// throughCallbacks[1] is the enrichedStream (registered inside stageToS3 after
+		// describeTable/ensureStagingLocation resolve). Drive 3 records through it to
+		// verify stagingCount increments correctly.
+		const enrichCb = ctx.throughCallbacks[1];
+		enrichCb({ id: 1 }, () => {});
+		enrichCb({ id: 2 }, () => {});
+		enrichCb({ id: 3 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(3);
+	});
+
+	it('__leo_delete__ records do not contribute to result.count', async () => {
+		// Delete records are filtered by dataStream before reaching enrichFn — they
+		// should not inflate the staged-record count.
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		await new Promise(setImmediate);
+		const dataStreamCb = ctx.throughCallbacks[0];
+		const enrichCb = ctx.throughCallbacks[1];
+		dataStreamCb({ __leo_delete__: 'id', __leo_delete_id__: 99 }, () => {});
+		enrichCb({ id: 1 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(1);
 	});
 
 	it('propagates a flushDeletes error and skips MERGE', async () => {
@@ -323,32 +336,6 @@ describe('importFact — orchestration', () => {
 		ctx.completePipeline();
 		await p;
 		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
-	});
-
-	it('propagates a COUNT query error and skips MERGE', async () => {
-		const ctx = setup({ tableFields: factTableFields, failCountQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'f_order_item', ['id']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from COUNT query').to.exist;
-		expect(caught.message).to.equal('COUNT query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
-	});
-
-	it('propagates a COUNT query error and skips MERGE (composite NK path)', async () => {
-		const ctx = setup({ tableFields: factTableFields, failCountQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from COUNT query').to.exist;
-		expect(caught.message).to.equal('COUNT query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
 	it('enrichedStream stamps audit/_deleted and computes sk via fingerprint64', async () => {

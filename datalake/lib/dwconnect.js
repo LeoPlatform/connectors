@@ -192,8 +192,10 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		let stagingCount = 0;
 		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
+			stagingCount++;
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
@@ -211,27 +213,13 @@ module.exports = function(dbconfig, options) {
 			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
 			const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-			let stagingCount = 0;
 
-			// Count sourced from staging rows, not MERGE result (which returns metrics,
-			// not row count). Mirrors postgres's totalRecords = results[0].cnt.
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
 			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
-
-				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-				withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
-					if (countErr) {
-						logger.error('COUNT query failed after retries, aborting importFact:', countErr);
-						return mergeCallback(countErr);
-					}
-					if (countResults && countResults[0]) {
-						stagingCount = countResults[0].cnt || 0;
-					}
-					withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
-				});
+				withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
 	};
@@ -277,8 +265,10 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		let stagingCount = 0;
 		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
+			if (!obj.__leo_delete__) stagingCount++;
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
@@ -294,25 +284,13 @@ module.exports = function(dbconfig, options) {
 			// are managed by the MERGE SQL (sentinel values on INSERT; preserved on UPDATE).
 			const auditCols = new Set([auditCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-			let stagingCount = 0;
 
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
 			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
-
-				const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-				withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
-					if (countErr) {
-						logger.error('COUNT query failed after retries, aborting importDimension:', countErr);
-						return mergeCallback(countErr);
-					}
-					if (countResults && countResults[0]) {
-						stagingCount = countResults[0].cnt || 0;
-					}
-					withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
-				});
+				withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
 	};
