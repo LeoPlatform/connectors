@@ -42,7 +42,7 @@ Closed list of items deliberately left matching postgres. Don't re-flag without 
 
 - `flushDeletes` IN-list via string interpolation
 - `alterColumnType` helper exists but is never called from `changeTableStructure`
-- `escapeValue` lowercases (dead code in datalake; OrderStream/Dsco convention if ever wired)
+- `escapeValue` lowercases (dead in datalake until `findAuditDate`/`exportChanges` read path is ported — see §2)
 - Schema cache invalidated only on `createTable`, not on `ADD COLUMN`
 - `npm` scripts use shell globs
 - `dwClient = client` module-scope alias
@@ -100,6 +100,9 @@ All needed before the Step 9 CI workflows can authenticate.
 
 ### [Gap] Open question #6 follow-up — `READ_FILES` grant
 External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
+
+### [Gap] Read-side interface — `findAuditDate` and `exportChanges` not yet ported
+`connectors/postgres/lib/dwconnect.js` exposes `client.findAuditDate(table, cb)` and `client.exportChanges(table, fields, remoteAuditdate, opts, cb)`. These are used by leoDW / Query Explorer to read audit dates and export changed rows from the DW. The datalake connector must implement Databricks-dialect equivalents before those consumers can migrate off Redshift. `escapeValue` (lowercasing variant, currently dead in the datalake connector) will be needed when this is built.
 
 ### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
 Without this bot in `general/`, nothing runs in production. The connector library is complete for fact tables; dim tables additionally need `importDimension` and `linkDimensions` (see §3 Dimension code paths). Shortest deployment path: write the bot, run it against `supplier-catalog-dim` first (fact-only queue), then add dim queue support once `importDimension` is implemented.
