@@ -15,6 +15,7 @@
 
 const { Readable } = require('stream');
 const { expect } = require('chai');
+const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');
 const connectFactory = require('../../lib/connect.js');
 const { stagingS3Path } = require('../../lib/connect.js');
@@ -73,7 +74,6 @@ describe('Timezone handling', function() {
 
 		after(async function() {
 			if (!dbconfig || !stagingPath) return;
-			const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 			const s3 = new S3Client({ region: dbconfig.region });
 			await s3.send(new DeleteObjectCommand({
 				Bucket: stagingPath.bucket,
