@@ -763,6 +763,16 @@ describe('connect.js', () => {
 			expect(client.escape("it's")).to.equal("'it\\'s'");
 		});
 
+		it('escape doubles backslashes before escaping quotes', () => {
+			const client = connectFactory({ catalog: 'c', schema: 's' });
+			// trailing backslash: value \ → SQL '\\' (ansi_mode=false: \\ → \)
+			expect(client.escape('\\')).to.equal("'\\\\'" );
+			// backslash in middle: foo\bar → SQL 'foo\\bar'
+			expect(client.escape('foo\\bar')).to.equal("'foo\\\\bar'");
+			// backslash immediately before quote: foo\'bar → SQL 'foo\\\'bar'
+			expect(client.escape("foo\\'bar")).to.equal("'foo\\\\\\'bar'");
+		});
+
 		it('escape returns non-string values unchanged', () => {
 			const client = connectFactory({ catalog: 'c', schema: 's' });
 			expect(client.escape(42)).to.equal(42);

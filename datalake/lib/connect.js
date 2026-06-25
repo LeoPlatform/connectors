@@ -307,23 +307,26 @@ module.exports = function(config) {
 		},
 
 		// Used for literal value escaping in SQL strings (not bind params).
+		// With ansi_mode=false (set on every session), Databricks processes backslash
+		// escape sequences — same as Redshift standard_conforming_strings=off. Backslash
+		// must be doubled before single-quote escaping to avoid broken literals.
 		escape: (value) => {
 			if (value && value.replace) {
-				return "'" + value.replace(/'/g, "\\'") + "'";
+				return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 			}
 			return value;
 		},
 
 		escapeValue: (value) => {
 			if (value && value.replace) {
-				return "'" + value.replace(/'/g, "\\'").toLowerCase() + "'";
+				return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").toLowerCase() + "'";
 			}
 			return value;
 		},
 
 		escapeValueNoToLower: (value) => {
 			if (value && value.replace) {
-				return "'" + value.replace(/'/g, "\\'") + "'";
+				return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 			}
 			return value;
 		},
