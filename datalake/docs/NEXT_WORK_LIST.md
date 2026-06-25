@@ -75,22 +75,24 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 ## 2. BUILD_PLAN.md items not yet implemented
 
+**Connector library release status:** No remaining blockers. The library is functionally complete (fact + dim, all unit/integration tests pass locally). The items below are prerequisites for the bot, migration validation, or Redshift retirement — not for releasing the connector package itself.
+
 ### ~~[Gap] Step 8 — `test/unit/load.smoke.test.js` (offline smoke through real `load.js`)~~ ✓ Done
 6 unit tests added. Pipes 100 synthetic events through the real `load.js` (including `combine.js` sort-and-dedup) into the real `lib/dwconnect.js importFact`, with `connect.js` and S3 stubbed at the `connect.js` boundary. Asserts the expected call sequence: `streamToTableFromS3`, MIN prune query, MERGE INTO, `insertMissingDimensions`, `dropTempTables`. 194 unit tests pass, lint clean.
 
-### [Gap] Step 9 — CI workflow scaffolding (per-branch cloned catalog)
+---
+
+### Bot development prerequisites
+
+The following items are prerequisites for writing and deploying `offload_to_datalake.js`, not for releasing the connector library.
+
+#### [Gap] `offload_to_datalake.js` bot (BUILD_PLAN risk #4)
+Without this bot in `general/`, nothing runs in production. The connector library is complete for both fact and dim tables (`importDimension` and `linkDimensions` are implemented in `lib/dwconnect.js`). Shortest deployment path: write the bot and run it against `supplier-catalog-dim` to validate end-to-end.
+
+#### [Gap] Step 9 — CI workflow scaffolding (per-branch cloned catalog)
 BUILD_PLAN Step 9 calls for two GitHub Actions workflows paralleling `data-lake-datapipelines`: `create-catalog.yml` on branch `create` and `destroy-catalog.yml` on branch `delete`, both using `chub-engineering/commercehub-actions/data-lake/shallow_clone` / `destroy`. **Not present** in `.github/workflows/`. Implication: today's integration tests only run locally against `de_cup_dev_us` / `public_stage_local`; CI doesn't validate against a per-branch isolated catalog.
 
-### [Gap] Step 12 — Equivalence script (DoD check)
-[test/equivalence/run.js](../test/equivalence/run.js) exists as a stub that errors out. Blocked on:
-- Open question #3 — captured PII-scrubbed prod fixture + nonprod environments live
-- Open question #6 — `READ_FILES` grant on the relevant External Location
-- Locking the table coverage set (see Step 12 criteria)
-- Lakebridge invocation + hand-rolled MD5 row-level diff implementation
-
-This is the documented DoD gate. Not flippable until the captured fixture exists.
-
-### [Gap] Open question #3 follow-ups (CI plumbing)
+#### [Gap] Open question #3 — CI plumbing
 Per BUILD_PLAN open question #3 (otherwise resolved):
 - SQL warehouse HTTP path
 - Service-principal credentials path in Secrets Manager (pattern: `data-emporium/dev/ci/<repo>/variables/*`)
@@ -98,23 +100,39 @@ Per BUILD_PLAN open question #3 (otherwise resolved):
 
 All needed before the Step 9 CI workflows can authenticate.
 
-### [Gap] Open question #6 follow-up — `READ_FILES` grant
+#### [Gap] Open question #6 — `READ_FILES` grant
 External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
 
-### [Gap] Read-side interface — `findAuditDate` and `exportChanges` not yet ported
+---
+
+### Migration validation
+
+#### [Gap] Step 12 — Equivalence script (DoD check)
+[test/equivalence/run.js](../test/equivalence/run.js) exists as a stub that errors out. Blocked on:
+- Open question #3 — captured PII-scrubbed prod fixture + nonprod environments live
+- Open question #6 — `READ_FILES` grant on the relevant External Location
+- Locking the table coverage set (see Step 12 criteria)
+- Lakebridge invocation + hand-rolled MD5 row-level diff implementation
+
+This is the documented migration DoD gate (not a connector-library release gate). Not flippable until the captured fixture exists.
+
+---
+
+### Redshift retirement gates
+
+These don't block the connector library or the bot, but must be resolved before Redshift can retire.
+
+#### [Gap] Read-side interface — `findAuditDate` and `exportChanges` not yet ported
 `connectors/postgres/lib/dwconnect.js` exposes `client.findAuditDate(table, cb)` and `client.exportChanges(table, fields, remoteAuditdate, opts, cb)`. These are used by leoDW / Query Explorer to read audit dates and export changed rows from the DW. The datalake connector must implement Databricks-dialect equivalents before those consumers can migrate off Redshift. `escapeValue` (lowercasing variant, currently dead in the datalake connector) will be needed when this is built.
 
-### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
-Without this bot in `general/`, nothing runs in production. The connector library is complete for both fact and dim tables (`importDimension` and `linkDimensions` are implemented in `lib/dwconnect.js`). Shortest deployment path: write the bot and run it against `supplier-catalog-dim` to validate end-to-end.
+#### [Gap] `bus-models/dw-schema` lowercase-assertion deploy gate (BUILD_PLAN risk #3)
+Mentioned in Step 1 prerequisites: extend `bus-models/dw-schema` with the lowercase-keys assertion. Without it, a producer adding a mixed-case key to `dw_fields` would silently diverge (Databricks lowercases on write; Redshift tolerates either casing; consumer queries that case-match Redshift diverge on Databricks). Implementation status in `bus-models` unknown — needs verification.
 
-### [Gap] BUILD_PLAN risk #5 — Operational monitors / alerts
+#### [Gap] Operational monitors / alerts (BUILD_PLAN risk #5)
 CloudWatch alarms, Datadog monitors, dashboards, PagerDuty services watching Redshift pipeline health need Databricks counterparts before Redshift retires. Inventory not started.
 
-### [Gap] BUILD_PLAN risk #6 — Redshift-specific AI Arcanum skills audit
+#### [Gap] Redshift-specific AI Arcanum skills audit (BUILD_PLAN risk #6)
 Skills that embed Redshift SQL or connection strings will produce wrong output once Databricks is live. Audit not started.
-
-### [Gap] BUILD_PLAN risk #3 — `bus-models/dw-schema` lowercase-assertion deploy gate
-Mentioned in Step 1 prerequisites: extend `bus-models/dw-schema` with the lowercase-keys assertion. Without it, a producer adding a mixed-case key to `dw_fields` would silently diverge (Databricks lowercases on write; Redshift tolerates either casing; consumer queries that case-match Redshift diverge on Databricks). Implementation status in `bus-models` unknown — needs verification.
 
 ---
 
