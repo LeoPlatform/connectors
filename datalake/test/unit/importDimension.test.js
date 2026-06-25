@@ -6,8 +6,8 @@ const proxyquire = require('proxyquire').noCallThru();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Orchestration tests for importDimension: covers the S3-staging + MERGE wiring,
-// prune-query type-aware quoting, error propagation, delete-marker filtering,
-// and row enrichment (sk + auditdate, no _deleted).
+// error propagation, delete-marker filtering, and row enrichment (sk + auditdate,
+// no _deleted).
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('importDimension — orchestration', () => {
@@ -34,14 +34,6 @@ describe('importDimension — orchestration', () => {
 			query: sinon.stub().callsFake((sql, params, cb) => {
 				queryHistory.push(sql);
 				const finalCb = typeof cb === 'function' ? cb : (typeof params === 'function' ? params : () => {});
-				if (sql.indexOf('SELECT MIN(') === 0) {
-					if (opts.failMinQuery) return finalCb(new Error('MIN query failed'));
-					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
-				}
-				if (sql.indexOf('SELECT CAST(COUNT(') === 0) {
-					if (opts.failCountQuery) return finalCb(new Error('COUNT query failed'));
-					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
-				}
 				if (sql.startsWith('UPDATE') && opts.failDimDeleteUpdate) return finalCb(new Error('UPDATE failed'));
 				return finalCb(null, []);
 			}),
@@ -124,42 +116,10 @@ describe('importDimension — orchestration', () => {
 		expect(merge).to.not.include('_deleted');
 	});
 
-	it('runs a SELECT MIN prune query against the single NK', async () => {
-		const ctx = setup({ tableFields: dimTableFields });
-		await runToCompletion(ctx, 'd_account', ['retailer_id']);
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery, 'expected a prune MIN query').to.exist;
-		expect(minQuery).to.include('`retailer_id`');
-	});
-
-	it('prune filter is NOT injected into the MERGE ON clause (regression: would duplicate rows with old cluster keys)', async () => {
-		const ctx = setup({ tableFields: dimTableFields, minVal: 99 });
-		await runToCompletion(ctx, 'd_account', ['retailer_id']); // no clusterKey — pruneCol falls back to single NK
-		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge, 'expected a MERGE INTO query').to.exist;
-		expect(merge).to.not.include('>=');
-	});
-
-	it('prefers tableDef.clusterKey over nk as the prune column', async () => {
-		const ctx = setup({ tableFields: dimTableFields });
-		await runToCompletion(ctx, 'd_account', ['retailer_id'], { clusterKey: 'name' });
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery).to.include('`name`');
-		expect(minQuery).to.not.include('MIN(`retailer_id`)');
-	});
-
-	it('skips prune query for composite NKs when no clusterKey is set', async () => {
-		const ctx = setup({ tableFields: dimTableFields });
-		await runToCompletion(ctx, 'd_account', ['retailer_id', 'name']);
-		expect(ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0)).to.not.exist;
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.exist;
-	});
-
 	it('normalizes a single non-array nk to an array', async () => {
 		const ctx = setup({ tableFields: dimTableFields });
 		await runToCompletion(ctx, 'd_account', 'retailer_id');
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery).to.include('`retailer_id`');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.exist;
 	});
 
 	it('propagates a pipeline error to the callback and skips MERGE', async () => {
@@ -260,44 +220,30 @@ describe('importDimension — orchestration', () => {
 		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
 	});
 
-	it('returns staging cnt as result.count (single NK — pruneCol path)', async () => {
-		const ctx = setup({ tableFields: dimTableFields, cnt: 42 });
-		const result = await runToCompletion(ctx, 'd_account', ['retailer_id']);
-		expect(result).to.exist;
-		expect(result.count).to.equal(42);
+	it('result.count reflects the number of rows enriched through staging', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		const enrichCb = ctx.throughCallbacks[1];
+		enrichCb({ retailer_id: 1 }, () => {});
+		enrichCb({ retailer_id: 2 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(2);
 	});
 
-	it('returns staging cnt as result.count (composite NK — COUNT path)', async () => {
-		const ctx = setup({ tableFields: dimTableFields, cnt: 17 });
-		const result = await runToCompletion(ctx, 'd_account', ['retailer_id', 'name']);
-		expect(result).to.exist;
-		expect(result.count).to.equal(17);
-	});
-
-	it('propagates a MIN query error and skips MERGE', async () => {
-		const ctx = setup({ tableFields: dimTableFields, failMinQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'd_account', ['retailer_id']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from MIN query').to.exist;
-		expect(caught.message).to.equal('MIN query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
-	});
-
-	it('propagates a COUNT query error and skips MERGE (composite NK path)', async () => {
-		const ctx = setup({ tableFields: dimTableFields, failCountQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'd_account', ['retailer_id', 'name']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from COUNT query').to.exist;
-		expect(caught.message).to.equal('COUNT query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+	it('id-marked __leo_delete__ records pushed to staging do not contribute to result.count', async () => {
+		// id-marked deletes are pushed downstream by dataStream so they reach enrichFn,
+		// but they are delete markers, not data records — they should not be counted.
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		const enrichCb = ctx.throughCallbacks[1];
+		enrichCb({ __leo_delete__: 'id', __leo_delete_id__: 42 }, () => {});
+		enrichCb({ retailer_id: 1 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(1);
 	});
 
 	it('enrichedStream stamps auditdate and computes sk, but does NOT set _deleted', async () => {

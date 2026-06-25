@@ -181,7 +181,6 @@ module.exports = function(dbconfig, options) {
 		const nks = ids;
 		const auditCol = columnConfig._auditdate;
 		const delCol = columnConfig._deleted;
-		const clusterKey = tableDef.clusterKey || null;
 
 		// Resolve the surrogate-key column once — tableDef.structure is fixed
 		// for the duration of this importFact call.
@@ -193,8 +192,10 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		let stagingCount = 0;
 		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
+			stagingCount++;
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
@@ -212,47 +213,13 @@ module.exports = function(dbconfig, options) {
 			const { stagingPath, stagingClause, allCols, fieldLookup } = staged;
 			const auditCols = new Set([auditCol, delCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-			const pruneCol = clusterKey || (ids.length === 1 ? ids[0] : null);
-			let stagingCount = 0;
 
-			// Count sourced from staging rows, not MERGE result (which returns metrics,
-			// not row count). Mirrors postgres's totalRecords = results[0].cnt.
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
 			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
-				let naturalKeyFilter = null;
-
-				if (pruneCol) {
-					const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-					const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
-					withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-						if (qErr) {
-							logger.error('MIN query failed after retries, aborting importFact:', qErr);
-							return mergeCallback(qErr);
-						}
-						if (results && results[0]) {
-							stagingCount = results[0].cnt || 0;
-							if (results[0].minval != null) {
-								naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
-							}
-						}
-						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
-					});
-				} else {
-					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-					withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
-						if (countErr) {
-							logger.error('COUNT query failed after retries, aborting importFact:', countErr);
-							return mergeCallback(countErr);
-						}
-						if (countResults && countResults[0]) {
-							stagingCount = countResults[0].cnt || 0;
-						}
-						withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
-					});
-				}
+				withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
 	};
@@ -289,7 +256,6 @@ module.exports = function(dbconfig, options) {
 		});
 
 		const auditCol = columnConfig._auditdate;
-		const clusterKey = tableDef.clusterKey || null;
 
 		const skField = tableDef.structure && Object.keys(tableDef.structure).find(k => {
 			const f = tableDef.structure[k];
@@ -299,8 +265,10 @@ module.exports = function(dbconfig, options) {
 		const auditdate = dwClient.auditdate;
 		const auditdateValue = auditdate ? auditdate.replace(/'/g, '') : naiveIsoNow();
 
+		let stagingCount = 0;
 		const fkEnrich = buildFkEnrichers(tableDef && tableDef.structure, columnConfig);
 		const enrichFn = obj => {
+			if (!obj.__leo_delete__) stagingCount++;
 			if (skField) {
 				obj[skField] = fingerprint64(nks.map(k => obj[k]));
 			}
@@ -316,46 +284,13 @@ module.exports = function(dbconfig, options) {
 			// are managed by the MERGE SQL (sentinel values on INSERT; preserved on UPDATE).
 			const auditCols = new Set([auditCol, columnConfig._current, columnConfig._startdate, columnConfig._enddate, columnConfig._rescued_data]);
 			const dataCols = allCols.filter(c => !nks.includes(c) && !auditCols.has(c));
-			const pruneCol = clusterKey || (nks.length === 1 ? nks[0] : null);
-			let stagingCount = 0;
 
 			const mergeCallback = (mergeErr) =>
 				cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeErr ? null : { count: stagingCount }, callback);
 
 			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
-
-				let naturalKeyFilter = null;
-
-				if (pruneCol) {
-					const minSql = `SELECT MIN(\`${pruneCol.toLowerCase()}\`) AS minval, CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-					const pruneColType = (fieldLookup[pruneCol.toLowerCase()] && fieldLookup[pruneCol.toLowerCase()].data_type) || '';
-					withRetry(done => client.query(minSql, [], done), {}, (qErr, results) => {
-						if (qErr) {
-							logger.error('MIN query failed after retries, aborting importDimension:', qErr);
-							return mergeCallback(qErr);
-						}
-						if (results && results[0]) {
-							stagingCount = results[0].cnt || 0;
-							if (results[0].minval != null) {
-								naturalKeyFilter = literalForType(results[0].minval, pruneColType, client.escapeValueNoToLower);
-							}
-						}
-						withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, pruneCol, naturalKeyFilter, done), {}, mergeCallback);
-					});
-				} else {
-					const countSql = `SELECT CAST(COUNT(*) AS INT) AS cnt FROM ${stagingClause} AS staging`;
-					withRetry(done => client.query(countSql, [], done), {}, (countErr, countResults) => {
-						if (countErr) {
-							logger.error('COUNT query failed after retries, aborting importDimension:', countErr);
-							return mergeCallback(countErr);
-						}
-						if (countResults && countResults[0]) {
-							stagingCount = countResults[0].cnt || 0;
-						}
-						withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, null, done), {}, mergeCallback);
-					});
-				}
+				withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
 	};
@@ -397,20 +332,6 @@ function reconstructType(field) {
 		return `DECIMAL(${p},${s})`;
 	}
 	return t;
-}
-
-// Render `value` as a SQL literal appropriate for `dataType`. Numeric columns
-// take an unquoted literal; everything else (string, timestamp, date) is
-// single-quoted via the connector's standard escaper. Mirrors the type-aware
-// branching in ../postgres/lib/dwconnect.js naturalKeyFilter — Databricks
-// types replace Postgres int4/int8/varchar/timestamp.
-function literalForType(value, dataType, escapeValueNoToLower) {
-	const t = String(dataType || '').toUpperCase();
-	const isNumeric = /^(BIGINT|INT|INTEGER|SMALLINT|TINYINT|DECIMAL|DOUBLE|FLOAT|REAL|NUMERIC)/.test(t);
-	if (isNumeric) {
-		return String(value);
-	}
-	return escapeValueNoToLower(String(value));
 }
 
 function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, callback) {
@@ -494,15 +415,13 @@ function stageToS3(client, table, pipelinePre, dbconfig, enrichFn, auditdate, ca
 	}).catch(callback);
 }
 
-function doMerge(mergeSqlFn, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, callback) {
+function doMerge(mergeSqlFn, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, callback) {
 	const mergeSql = mergeSqlFn(
 		qualifiedTable,
 		stagingClause,
 		nks,
 		dataCols,
 		columnConfig,
-		clusterKey,
-		naturalKeyFilter,
 		client.escapeId
 	);
 
@@ -528,7 +447,7 @@ function cleanupStagedFile(dbconfig, stagingPath, mergeErr, mergeResult, callbac
 // (default 3). Retries only on connection-class errors — query-class errors
 // (SQL syntax, permission, data) propagate immediately. Each retry re-acquires
 // a fresh pool session (the dead one was destroyed by query()'s error handler).
-// Safe because the callers — MIN SELECT, MERGE, flushDeletes UPDATE — are all
+// Safe because the callers — COUNT SELECT, MERGE, flushDeletes UPDATE — are all
 // idempotent: re-running yields the same final state. Never retry inside query()
 // itself (which runs arbitrary, possibly non-idempotent SQL).
 function withRetry(fn, opts, callback) {
@@ -623,8 +542,7 @@ function buildFkEnrichers(structure, columnConfig) {
 	return obj => fns.forEach(fn => fn(obj));
 }
 
-// Exposed for unit testing of the type-aware naturalKeyFilter quoting and retry.
-module.exports.literalForType = literalForType;
+// Exposed for unit testing.
 module.exports.withRetry = withRetry;
 module.exports.dateSk = dateSk;
 module.exports.timeSk = timeSk;

@@ -6,8 +6,8 @@
 // combine.js sort-and-dedup) into the real lib/dwconnect.js importFact, with the
 // Databricks SQL layer (connect.js) and S3 staging stubbed at the connect.js boundary.
 //
-// This guards the load.js → dwconnect.js dispatch wiring: if importFact's signature,
-// the MIN query, or the MERGE callback path drift, this test breaks before production does.
+// This guards the load.js → dwconnect.js dispatch wiring: if importFact's signature
+// or the MERGE callback path drift, this test breaks before production does.
 
 const fs = require('fs');
 const { expect } = require('chai');
@@ -24,7 +24,6 @@ const TABLE = 'f_smoke_test';
 const tableDef = {
 	identifier: TABLE,
 	isDimension: false,
-	clusterKey: 'id',
 	structure: {
 		id:       { type: 'bigint', nk: true },
 		name:     { type: 'varchar(100)' },
@@ -68,7 +67,6 @@ describe('load.js smoke — offline wiring guard', function() {
 	let connectClientStub;
 	let insertMissingDimensionsCalls;
 	let dropTempTablesCalls;
-	let minQueryCount;
 	let mergeQueryCount;
 
 	before(function(done) {
@@ -79,7 +77,6 @@ describe('load.js smoke — offline wiring guard', function() {
 
 		insertMissingDimensionsCalls = [];
 		dropTempTablesCalls = 0;
-		minQueryCount = 0;
 		mergeQueryCount = 0;
 
 		connectClientStub = {
@@ -100,16 +97,8 @@ describe('load.js smoke — offline wiring guard', function() {
 			buildStagingSelect: sinon.stub().returns('SELECT * FROM smoke_staging'),
 			query: sinon.stub().callsFake((sql, _params, cb) => {
 				const done = typeof cb === 'function' ? cb : (typeof _params === 'function' ? _params : () => {});
-				if (/SELECT MIN\(/.test(sql)) {
-					minQueryCount++;
-					return done(null, [{ minval: 1, cnt: 100 }]);
-				}
-				if (/SELECT CAST\(COUNT/.test(sql)) {
-					return done(null, [{ cnt: 100 }]);
-				}
 				if (/^MERGE INTO/.test(sql)) {
 					mergeQueryCount++;
-					return done(null, []);
 				}
 				return done(null, []);
 			}),
@@ -155,10 +144,6 @@ describe('load.js smoke — offline wiring guard', function() {
 	it('stages records to S3 via streamToTableFromS3', () => {
 		expect(connectClientStub.streamToTableFromS3.callCount, 'streamToTableFromS3 call count').to.equal(1);
 		expect(connectClientStub.streamToTableFromS3.firstCall.args[0]).to.equal(TABLE);
-	});
-
-	it('runs the MIN prune query against the staging clause', () => {
-		expect(minQueryCount, 'MIN query count').to.equal(1);
 	});
 
 	it('runs the MERGE INTO query', () => {

@@ -23,7 +23,7 @@ The datalake connector is a fork of the postgres connector adapted for Databrick
 ### `escapeValue` lowercases string values
 - **Location:** `lib/connect.js` — `escapeValue` returns `"'" + value.toLowerCase() + "'"`
 - **Why kept:** Two reasons.
-  1. **Dead code in datalake.** The only postgres callsites are in `needsToProcess` / `dwAuditdate` audit-comparison helpers that have not been ported. `escapeValue` is currently unreachable from any datalake codepath. The companion `escapeValueNoToLower` is the one actually in use (audit-timestamp literals, `naturalKeyFilter` for non-numeric types).
+  1. **Incomplete — `findAuditDate` and `exportChanges` not yet ported.** These are the read-side interface (leoDW / Query Explorer reads audit dates and exports changed rows). They will need to be implemented in the datalake connector when those consumers migrate to Databricks. `escapeValue` is therefore dead today but will be needed when that read path is built.
   2. **The lowercasing is an OrderStream/Dsco convention** (all string data is lowercased before storage), not a bug. If `escapeValue` is ever wired up, that convention has to be preserved for parity with what Redshift consumers expect.
 
 ### Schema cache invalidated only on `createTable`, not on `ADD COLUMN`

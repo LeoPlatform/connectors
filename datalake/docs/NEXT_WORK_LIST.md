@@ -18,7 +18,7 @@ Items are tagged **[Bug]** (correctness regression vs postgres), **[Gap]** (BUIL
 |---|---|---|---|
 | Staging artifact | `staging_<table>` real table | S3 file, inlined via `read_files()` in MERGE | Each pooled session can serve any query; a session-scoped temp view from one acquire isn't guaranteed to live across the MIN+MERGE pair |
 | UPSERT mechanism | `UPDATE prev FROM staging` + `INSERT WHERE NOT EXISTS` | `MERGE INTO ... WHEN MATCHED ... WHEN NOT MATCHED INSERT` | Delta supports atomic MERGE; Redshift doesn't |
-| `naturalKeyFilter` placement | WHERE clauses on `prev` joins / DELETE | MERGE `ON` clause `target.<clusterKey> >= <filter>` | Forced by MERGE mechanism |
+| `naturalKeyFilter` placement | WHERE clauses on `prev` joins / DELETE | Not used — Redshift block-skipping via SORTKEY has no equivalent; Delta file-skipping is driven by `CLUSTER BY AUTO` + Photon column stats | Databricks Photon handles this automatically |
 | `escapeId` casing | preserves case (`"Name"`) | lowercases (`` `name` ``) | Intentional lowercase-everywhere convention ([CLAUDE.md](../CLAUDE.md)); BUILD_PLAN Step 3 open question #7 |
 | Staging identifier | `qualifiedStagingTable = "${stageSchema}.${stageTablePrefix}_${table}"` | `stagingS3Path(s3Bucket, s3Prefix, table, auditdate)` | Different shape (URI vs schema-qualified name), same ownership pattern — caller owns and passes down |
 | Transactions | `BEGIN/COMMIT/ROLLBACK` around post-stage SQL | None | Pool sessions are independent acquires per query; multi-statement TX not viable in this model |
@@ -42,7 +42,7 @@ Closed list of items deliberately left matching postgres. Don't re-flag without 
 
 - `flushDeletes` IN-list via string interpolation
 - `alterColumnType` helper exists but is never called from `changeTableStructure`
-- `escapeValue` lowercases (dead code in datalake; OrderStream/Dsco convention if ever wired)
+- `escapeValue` lowercases (dead in datalake until `findAuditDate`/`exportChanges` read path is ported — see §2)
 - Schema cache invalidated only on `createTable`, not on `ADD COLUMN`
 - `npm` scripts use shell globs
 - `dwClient = client` module-scope alias
@@ -55,9 +55,9 @@ These are real and still present after `b62d3b8`. Worth addressing:
 
 - ~~**[Bug] `flushDeletes` post-retry error is swallowed.**~~ ✓ Fixed — `mergeCallback` hoisted before `withRetry(flushDeletes...)`; callback now takes `(flushErr)` and returns early. Unit-tested: `propagates a flushDeletes error and skips MERGE`.
 
-- ~~**[Bug] MIN query post-retry error is swallowed.**~~ ✓ Fixed — `qErr` now propagates via `mergeCallback`; error is logged at ERROR level before returning. Unit-tested: `propagates a MIN query error and skips MERGE`.
+- ~~**[Bug] `count` returned to the orchestrator is wrong.**~~ ✓ Fixed — `stagingCount` captured from a `SELECT CAST(COUNT(*) AS INT)` before the MERGE; `doMerge` simplified to `client.query(mergeSql, [], callback)`. Unit-tested. Integration-tested: `loads 100 records via importFact` now asserts `tableInfo.count === 100` and passes against live Databricks.
 
-- ~~**[Bug] `count` returned to the orchestrator is wrong.**~~ ✓ Fixed — `stagingCount` captured from MIN query's `cnt` (pruneCol path) or a separate `SELECT CAST(COUNT(*) AS INT)` (no-pruneCol path); `doMerge` simplified to `client.query(mergeSql, [], callback)`. Unit-tested on both paths. Integration-tested: `loads 100 records via importFact` now asserts `tableInfo.count === 100` and passes against live Databricks.
+- ~~**[Removed] `clusterKey` / `naturalKeyFilter` / `pruneCol` apparatus.**~~ ✓ Removed — the `clusterKey` dw_fields field, `MIN(clusterKey)` pruning query, `literalForType` helper, and all associated parameters dropped. Every table now declares `CLUSTER BY AUTO`; Databricks Photon handles file-skipping via transaction-log column statistics driven by clustering.
 
 - ~~**[Doc] Outdated `streamToTableFromS3` comment.**~~ ✓ Done — was actually in [dwconnect.js:207-209](../lib/dwconnect.js#L207-L209), not connect.js. Updated the rationale to "Sessions are pooled, so the MIN and MERGE queries may run on different acquires — a session-scoped temp view from one acquire is not guaranteed visible to the next. Inlining avoids that."
 
@@ -100,6 +100,9 @@ All needed before the Step 9 CI workflows can authenticate.
 
 ### [Gap] Open question #6 follow-up — `READ_FILES` grant
 External Location `datalake-dev-external-location` exists (`infra-iac-databricks/data-platform/main.tf:263`) and covers the staging bucket. The `[dev-cup]` SP currently works for local dev. For CI, either: (a) reuse the `dbt` SP (already has `READ_FILES`), or (b) add a new SP + grant in `infra-iac-databricks/`. Decision deferred.
+
+### [Gap] Read-side interface — `findAuditDate` and `exportChanges` not yet ported
+`connectors/postgres/lib/dwconnect.js` exposes `client.findAuditDate(table, cb)` and `client.exportChanges(table, fields, remoteAuditdate, opts, cb)`. These are used by leoDW / Query Explorer to read audit dates and export changed rows from the DW. The datalake connector must implement Databricks-dialect equivalents before those consumers can migrate off Redshift. `escapeValue` (lowercasing variant, currently dead in the datalake connector) will be needed when this is built.
 
 ### [Gap] BUILD_PLAN risk #4 — `offload_to_datalake.js` bot
 Without this bot in `general/`, nothing runs in production. The connector library is complete for both fact and dim tables (`importDimension` and `linkDimensions` are implemented in `lib/dwconnect.js`). Shortest deployment path: write the bot and run it against `supplier-catalog-dim` to validate end-to-end.

@@ -133,9 +133,9 @@ describe('importFact — CSV output contract', () => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Orchestration tests: cover importFact's wiring of describeTable →
-// ensureStagingLocation → streamToTableFromS3 → MERGE, plus prune-query
-// type-aware quoting, error propagation, and the row-level routing
-// (delete records out, sk + audit + _deleted onto every survivor).
+// ensureStagingLocation → streamToTableFromS3 → MERGE, plus error propagation
+// and the row-level routing (delete records out, sk + audit + _deleted onto
+// every survivor).
 //
 // leo-sdk.streams is the canonical leo-streams package (cf. connect.js);
 // we stub it so ls.pipe completes synchronously and ls.through hands us
@@ -172,14 +172,6 @@ describe('importFact — orchestration', () => {
 				const finalCb = typeof cb === 'function' ? cb : (typeof params === 'function' ? params : () => {});
 				if (opts.failFlushDeletes && /^UPDATE\s/i.test(sql)) {
 					return finalCb(new Error('flush delete failed'));
-				}
-				if (sql.indexOf('SELECT MIN(') === 0) {
-					if (opts.failMinQuery) return finalCb(new Error('MIN query failed'));
-					return finalCb(null, [{ minval: opts.minVal !== undefined ? opts.minVal : 100, cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
-				}
-				if (sql.indexOf('SELECT CAST(COUNT(') === 0) {
-					if (opts.failCountQuery) return finalCb(new Error('COUNT query failed'));
-					return finalCb(null, [{ cnt: opts.cnt !== undefined ? opts.cnt : 50 }]);
 				}
 				return finalCb(null, []);
 			}),
@@ -255,56 +247,10 @@ describe('importFact — orchestration', () => {
 		expect(merge).to.include('cat.sch.f_order_item');
 	});
 
-	it('runs a SELECT MIN prune query against the single NK', async () => {
-		const ctx = setup({ tableFields: factTableFields });
-		await runToCompletion(ctx, 'f_order_item', ['id']);
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery, 'expected a prune MIN query').to.exist;
-		expect(minQuery).to.include('`id`');
-	});
-
-	it('prefers tableDef.clusterKey over ids as the prune column', async () => {
-		const ctx = setup({ tableFields: factTableFields });
-		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'qty' });
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery).to.include('`qty`');
-		expect(minQuery).to.not.include('MIN(`id`)');
-	});
-
-	it('prune filter is NOT injected into the MERGE ON clause (regression: would duplicate rows with old cluster keys)', async () => {
-		const ctx = setup({ tableFields: factTableFields, minVal: 42 });
-		await runToCompletion(ctx, 'f_order_item', ['id']); // no clusterKey — pruneCol falls back to single NK
-		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge, 'expected a MERGE INTO query').to.exist;
-		expect(merge).to.not.include('>=');
-	});
-
-	it('naturalKeyFilter is computed but NOT injected into MERGE ON (numeric case)', async () => {
-		const ctx = setup({ tableFields: factTableFields, minVal: 12345 });
-		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'id' });
-		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge).to.not.include('>=');
-	});
-
-	it('naturalKeyFilter is computed but NOT injected into MERGE ON (timestamp case)', async () => {
-		const ctx = setup({ tableFields: factTableFields, minVal: '2026-03-15 14:30:00' });
-		await runToCompletion(ctx, 'f_order_item', ['id'], { clusterKey: 'created_at' });
-		const merge = ctx.queryHistory.find(q => q.startsWith('MERGE INTO'));
-		expect(merge).to.not.include('>=');
-	});
-
-	it('skips prune query for composite NKs when no clusterKey is set', async () => {
-		const ctx = setup({ tableFields: factTableFields });
-		await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
-		expect(ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0)).to.not.exist;
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.exist;
-	});
-
 	it('normalizes a single non-array id to an array', async () => {
 		const ctx = setup({ tableFields: factTableFields });
 		await runToCompletion(ctx, 'f_order_item', 'id');
-		const minQuery = ctx.queryHistory.find(q => q.indexOf('SELECT MIN(') === 0);
-		expect(minQuery).to.include('`id`');
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.exist;
 	});
 
 	it('propagates a pipeline error to the callback and skips MERGE', async () => {
@@ -336,18 +282,35 @@ describe('importFact — orchestration', () => {
 		expect(forwarded).to.deep.equal([{ id: 1, qty: 5 }]);
 	});
 
-	it('returns staging cnt as result.count (single NK — pruneCol path)', async () => {
-		const ctx = setup({ tableFields: factTableFields, cnt: 77 });
-		const result = await runToCompletion(ctx, 'f_order_item', ['id']);
-		expect(result).to.exist;
-		expect(result.count).to.equal(77);
+	it('result.count reflects the number of rows enriched through staging', async () => {
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		await new Promise(setImmediate);
+		// throughCallbacks[1] is the enrichedStream (registered inside stageToS3 after
+		// describeTable/ensureStagingLocation resolve). Drive 3 records through it to
+		// verify stagingCount increments correctly.
+		const enrichCb = ctx.throughCallbacks[1];
+		enrichCb({ id: 1 }, () => {});
+		enrichCb({ id: 2 }, () => {});
+		enrichCb({ id: 3 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(3);
 	});
 
-	it('returns staging cnt as result.count (composite NK — COUNT path)', async () => {
-		const ctx = setup({ tableFields: factTableFields, cnt: 33 });
-		const result = await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
-		expect(result).to.exist;
-		expect(result.count).to.equal(33);
+	it('__leo_delete__ records do not contribute to result.count', async () => {
+		// Delete records are filtered by dataStream before reaching enrichFn — they
+		// should not inflate the staged-record count.
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		await new Promise(setImmediate);
+		const dataStreamCb = ctx.throughCallbacks[0];
+		const enrichCb = ctx.throughCallbacks[1];
+		dataStreamCb({ __leo_delete__: 'id', __leo_delete_id__: 99 }, () => {});
+		enrichCb({ id: 1 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(1);
 	});
 
 	it('propagates a flushDeletes error and skips MERGE', async () => {
@@ -373,32 +336,6 @@ describe('importFact — orchestration', () => {
 		ctx.completePipeline();
 		await p;
 		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
-	});
-
-	it('propagates a MIN query error and skips MERGE', async () => {
-		const ctx = setup({ tableFields: factTableFields, failMinQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'f_order_item', ['id']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from MIN query').to.exist;
-		expect(caught.message).to.equal('MIN query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
-	});
-
-	it('propagates a COUNT query error and skips MERGE (composite NK path)', async () => {
-		const ctx = setup({ tableFields: factTableFields, failCountQuery: true });
-		let caught;
-		try {
-			await runToCompletion(ctx, 'f_order_item', ['id', 'qty']);
-		} catch (e) {
-			caught = e;
-		}
-		expect(caught, 'expected an error from COUNT query').to.exist;
-		expect(caught.message).to.equal('COUNT query failed');
-		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
 	});
 
 	it('enrichedStream stamps audit/_deleted and computes sk via fingerprint64', async () => {

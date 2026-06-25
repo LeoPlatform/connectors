@@ -78,10 +78,11 @@ function colDef(name, rawType, escapeId) {
  * `if (definition.isDimension)` block). Note: SCD is bypassed in all production
  * bot configs (bypassSlowlyChangingDimensions=true, no `scds` fields in any
  * dw_fields), so these columns will be null until dim upsert is implemented.
- * Appends CLUSTER BY (clusterKey) when clusterKey is set.
+ * Always appends CLUSTER BY AUTO so Databricks chooses clustering columns from
+ * observed query patterns (requires Predictive Optimization on the catalog).
  *
  * @param {string} qualifiedTable  - fully-qualified table name (catalog.schema.table)
- * @param {object} definition      - dw_fields entry (structure, isDimension, clusterKey)
+ * @param {object} definition      - dw_fields entry (structure, isDimension)
  * @param {object} columnConfig    - audit column name overrides
  * @param {function} escapeId      - identifier quoting function from connect.js
  * @returns {string} SQL DDL
@@ -132,13 +133,7 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 	}
 	cols.push(`${escapeId(columnConfig._rescued_data)} STRING`);
 
-	let sql = `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA`;
-
-	if (definition.clusterKey) {
-		sql += `\nCLUSTER BY (${escapeId(definition.clusterKey)})`;
-	}
-
-	return sql;
+	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA\nCLUSTER BY AUTO`;
 }
 
 /**
@@ -167,12 +162,10 @@ function alterColumnType(qualifiedTable, columnName, newRawType, escapeId) {
  * @param {string[]} nks            - natural key column names
  * @param {string[]} dataCols       - non-NK, non-audit data columns
  * @param {object} columnConfig     - audit column name overrides
- * @param {string|null} clusterKey  - reserved, ignored (was incorrectly used as MERGE ON filter)
- * @param {string|null} naturalKeyFilter - reserved, ignored (was incorrectly used as MERGE ON filter)
  * @param {function} escapeId       - identifier quoting function
  * @returns {string} MERGE SQL
  */
-function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, escapeId) {
+function mergeFact(target, staging, nks, dataCols, columnConfig, escapeId) {
 	const ad = escapeId(columnConfig._auditdate);
 	const del = escapeId(columnConfig._deleted);
 	const rd = escapeId(columnConfig._rescued_data);
@@ -220,12 +213,10 @@ function mergeFact(target, staging, nks, dataCols, columnConfig, clusterKey, nat
  * @param {string[]} nks            - natural key column names
  * @param {string[]} dataCols       - non-NK, non-audit data columns
  * @param {object} columnConfig     - audit column name overrides
- * @param {string|null} clusterKey  - reserved, ignored (was incorrectly used as MERGE ON filter)
- * @param {string|null} naturalKeyFilter - reserved, ignored (was incorrectly used as MERGE ON filter)
  * @param {function} escapeId       - identifier quoting function
  * @returns {string} MERGE SQL
  */
-function mergeDim(target, staging, nks, dataCols, columnConfig, clusterKey, naturalKeyFilter, escapeId) {
+function mergeDim(target, staging, nks, dataCols, columnConfig, escapeId) {
 	const ad = escapeId(columnConfig._auditdate);
 	const rd = escapeId(columnConfig._rescued_data);
 
