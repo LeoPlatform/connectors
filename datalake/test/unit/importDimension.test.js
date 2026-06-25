@@ -21,7 +21,8 @@ describe('importDimension — orchestration', () => {
 			auditdate: "'2026-05-27T00:00:00'",
 			setAuditdate: sinon.stub(),
 			escapeId: name => '`' + String(name).toLowerCase() + '`',
-			escapeValueNoToLower: v => typeof v === 'string' ? "'" + v.replace(/'/g, "\\'") + "'" : v,
+			escape: v => typeof v === 'string' ? "'" + v.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'" : v,
+			escapeValueNoToLower: v => typeof v === 'string' ? "'" + v.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'" : v,
 			describeTable: sinon.stub().resolves(opts.tableFields),
 			ensureStagingLocation: sinon.stub().resolves({ s3Bucket: 'b', s3Prefix: 'p' }),
 			stagingS3Path: (table) => ({
@@ -218,6 +219,23 @@ describe('importDimension — orchestration', () => {
 		ctx.completePipeline();
 		await p;
 		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.not.exist;
+	});
+
+	it('flushDimDeletes correctly escapes tricky string IDs in UPDATE IN (...)', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		const injectDelete = id => ctx.throughCallbacks[0]({ __leo_delete__: 'retailer_id', __leo_delete_id__: id }, () => {}, () => {});
+		injectDelete("it's");       // embedded single quote
+		injectDelete('foo\\');      // trailing backslash
+		injectDelete("foo\\'bar");  // backslash immediately before quote
+		ctx.completePipeline();
+		await p;
+		const updateSql = ctx.queryHistory.find(q => q.startsWith('UPDATE'));
+		expect(updateSql).to.exist;
+		expect(updateSql).to.include("'it\\'s'");
+		expect(updateSql).to.include("'foo\\\\'");
+		expect(updateSql).to.include("'foo\\\\\\'bar'");
 	});
 
 	it('result.count reflects the number of rows enriched through staging', async () => {

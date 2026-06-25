@@ -350,7 +350,7 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 	});
 
 	const tasks = Object.keys(byField).map(field => done => {
-		const ids = byField[field].map(v => typeof v === 'string' ? `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : v).join(',');
+		const ids = byField[field].map(v => typeof v === 'string' ? client.escape(v) : v).join(',');
 		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids})`;
 		client.query(updateSql, [], done);
 	});
@@ -373,7 +373,7 @@ function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, au
 	});
 
 	const tasks = Object.keys(byField).map(field => done => {
-		const ids = byField[field].map(v => typeof v === 'string' ? `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : v).join(',');
+		const ids = byField[field].map(v => typeof v === 'string' ? client.escape(v) : v).join(',');
 		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids}) AND \`${columnConfig._current}\` = true`;
 		client.query(updateSql, [], done);
 	});
