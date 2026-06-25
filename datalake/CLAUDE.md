@@ -70,6 +70,8 @@ Databricks workspace targets are configured per environment via environment vari
 
 The publishing/offload path does **not** go through `leo-connector-redshift`. The bot-side caller (`general/lib/offload_to_redshift.js`) loads `leo-connector-common/datawarehouse/load.js` and `leo-connector-postgres/lib/dwconnect.js` — `connectors/redshift` is only used by the `report/` consumer. Model the data-publishing side on `connectors/postgres`, not `connectors/redshift`.
 
+**Path convention:** `../postgres/`, `../common/`, `../redshift/` are sibling packages in this monorepo (workspace-relative). References to other Rithum repos name the repo and its in-repo path (e.g. the `general` repo's `lib/offload_to_redshift.js`) — they are separate repos, not paths under this checkout.
+
 | What | Where | Why |
 |---|---|---|
 | **Offload mechanics** (staging, merge, schema discovery, `_auditdate`/`_current`/`_deleted` cols, dim/fact handling) | `../postgres/lib/dwconnect.js` | The actual code `offload_to_redshift.js` invokes; the datalake connector must expose the same shape, staging to S3 + `COPY INTO`/`MERGE` against Delta |
@@ -77,8 +79,8 @@ The publishing/offload path does **not** go through `leo-connector-redshift`. Th
 | `package.json` / `index.js` shape, file layout | `../postgres/package.json`, `../postgres/index.js` | Drop `pg`/`pg-copy-streams`/`pg-format`; add `farmhash-modern` + Databricks SQL client |
 | Connection layer | `../postgres/lib/connect.js` | Connection-pool plumbing; adapt to Databricks SQL client |
 | Domain Object Layer (consumer-side queries) | `../postgres/lib/dol.js` | SQL query builder pattern; Databricks-dialect adaptation. Not on the publishing critical path |
-| dw_fields schema format | `../../order/dw_fields/d_order.json` | Canonical dimension schema with nk, sk, groups, structure |
-| How bots call the connector | `../../general/lib/offload_to_redshift.js` | Calling convention; datalake connector must match this interface |
+| dw_fields schema format | the `order` repo's `dw_fields/d_order.json` | Canonical dimension schema with nk, sk, groups, structure |
+| How bots call the connector | the `general` repo's `lib/offload_to_redshift.js` | Calling convention; datalake connector must match this interface |
 
 **Skip:** `../postgres/lib/binlogreader.js`, `../postgres/lib/lsn.js`, `../postgres/lib/test_decoding.js` — CDC/logical-replication; not relevant to RStreams-driven publishing.
 
@@ -103,7 +105,7 @@ Separately: some review-flagged patterns *should* match postgres and were kept o
 - Keep all dw_fields config changes additive during Redshift coexistence — no change may break the running Redshift pipeline
 
 **Never:**
-- Release changes that impact the running Redshift pipeline as side effects. The publishing-path code (`../postgres/` — especially `lib/dwconnect.js` — plus `../common/datawarehouse/`, `../../general/lib/offload_to_redshift.js`, and the offload bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. `../redshift/` is consumer-only (used by `report/`) and is not on the publishing path. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
+- Release changes that impact the running Redshift pipeline as side effects. The publishing-path code (`../postgres/` — especially `lib/dwconnect.js` — plus `../common/datawarehouse/`, the `general` repo's `lib/offload_to_redshift.js`, and the offload bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. `../redshift/` is consumer-only (used by `report/`) and is not on the publishing path. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
 - Use Redshift-specific SQL syntax in new code (`GETDATE()`, `TOP N`, `DISTKEY`/`SORTKEY` in DDL, `FARMFINGERPRINT64()`)
 - Add npm dependencies without asking first
 - Write SQL stored procedures
@@ -155,7 +157,7 @@ The shared audit-timestamp helper [`lib/audit_timestamp.js`](lib/audit_timestamp
 - Don't apply `CONVERT_TIMEZONE` / `from_utc_timestamp` in the connector — semantic normalization belongs in downstream models, not at ingest.
 - Don't change session `timezone` away from UTC — both the `Z` strip and the audit-column UTC assumption depend on it. If you must change it, audit-column writes and the strip have to change together.
 
-**Canonical reference for stored timezones per table:** [../../data-warehouse/docs/timezone-data-conventions.md](../../data-warehouse/docs/timezone-data-conventions.md).
+**Canonical reference for stored timezones per table:** the `data-warehouse` repo's `docs/timezone-data-conventions.md`.
 
 ## Definition of Done
 
