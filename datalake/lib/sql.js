@@ -43,6 +43,7 @@ const TYPE_MAP = {
 	'integer': 'INT',
 	'bigint': 'BIGINT',
 	'string': 'STRING',
+	'varchar': 'STRING',
 	'timestamp': 'TIMESTAMP_NTZ',
 	'timestamptz': 'TIMESTAMP',
 };
