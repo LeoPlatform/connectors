@@ -18,9 +18,52 @@ describe('sql.js', () => {
 
 	describe('mapType', () => {
 		const cases = [
+			// boolean
+			['boolean', 'BOOLEAN'],
+			['BOOLEAN', 'BOOLEAN'],
+			// date
+			['date', 'DATE'],
+			// integers
+			['smallint', 'SMALLINT'],
+			['int2', 'SMALLINT'],
+			['int', 'INT'],
+			['int4', 'INT'],
+			['integer', 'INT'],
+			['bigint', 'BIGINT'],
+			['int8', 'BIGINT'],
+			// floating-point
+			['real', 'FLOAT'],
+			['float4', 'FLOAT'],
+			['float', 'DOUBLE'],
+			['FLOAT', 'DOUBLE'],
+			['float8', 'DOUBLE'],
+			['double precision', 'DOUBLE'],
+			['DOUBLE PRECISION', 'DOUBLE'],
+			// strings
 			['varchar(300)', 'STRING'],
 			['varchar(1)', 'STRING'],
 			['VARCHAR(100)', 'STRING'],
+			['char(10)', 'STRING'],
+			['nvarchar(50)', 'STRING'],
+			['text', 'STRING'],
+			['bpchar', 'STRING'],
+			// binary
+			['varbyte', 'BINARY'],
+			['varbyte(100)', 'BINARY'],
+			['varbinary', 'BINARY'],
+			['varbinary(256)', 'BINARY'],
+			['binary varying', 'BINARY'],
+			['binary varying(512)', 'BINARY'],
+			// decimal / numeric
+			['decimal', 'DECIMAL(18,0)'],
+			['DECIMAL', 'DECIMAL(18,0)'],
+			['decimal(10,2)', 'DECIMAL(10,2)'],
+			['DECIMAL(38,10)', 'DECIMAL(38,10)'],
+			['numeric', 'DECIMAL(18,0)'],
+			['NUMERIC', 'DECIMAL(18,0)'],
+			['numeric(10,2)', 'DECIMAL(10,2)'],
+			['NUMERIC(38,10)', 'DECIMAL(38,10)'],
+			// timestamps
 			['timestamp', 'TIMESTAMP_NTZ'],
 			['TIMESTAMP', 'TIMESTAMP_NTZ'],
 			['timestamp without time zone', 'TIMESTAMP_NTZ'],
@@ -29,17 +72,6 @@ describe('sql.js', () => {
 			['TIMESTAMPTZ', 'TIMESTAMP'],
 			['timestamp with time zone', 'TIMESTAMP'],
 			['TIMESTAMP WITH TIME ZONE', 'TIMESTAMP'],
-			['date', 'DATE'],
-			['boolean', 'BOOLEAN'],
-			['BOOLEAN', 'BOOLEAN'],
-			['int', 'INT'],
-			['integer', 'INT'],
-			['bigint', 'BIGINT'],
-			['float', 'FLOAT'],
-			['decimal', 'DECIMAL(18,0)'],
-			['DECIMAL', 'DECIMAL(18,0)'],
-			['decimal(10,2)', 'DECIMAL(10,2)'],
-			['DECIMAL(38,10)', 'DECIMAL(38,10)'],
 		];
 
 		cases.forEach(([input, expected]) => {

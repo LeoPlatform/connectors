@@ -36,24 +36,44 @@
 // Databricks SQL keywords (including type names) are case-insensitive — `int` and
 // `INT` both work. Uppercase here is stylistic, for readability of generated DDL.
 const TYPE_MAP = {
+	// boolean
 	'boolean': 'BOOLEAN',
+	// date
 	'date': 'DATE',
-	'float': 'FLOAT',
-	'int': 'INT',
-	'integer': 'INT',
-	'bigint': 'BIGINT',
-	'string': 'STRING',
-	'char': 'STRING',
-	'character': 'STRING',
-	'nchar': 'STRING',
-	'varchar': 'STRING',
+	// integers
+	'smallint': 'SMALLINT',
+	'int2':     'SMALLINT',
+	'int':      'INT',
+	'int4':     'INT',
+	'integer':  'INT',
+	'bigint':   'BIGINT',
+	'int8':     'BIGINT',
+	// floating-point
+	// NOTE: Redshift FLOAT = DOUBLE PRECISION (8 bytes), not REAL (4 bytes).
+	// Databricks FLOAT is single-precision; DOUBLE is double-precision.
+	'real':             'FLOAT',
+	'float4':           'FLOAT',
+	'float':            'DOUBLE',   // Redshift FLOAT = DOUBLE PRECISION
+	'float8':           'DOUBLE',
+	'double precision': 'DOUBLE',
+	// strings
+	'string':   'STRING',
+	'char':     'STRING',
+	'character':'STRING',
+	'nchar':    'STRING',
+	'varchar':  'STRING',
 	'nvarchar': 'STRING',
-	'bpchar': 'STRING',
-	'text': 'STRING',
-	'timestamp': 'TIMESTAMP_NTZ',
-	'timestamp without time zone': 'TIMESTAMP_NTZ',
-	'timestamptz': 'TIMESTAMP',
-	'timestamp with time zone': 'TIMESTAMP',
+	'bpchar':   'STRING',
+	'text':     'STRING',
+	// binary
+	'varbyte':        'BINARY',
+	'varbinary':      'BINARY',
+	'binary varying': 'BINARY',
+	// timestamps (zone-naive → NTZ; zone-aware → TIMESTAMP)
+	'timestamp':                    'TIMESTAMP_NTZ',
+	'timestamp without time zone':  'TIMESTAMP_NTZ',
+	'timestamptz':                  'TIMESTAMP',
+	'timestamp with time zone':     'TIMESTAMP',
 };
 
 function mapType(rawType) {
@@ -67,6 +87,9 @@ function mapType(rawType) {
 	// varchar(n), char(n), nvarchar(n) → STRING (Databricks has no length-bounded string type)
 	if (t.startsWith('varchar') || t.startsWith('char') || t.startsWith('nvarchar')) return 'STRING';
 
+	// varbyte(n), varbinary(n), binary varying(n) → BINARY
+	if (t.startsWith('varbyte') || t.startsWith('varbinary') || t.startsWith('binary varying')) return 'BINARY';
+
 	// TIME and TIMETZ have no native Databricks equivalent — explicit error with
 	// a more informative message than the generic unmapped-type error below.
 	if (t === 'time' || t === 'timetz' ||
@@ -74,12 +97,13 @@ function mapType(rawType) {
 		throw new Error(`mapType: no Databricks equivalent for '${rawType}' — add explicit column handling`);
 	}
 
-	// decimal with no precision → DECIMAL(18,0) to match Redshift default.
+	// decimal/numeric with no precision → DECIMAL(18,0) to match Redshift default.
 	// Databricks default is DECIMAL(10,0) — do NOT rely on it.
-	if (t === 'decimal') return 'DECIMAL(18,0)';
+	if (t === 'decimal' || t === 'numeric') return 'DECIMAL(18,0)';
 
-	// decimal(p,s) → pass through verbatim, uppercased
+	// decimal(p,s) / numeric(p,s) → DECIMAL(p,s), verbatim precision/scale
 	if (t.startsWith('decimal(')) return rawType.trim().toUpperCase();
+	if (t.startsWith('numeric(')) return 'DECIMAL' + rawType.trim().slice('numeric'.length).toUpperCase();
 
 	throw new Error(`mapType: unrecognized type '${rawType}' — add to TYPE_MAP if this is a valid mapping`);
 }
