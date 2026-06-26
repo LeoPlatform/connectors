@@ -2,7 +2,7 @@
 
 // Step 9 — Integration harness
 // Verifies connectivity, schema accessibility, and staging-location resolution.
-// Skips all tests when ~/.databrickscfg [dev-cup] (or env override) is absent.
+// Throws (fails) when DATABRICKS_CONFIG_PROFILE + ~/.databrickscfg or DATABRICKS_HOST+auth env vars are not configured.
 //
 // Uses fixed schema names (public_stage_local for local dev, public_stage for CI);
 // isolation is per-branch catalog, not per-run UUID schema.

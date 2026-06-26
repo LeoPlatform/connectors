@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-PROFILE="${DATABRICKS_CONFIG_PROFILE:-dev-cup}"
+PROFILE="${DATABRICKS_CONFIG_PROFILE:?DATABRICKS_CONFIG_PROFILE is required (set to your ~/.databrickscfg section name)}"
 WAREHOUSE_ID="${WAREHOUSE_ID:-5d84579f11466e3f}"
 DBC="databricks --profile $PROFILE"
 
