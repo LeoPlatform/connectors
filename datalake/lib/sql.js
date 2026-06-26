@@ -42,6 +42,7 @@ const TYPE_MAP = {
 	'int': 'INT',
 	'integer': 'INT',
 	'bigint': 'BIGINT',
+	'string': 'STRING',
 	'timestamp': 'TIMESTAMP_NTZ',
 	'timestamptz': 'TIMESTAMP',
 };
@@ -131,7 +132,7 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId, mapType
 	} else {
 		cols.push(`${escapeId(columnConfig._deleted)} ${mapTypeFn('boolean')}`);
 	}
-	cols.push(`${escapeId(columnConfig._rescued_data)} ${mapTypeFn('varchar')}`);
+	cols.push(`${escapeId(columnConfig._rescued_data)} ${mapTypeFn('string')}`);
 
 	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) ${storageClause}`;
 }
