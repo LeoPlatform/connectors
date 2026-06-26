@@ -123,15 +123,15 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId, mapType
 		}
 	});
 
-	cols.push(`${escapeId(columnConfig._auditdate)} TIMESTAMP_NTZ`);
+	cols.push(`${escapeId(columnConfig._auditdate)} ${mapTypeFn('timestamp')}`);
 	if (definition.isDimension) {
-		cols.push(`${escapeId(columnConfig._startdate)} TIMESTAMP_NTZ`);
-		cols.push(`${escapeId(columnConfig._enddate)} TIMESTAMP_NTZ`);
-		cols.push(`${escapeId(columnConfig._current)} BOOLEAN`);
+		cols.push(`${escapeId(columnConfig._startdate)} ${mapTypeFn('timestamp')}`);
+		cols.push(`${escapeId(columnConfig._enddate)} ${mapTypeFn('timestamp')}`);
+		cols.push(`${escapeId(columnConfig._current)} ${mapTypeFn('boolean')}`);
 	} else {
-		cols.push(`${escapeId(columnConfig._deleted)} BOOLEAN`);
+		cols.push(`${escapeId(columnConfig._deleted)} ${mapTypeFn('boolean')}`);
 	}
-	cols.push(`${escapeId(columnConfig._rescued_data)} STRING`);
+	cols.push(`${escapeId(columnConfig._rescued_data)} ${mapTypeFn('varchar')}`);
 
 	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) ${storageClause}`;
 }
