@@ -51,7 +51,9 @@ const TYPE_MAP = {
 	'bpchar': 'STRING',
 	'text': 'STRING',
 	'timestamp': 'TIMESTAMP_NTZ',
+	'timestamp without time zone': 'TIMESTAMP_NTZ',
 	'timestamptz': 'TIMESTAMP',
+	'timestamp with time zone': 'TIMESTAMP',
 };
 
 function mapType(rawType) {
