@@ -43,7 +43,13 @@ const TYPE_MAP = {
 	'integer': 'INT',
 	'bigint': 'BIGINT',
 	'string': 'STRING',
+	'char': 'STRING',
+	'character': 'STRING',
+	'nchar': 'STRING',
 	'varchar': 'STRING',
+	'nvarchar': 'STRING',
+	'bpchar': 'STRING',
+	'text': 'STRING',
 	'timestamp': 'TIMESTAMP_NTZ',
 	'timestamptz': 'TIMESTAMP',
 };
@@ -54,8 +60,8 @@ function mapType(rawType) {
 
 	if (TYPE_MAP[t]) return TYPE_MAP[t];
 
-	// varchar(n) → STRING (Databricks has no length-bounded string type)
-	if (t.startsWith('varchar')) return 'STRING';
+	// varchar(n), char(n), nvarchar(n) → STRING (Databricks has no length-bounded string type)
+	if (t.startsWith('varchar') || t.startsWith('char') || t.startsWith('nvarchar')) return 'STRING';
 
 	// decimal with no precision → DECIMAL(18,0) to match Redshift default.
 	// Databricks default is DECIMAL(10,0) — do NOT rely on it.
