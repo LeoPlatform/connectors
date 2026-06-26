@@ -39,10 +39,6 @@ describe('dwconnect.js', () => {
 		proxyquire('../../lib/dwconnect.js', {
 			'./connect.js': sinon.stub().returns(makeClientStub()),
 			'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-			'leo-streams': {
-				through: sinon.stub().returns({ pipe: sinon.stub() }),
-				pipe: sinon.stub(),
-			},
 			'./sql.js': require('../../lib/sql.js'),
 			'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 		});
@@ -54,7 +50,6 @@ describe('dwconnect.js', () => {
 			const factory = proxyquire('../../lib/dwconnect.js', {
 				'./connect.js': connectStub,
 				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
 				'./sql.js': require('../../lib/sql.js'),
 				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 			});
@@ -102,7 +97,6 @@ describe('dwconnect.js', () => {
 			const factory = proxyquire('../../lib/dwconnect.js', {
 				'./connect.js': connectStub,
 				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
 				'./sql.js': require('../../lib/sql.js'),
 				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 			});
@@ -183,7 +177,6 @@ describe('dwconnect.js', () => {
 			const factory = proxyquire('../../lib/dwconnect.js', {
 				'./connect.js': connectStub,
 				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
 				'./sql.js': require('../../lib/sql.js'),
 				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 			});
@@ -271,7 +264,6 @@ describe('dwconnect.js', () => {
 			const factory = proxyquire('../../lib/dwconnect.js', {
 				'./connect.js': connectStub,
 				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
 				'./sql.js': require('../../lib/sql.js'),
 				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 			});
@@ -366,7 +358,6 @@ describe('dwconnect.js', () => {
 			const factory = proxyquire('../../lib/dwconnect.js', {
 				'./connect.js': connectStub,
 				'leo-logger': { info: () => {}, debug: () => {}, error: () => {} },
-				'leo-streams': { through: sinon.stub(), pipe: sinon.stub() },
 				'./sql.js': require('../../lib/sql.js'),
 				'./surrogate_key.js': require('../../lib/surrogate_key.js'),
 			});
