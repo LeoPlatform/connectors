@@ -47,6 +47,12 @@ describe('sql.js', () => {
 		it('returns STRING for unknown types', () => {
 			expect(mapType('unknowntype')).to.equal('STRING');
 		});
+
+		['time', 'timetz', 'TIME', 'TIMETZ', 'time without time zone', 'time with time zone'].forEach(t => {
+			it(`throws for unsupported type: ${t}`, () => {
+				expect(() => mapType(t)).to.throw(/no Databricks equivalent/);
+			});
+		});
 	});
 
 	describe('createTable', () => {

@@ -63,6 +63,13 @@ function mapType(rawType) {
 	// varchar(n), char(n), nvarchar(n) → STRING (Databricks has no length-bounded string type)
 	if (t.startsWith('varchar') || t.startsWith('char') || t.startsWith('nvarchar')) return 'STRING';
 
+	// TIME and TIMETZ have no native Databricks equivalent — fail explicitly rather
+	// than silently degrading to STRING and losing time semantics.
+	if (t === 'time' || t === 'timetz' ||
+		t === 'time without time zone' || t === 'time with time zone') {
+		throw new Error(`mapType: no Databricks equivalent for '${rawType}' — add explicit column handling`);
+	}
+
 	// decimal with no precision → DECIMAL(18,0) to match Redshift default.
 	// Databricks default is DECIMAL(10,0) — do NOT rely on it.
 	if (t === 'decimal') return 'DECIMAL(18,0)';
