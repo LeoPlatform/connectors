@@ -97,6 +97,14 @@ function mapType(rawType) {
 		throw new Error(`mapType: no Databricks equivalent for '${rawType}' — add explicit column handling`);
 	}
 
+	// SUPER/VARIANT require changes to the staging pipeline beyond a type mapping
+	// (CSV round-trip serializes nested JSON as STRING; read_files needs explicit
+	// TRY_PARSE_JSON casting; MERGE COALESCE semantics differ). See CONNECTOR_MIGRATION.md
+	// Deliverable #2 — VARIANT event tables.
+	if (t === 'super' || t === 'variant') {
+		throw new Error(`mapType: '${rawType}' requires staging pipeline changes beyond a type mapping — see Deliverable #2 in CONNECTOR_MIGRATION.md`);
+	}
+
 	// decimal/numeric with no precision → DECIMAL(18,0) to match Redshift default.
 	// Databricks default is DECIMAL(10,0) — do NOT rely on it.
 	if (t === 'decimal' || t === 'numeric') return 'DECIMAL(18,0)';

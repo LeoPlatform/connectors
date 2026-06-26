@@ -95,6 +95,12 @@ describe('sql.js', () => {
 				expect(() => mapType(t)).to.throw(/no Databricks equivalent/);
 			});
 		});
+
+		['super', 'SUPER', 'variant', 'VARIANT'].forEach(t => {
+			it(`throws for semi-structured type: ${t}`, () => {
+				expect(() => mapType(t)).to.throw(/staging pipeline changes/);
+			});
+		});
 	});
 
 	describe('createTable', () => {
