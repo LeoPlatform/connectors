@@ -210,6 +210,27 @@ describe('sql.js', () => {
 				expect(ddl).to.not.include('`d_item`');
 			});
 		});
+
+		describe('custom mapTypeFn and storageClause', () => {
+			const simpleDef = { isDimension: false, structure: { 'amount': { type: 'float' } } };
+
+			it('uses custom mapTypeFn for data columns', () => {
+				const customMap = t => t === 'float' ? 'REAL' : 'TEXT';
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId, customMap);
+				expect(ddl).to.include('`amount` REAL');
+			});
+
+			it('uses custom storageClause', () => {
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId, mapType, 'USING ICEBERG');
+				expect(ddl).to.match(/\) USING ICEBERG$/);
+				expect(ddl).to.not.include('USING DELTA');
+			});
+
+			it('defaults to USING DELTA CLUSTER BY AUTO when neither override is provided', () => {
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId);
+				expect(ddl).to.match(/\) USING DELTA\nCLUSTER BY AUTO$/);
+			});
+		});
 	});
 
 	describe('alterAddColumn', () => {
@@ -217,12 +238,22 @@ describe('sql.js', () => {
 			const ddl = alterAddColumn('cat.sch.d_order', 'extra_col', 'varchar(50)', escapeId);
 			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ADD COLUMN `extra_col` STRING');
 		});
+		it('uses custom mapTypeFn when provided', () => {
+			const customMap = () => 'TEXT';
+			const ddl = alterAddColumn('cat.sch.d_order', 'extra_col', 'varchar(50)', escapeId, customMap);
+			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ADD COLUMN `extra_col` TEXT');
+		});
 	});
 
 	describe('alterColumnType', () => {
 		it('emits ALTER COLUMN TYPE', () => {
 			const ddl = alterColumnType('cat.sch.d_order', 'cost', 'bigint', escapeId);
 			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ALTER COLUMN `cost` TYPE BIGINT');
+		});
+		it('uses custom mapTypeFn when provided', () => {
+			const customMap = () => 'NUMBER';
+			const ddl = alterColumnType('cat.sch.d_order', 'cost', 'bigint', escapeId, customMap);
+			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ALTER COLUMN `cost` TYPE NUMBER');
 		});
 	});
 

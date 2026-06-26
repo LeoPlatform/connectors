@@ -108,6 +108,7 @@ Separately: some review-flagged patterns *should* match postgres and were kept o
 - Release changes that impact the running Redshift pipeline as side effects. The publishing-path code (`../postgres/` — especially `lib/dwconnect.js` — plus `../common/datawarehouse/`, the `general` repo's `lib/offload_to_redshift.js`, and the offload bots) may be refactored or extended (e.g., to enable shared patterns), but all changes must be backwards-compatible and safe by default — new functionality disabled unless explicitly enabled. `../redshift/` is consumer-only (used by `report/`) and is not on the publishing path. The Redshift pipeline must remain independently deployable and unaffected by what is or isn't complete on the Databricks side.
 - Use Redshift-specific SQL syntax in new code (`GETDATE()`, `TOP N`, `DISTKEY`/`SORTKEY` in DDL, `FARMFINGERPRINT64()`)
 - Publish to npm or bump the package version without explicit approval from the user — publishing is manual, requires an `leoinsights` org token, and must be preceded by a passing integration test run
+- Create a separate connector package for a new datalake target — additional targets belong as configured variants inside this package (see [docs/project_principles.md](docs/project_principles.md) P0)
 - Add npm dependencies without asking first
 - Write SQL stored procedures
 - Commit credentials or Databricks tokens

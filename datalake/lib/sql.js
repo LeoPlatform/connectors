@@ -66,8 +66,8 @@ function mapType(rawType) {
 }
 
 // Emit a column definition string using the client's escapeId for identifier quoting.
-function colDef(name, rawType, escapeId) {
-	return `${escapeId(name)} ${mapType(rawType)}`;
+function colDef(name, rawType, escapeId, mapTypeFn) {
+	return `${escapeId(name)} ${mapTypeFn(rawType)}`;
 }
 
 /**
@@ -87,7 +87,7 @@ function colDef(name, rawType, escapeId) {
  * @param {function} escapeId      - identifier quoting function from connect.js
  * @returns {string} SQL DDL
  */
-function createTable(qualifiedTable, definition, columnConfig, escapeId) {
+function createTable(qualifiedTable, definition, columnConfig, escapeId, mapTypeFn = mapType, storageClause = 'USING DELTA\nCLUSTER BY AUTO') {
 	const cols = [];
 
 	Object.keys(definition.structure).forEach(key => {
@@ -101,7 +101,7 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 			field = { type: field };
 		}
 		if (!field.type) return;
-		cols.push(colDef(key, field.type, escapeId));
+		cols.push(colDef(key, field.type, escapeId, mapTypeFn));
 
 		// FK surrogate-key column for dimension links
 		if (field.dimension && typeof columnConfig.dimColumnTransform === 'function') {
@@ -133,22 +133,22 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 	}
 	cols.push(`${escapeId(columnConfig._rescued_data)} STRING`);
 
-	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA\nCLUSTER BY AUTO`;
+	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) ${storageClause}`;
 }
 
 /**
  * Generate ALTER TABLE ... ADD COLUMN DDL.
  */
-function alterAddColumn(qualifiedTable, columnName, rawType, escapeId) {
-	return `ALTER TABLE ${qualifiedTable} ADD COLUMN ${escapeId(columnName)} ${mapType(rawType)}`;
+function alterAddColumn(qualifiedTable, columnName, rawType, escapeId, mapTypeFn = mapType) {
+	return `ALTER TABLE ${qualifiedTable} ADD COLUMN ${escapeId(columnName)} ${mapTypeFn(rawType)}`;
 }
 
 /**
  * Generate ALTER TABLE ... ALTER COLUMN ... TYPE DDL.
  * Throws if attempting to narrow a type (Databricks only widens).
  */
-function alterColumnType(qualifiedTable, columnName, newRawType, escapeId) {
-	return `ALTER TABLE ${qualifiedTable} ALTER COLUMN ${escapeId(columnName)} TYPE ${mapType(newRawType)}`;
+function alterColumnType(qualifiedTable, columnName, newRawType, escapeId, mapTypeFn = mapType) {
+	return `ALTER TABLE ${qualifiedTable} ALTER COLUMN ${escapeId(columnName)} TYPE ${mapTypeFn(newRawType)}`;
 }
 
 /**
@@ -253,4 +253,4 @@ function mergeDim(target, staging, nks, dataCols, columnConfig, escapeId) {
 	].join('\n');
 }
 
-module.exports = { mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim };
+module.exports = { TYPE_MAP, mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim };
