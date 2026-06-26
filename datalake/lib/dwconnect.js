@@ -372,7 +372,7 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 		} catch (e) {
 			return done(e);
 		}
-		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${escapedIds})`;
+		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE ${client.escapeId(field)} IN (${escapedIds})`;
 		client.query(updateSql, [], done);
 	});
 
@@ -400,7 +400,7 @@ function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, au
 		} catch (e) {
 			return done(e);
 		}
-		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${escapedIds}) AND \`${columnConfig._current}\` = true`;
+		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE ${client.escapeId(field)} IN (${escapedIds}) AND \`${columnConfig._current}\` = true`;
 		client.query(updateSql, [], done);
 	});
 

@@ -33,10 +33,6 @@ The datalake connector is a fork of the postgres connector adapted for Databrick
   1. **Incomplete — `findAuditDate` and `exportChanges` not yet ported.** These are the read-side interface (leoDW / Query Explorer reads audit dates and exports changed rows). They will need to be implemented when those consumers migrate to Databricks — tracked as migration work (a Redshift-retirement gate), not as connector build work. `escapeValue` is therefore dead today but will be needed when that read path is built.
   2. **The lowercasing is an OrderStream/Dsco convention** (all string data is lowercased before storage), not a bug. If `escapeValue` is ever wired up, that convention has to be preserved for parity with what Redshift consumers expect.
 
-### Schema cache invalidated only on `createTable`, not on `ADD COLUMN`
-- **Location:** `lib/dwconnect.js` — `client.clearSchemaCache()` is called only after CREATE
-- **Why kept:** Same scope as postgres. The cache is per-process and short-lived; the next loader invocation (a few seconds later) re-reads `information_schema` regardless. Adding invalidation on ADD COLUMN would not be wrong, but it would be a divergence from postgres without a load-bearing reason.
-
 ### `npm` scripts use shell globs (`test/unit/**/*.test.js`)
 - **Location:** `package.json`
 - **Why kept:** Same as postgres. macOS and Linux are the only target platforms for the loader bots. Windows portability is not a project requirement.
