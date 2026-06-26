@@ -34,7 +34,7 @@ The detail below is retained as the build record (what was built and why).
 
 **Auth + AWS plumbing for local dev** (resolves open questions #3, #6):
 - `lib/connect.js` now supports OAuth M2M (`authType: 'databricks-oauth'` + `oauthClientId`/`oauthClientSecret`) in addition to PAT.
-- Test helper `test/integration/helpers/databricks.js` is **profile-first**: reads `~/.databrickscfg [dev-cup]` for host + client_id + client_secret, auto-selects per-workspace defaults for warehouse HTTP path / catalog / schema / region / S3 bucket / S3 prefix, accepts env-var overrides per field. `npm run test:int-local` (sets `LEO_LOCAL=true`) uses the `public_stage_local` isolation schema; `npm run test:int` uses the shared `public_stage` schema.
+- Test helper `test/integration/helpers/databricks.js` is **profile-first**: reads `~/.databrickscfg [dev-cup]` for host + client_id + client_secret, auto-selects per-workspace defaults for warehouse HTTP path / catalog / schema / region / S3 bucket / S3 prefix, accepts env-var overrides per field. `npm run test:int-local` (sets `LEO_LOCAL=true`) runs from a developer's local machine and targets the `public_stage_local` schema; `npm run test:int-ci` runs in CI and targets the shared `public_stage` schema. Both hit the same shared dev Databricks workspace.
 
 **Cross-account S3 write (resolved via bucket policy, not assume-role):**
 Local AWS identity (`dsco-aws-poweruser` in account 220162591379) needs to PutObject to the DE-account staging bucket. Earlier attempts used `sts:AssumeRole` in the test helper, but that violated the Dsco convention that developers shouldn't need per-resource credential handling. **Resolution:** added a bucket-policy grant in `data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py` (`_create_dsco_developer_resource_policy`, dev+test only) that mirrors the `de-ingestion-bot-{env}-role` S3 surface onto `arn:aws:iam::220162591379:role/dsco-aws-poweruser`. The connector and the test helper now use the standard AWS credential chain — no assume-role, no special profiles, no env-var manipulation.
@@ -215,7 +215,7 @@ Write `test/unit/load.smoke.test.js`: pipe a 100-event in-memory stream through 
 **Done when:** `npm test` green, fully offline.
 
 ### Step 9 — Integration test harness
-`test/integration/helpers/databricks.js`: read `DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`, `DATABRICKS_CATALOG`, `DATABRICKS_SCHEMA`, `AWS_S3_BUCKET`. Any unset → `this.skip()` so `npm run test:int` is green offline.
+`test/integration/helpers/databricks.js`: read `DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`, `DATABRICKS_CATALOG`, `DATABRICKS_SCHEMA`, `AWS_S3_BUCKET`. Any unset → `this.skip()` so `npm run test:int-ci` is green offline.
 
 **Isolation strategy:** fixed schema and table names; isolation is per-branch cloned catalog rather than per-run UUID schemas. Two operating modes:
 - **Local dev:** catalog=`de_cup_dev_us`, schema=`public_stage_local`. Developer runs against the live dev catalog's local-dev schema — no catalog setup needed. **This mode is built and green.**
@@ -235,7 +235,7 @@ The `before` hook truncates (or drops+recreates) the fixed test tables so each r
 ### Step 11 — Idempotency + schema evolution
 - `idempotency.test.js`: run same batch twice; row count stays 100, `_auditdate` updates to second run.
 - `schema_evolution.test.js`: load N cols; mutate dw_fields to add `extra_col varchar(50)`; load 10 events with `extra_col`. Assert `DESCRIBE TABLE` shows new column (STRING), new rows have non-null `extra_col`, prior rows have null.
-**Done when:** both pass. (Total `npm run test:int` runtime budget TBD per #3 — fast enough to run pre-merge without being annoying; concrete number lockable once warehouse sizing is known.)
+**Done when:** both pass. (Total `npm run test:int-ci` runtime budget TBD per #3 — fast enough to run pre-merge without being annoying; concrete number lockable once warehouse sizing is known.)
 
 ### Step 12 — Equivalence check → moved to migration validation
 **Reclassified out of the connector build plan.** Cross-system equivalence (Lakebridge reconciliation + a hand-rolled byte-equal MD5 check) validates the *migration*, not the connector library, and is blocked on inputs outside this repo (a captured PII-scrubbed prod fixture, live nonprod environments, the CI `READ_FILES` grant, and a locked table-coverage set). It is tracked in full — including the stub at `test/equivalence/run.js` — as migration work outside this repo. The build plan does not gate on it.
@@ -296,7 +296,7 @@ export DATABRICKS_SCHEMA=public_stage_local
 export DATABRICKS_CATALOG=de_cup_dev_us__<sanitized-branch>
 export DATABRICKS_SCHEMA=public_stage
 
-npm run test:int
+npm run test:int-ci
 ```
 Inspect manually (substitute the actual catalog/schema you set above; `<test_dim_table>` is the dim identifier from the Step 10 synthetic `dw_fields` fixture):
 ```sql

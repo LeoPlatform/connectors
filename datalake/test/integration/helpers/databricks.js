@@ -7,12 +7,13 @@
 //   2. ~/.databrickscfg [<profile>] — default `dev-cup`, override via DATABRICKS_CONFIG_PROFILE
 //   3. Per-workspace defaults auto-selected by host (see DEFAULTS_BY_HOST below)
 //
-// Local developer isolation: set LEO_LOCAL=true to use the `public_stage_local` schema
-// and matching S3 prefix instead of the shared `public_stage`. Follows the same leo-config
-// convention bots use. Individual env vars still override any field.
+// LEO_LOCAL=true (test:int-local) selects the `public_stage_local` schema; omitting it
+// (test:int-ci) uses the shared `public_stage` schema. Both target the same shared dev
+// Databricks workspace. Follows the same leo-config convention bots use.
+// Individual env vars still override any field.
 //
 // If neither env nor profile yields host + auth (token OR client_id/client_secret),
-// `getConfig()` returns null and the caller should `this.skip()` so `npm run test:int`
+// `getConfig()` returns null and the caller should `this.skip()` so `npm run test:int-local`
 // stays green offline.
 //
 // AWS credentials for S3 staging come from the standard chain (~/.aws, SSO, env).

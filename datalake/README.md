@@ -16,10 +16,13 @@ Exit 0 is the gate. Unit tests stub the Databricks SQL client — they're fast b
 ## Integration tests (against the dev workspace)
 
 ```sh
-npm run test:int
+npm run test:int-local   # local developer run — targets public_stage_local schema
+npm run test:int-ci      # CI run — targets public_stage schema
 ```
 
-The suite skips silently when credentials aren't configured, so an unconfigured `npm run test:int` exits 0 — it's the configured-but-failing case that signals a regression. Set up once per developer:
+Both scripts hit the same shared dev Databricks workspace (`dbc-0b0acbc9-467a`). The difference is the target schema: `test:int-local` sets `LEO_LOCAL=true` which selects `public_stage_local`; `test:int-ci` uses `public_stage`. Use `test:int-local` for day-to-day local development.
+
+The suite skips silently when credentials aren't configured, so an unconfigured `npm run test:int-local` exits 0 — it's the configured-but-failing case that signals a regression. Set up once per developer:
 
 ### 1. AWS access — already in place for Dsco developers
 
@@ -72,10 +75,10 @@ The connector's auth selection in [`lib/connect.js`](lib/connect.js) prefers `cl
 ### 3. Run
 
 ```sh
-npm run test:int
+npm run test:int-local
 ```
 
-Should print 11 passing across `harness.test.js`, `round_trip.test.js`, `idempotency.test.js`, `schema_evolution.test.js`. The fixture table `f_datalake_connector_test` lives in `de_cup_dev_us.public_stage_local` and is dropped + recreated at the start of each test file.
+The fixture tables live in `de_cup_dev_us.public_stage_local` and are dropped + recreated at the start of each test file.
 
 ### Overrides
 
@@ -94,7 +97,7 @@ Every locked default in [`test/integration/helpers/databricks.js`](test/integrat
 | `DATALAKE_S3_PREFIX` | `stage/data/internal/rithum/public_stage_local` | staging prefix |
 | `AWS_REGION` | `us-east-1` | bucket region |
 
-The host allowlist in [`helpers/databricks.js`](test/integration/helpers/databricks.js) refuses any host outside the nonprod list — `npm run test:int` cannot accidentally hit prod.
+The host allowlist in [`helpers/databricks.js`](test/integration/helpers/databricks.js) refuses any host outside the nonprod list — neither `test:int-local` nor `test:int-ci` can accidentally hit prod.
 
 ### Troubleshooting
 

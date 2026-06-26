@@ -14,8 +14,8 @@
 		"lint": "eslint index.js lib/**/*.js test/**/*.js",
 		"test": "mocha test/unit/**/*.test.js",
 		"test:coverage": "nyc npm test",
-		"test:int": "mocha test/integration/**/*.test.js --timeout 120000",
 		"test:int-local": "LEO_LOCAL=true mocha test/integration/**/*.test.js --timeout 120000",
+		"test:int-ci": "mocha test/integration/**/*.test.js --timeout 120000",
 		"format": "echo 'no formatter configured'"
 	},
 	"author": "",
