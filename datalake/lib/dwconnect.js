@@ -219,6 +219,8 @@ module.exports = function(dbconfig, options) {
 
 			withRetry(done => flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
+				// read_files on an empty S3 file has no schema to resolve _rescued_data from.
+				if (stagingCount === 0) return mergeCallback(null);
 				withRetry(done => doMerge(sql.mergeFact, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
@@ -290,6 +292,8 @@ module.exports = function(dbconfig, options) {
 
 			withRetry(done => flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, auditdate, fieldLookup, done), {}, (flushErr) => {
 				if (flushErr) return mergeCallback(flushErr);
+				// read_files on an empty S3 file has no schema to resolve _rescued_data from.
+				if (stagingCount === 0) return mergeCallback(null);
 				withRetry(done => doMerge(sql.mergeDim, client, qualifiedTable, stagingClause, nks, dataCols, columnConfig, done), {}, mergeCallback);
 			});
 		});
@@ -334,6 +338,18 @@ function reconstructType(field) {
 	return t;
 }
 
+// Escape a single DELETE id for inline SQL. Strings are quoted and escaped;
+// finite numbers are inlined raw. Anything else (NaN, Infinity, objects, null)
+// produces broken or injection-unsafe SQL and is rejected — natural keys are
+// customer-supplied and have been known to contain special characters (e.g. SKUs).
+function escapeLiteral(client, v) {
+	if (typeof v === 'string') return client.escape(v);
+	if (typeof v === 'number' && isFinite(v)) return v;
+	const err = new Error(`DELETE id must be a string or finite number; got ${typeof v}: ${String(v)}`);
+	err.code = 'INVALID_DELETE_ID';
+	throw err;
+}
+
 function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, auditdate, fieldLookup, callback) {
 	if (!deleteRecords.length) return callback();
 
@@ -350,8 +366,13 @@ function flushDeletes(client, qualifiedTable, deleteRecords, ids, columnConfig, 
 	});
 
 	const tasks = Object.keys(byField).map(field => done => {
-		const ids = byField[field].map(v => typeof v === 'string' ? client.escape(v) : v).join(',');
-		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids})`;
+		let escapedIds;
+		try {
+			escapedIds = byField[field].map(v => escapeLiteral(client, v)).join(',');
+		} catch (e) {
+			return done(e);
+		}
+		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._deleted}\` = true, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${escapedIds})`;
 		client.query(updateSql, [], done);
 	});
 
@@ -373,8 +394,13 @@ function flushDimDeletes(client, qualifiedTable, deleteRecords, columnConfig, au
 	});
 
 	const tasks = Object.keys(byField).map(field => done => {
-		const ids = byField[field].map(v => typeof v === 'string' ? client.escape(v) : v).join(',');
-		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${ids}) AND \`${columnConfig._current}\` = true`;
+		let escapedIds;
+		try {
+			escapedIds = byField[field].map(v => escapeLiteral(client, v)).join(',');
+		} catch (e) {
+			return done(e);
+		}
+		const updateSql = `UPDATE ${qualifiedTable} SET \`${columnConfig._enddate}\` = ${auditdate}, \`${columnConfig._auditdate}\` = ${auditdate} WHERE \`${field.toLowerCase()}\` IN (${escapedIds}) AND \`${columnConfig._current}\` = true`;
 		client.query(updateSql, [], done);
 	});
 

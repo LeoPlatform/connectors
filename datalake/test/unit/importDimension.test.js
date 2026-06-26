@@ -80,6 +80,9 @@ describe('importDimension — orchestration', () => {
 	async function runToCompletion(ctx, table, nk, tableDef, pipelineError) {
 		const p = callImportDimension(ctx.dwClient, table, nk, tableDef);
 		await new Promise(setImmediate);
+		// Push one record through enrichedStream so stagingCount > 0 and MERGE fires.
+		// (For dims, stagingCount increments inside enrichFn which runs in throughCallbacks[1].)
+		if (!pipelineError) ctx.throughCallbacks[1]({ retailer_id: 1 }, () => {});
 		ctx.completePipeline(pipelineError);
 		return p;
 	}
@@ -186,6 +189,18 @@ describe('importDimension — orchestration', () => {
 		expect(updateQuery).to.include('`_current` = true');
 	});
 
+	it('skips MERGE when stream contains only delete markers (stagingCount === 0)', async () => {
+		const ctx = setup({ tableFields: dimTableFields });
+		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+		await new Promise(setImmediate);
+		ctx.throughCallbacks[0]({ __leo_delete__: 'retailer_id', __leo_delete_id__: 42 }, () => {}, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(0);
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.exist;
+	});
+
 	it('flushDimDeletes error propagates and skips MERGE', async () => {
 		const ctx = setup({ tableFields: dimTableFields, failDimDeleteUpdate: true });
 		const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
@@ -236,6 +251,20 @@ describe('importDimension — orchestration', () => {
 		expect(updateSql).to.include("'it\\'s'");
 		expect(updateSql).to.include("'foo\\\\'");
 		expect(updateSql).to.include("'foo\\\\\\'bar'");
+	});
+
+	it('flushDimDeletes rejects invalid ID types and propagates error', async () => {
+		for (const badId of [NaN, Infinity, null, {}, []]) {
+			const ctx = setup({ tableFields: dimTableFields });
+			const p = callImportDimension(ctx.dwClient, 'd_account', ['retailer_id']);
+			await new Promise(setImmediate);
+			ctx.throughCallbacks[0]({ __leo_delete__: 'retailer_id', __leo_delete_id__: badId }, () => {}, () => {});
+			ctx.completePipeline();
+			let caught;
+			try { await p; } catch (e) { caught = e; }
+			expect(caught, `expected error for id ${String(badId)}`).to.exist;
+			expect(caught.message).to.include('DELETE id must be a string or finite number');
+		}
 	});
 
 	it('result.count reflects the number of rows enriched through staging', async () => {

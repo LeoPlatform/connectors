@@ -39,6 +39,8 @@ function isConnectionError(err) {
 	if (msg.includes('sql compilation error') || msg.includes('parse_syntax_error') ||
 		msg.includes('permission_denied') || msg.includes('table_or_view_not_found') ||
 		msg.includes('schema_not_found') || msg.includes('syntax error')) return false;
+	// Validation errors from dwconnect (e.g. bad DELETE id type) → query-class
+	if ((err.code || '') === 'INVALID_DELETE_ID') return false;
 	// Conservative default: treat remaining unknown errors as connection-class
 	return true;
 }

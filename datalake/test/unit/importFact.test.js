@@ -228,6 +228,11 @@ describe('importFact — orchestration', () => {
 		const p = callImportFact(ctx.dwClient, table, ids, tableDef);
 		// Allow the describeTable/ensureStagingLocation promise chain to register ls.pipe.
 		await new Promise(setImmediate);
+		// Push one record through enrichedStream so stagingCount > 0 and MERGE fires.
+		// stagingCount is incremented inside enrichFn, which runs in throughCallbacks[1].
+		// (MERGE is skipped when stagingCount === 0 to avoid read_files schema issues
+		// on empty S3 files.)
+		if (!pipelineError) ctx.throughCallbacks[1]({ id: 1 }, () => {});
 		ctx.completePipeline(pipelineError);
 		return p;
 	}
@@ -314,6 +319,20 @@ describe('importFact — orchestration', () => {
 		expect(result.count).to.equal(1);
 	});
 
+	it('skips MERGE when stream contains only delete markers (stagingCount === 0)', async () => {
+		// read_files on an empty S3 file has no schema so _rescued_data is unresolvable.
+		// importFact must skip the MERGE entirely and still resolve successfully.
+		const ctx = setup({ tableFields: factTableFields });
+		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+		await new Promise(setImmediate);
+		ctx.throughCallbacks[0]({ __leo_delete__: 'id', __leo_delete_id__: 42 }, () => {});
+		ctx.completePipeline();
+		const result = await p;
+		expect(result.count).to.equal(0);
+		expect(ctx.queryHistory.find(q => q.startsWith('MERGE INTO'))).to.not.exist;
+		expect(ctx.queryHistory.find(q => q.startsWith('UPDATE'))).to.exist;
+	});
+
 	it('propagates a flushDeletes error and skips MERGE', async () => {
 		const ctx = setup({ tableFields: factTableFields, failFlushDeletes: true });
 		const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
@@ -354,6 +373,20 @@ describe('importFact — orchestration', () => {
 		expect(updateSql).to.include("'it\\'s'");         // ' → \'
 		expect(updateSql).to.include("'foo\\\\'");        // \ → \\
 		expect(updateSql).to.include("'foo\\\\\\'bar'");  // \' → \\\' (\ doubled, then ' escaped)
+	});
+
+	it('flushDeletes rejects invalid ID types and propagates error', async () => {
+		for (const badId of [NaN, Infinity, null, {}, []]) {
+			const ctx = setup({ tableFields: factTableFields });
+			const p = callImportFact(ctx.dwClient, 'f_order_item', ['id']);
+			ctx.throughCallbacks[0]({ __leo_delete__: 'id', __leo_delete_id__: badId }, () => {});
+			await new Promise(setImmediate);
+			ctx.completePipeline();
+			let caught;
+			try { await p; } catch (e) { caught = e; }
+			expect(caught, `expected error for id ${String(badId)}`).to.exist;
+			expect(caught.message).to.include('DELETE id must be a string or finite number');
+		}
 	});
 
 	it('enrichedStream stamps audit/_deleted and computes sk via fingerprint64', async () => {
