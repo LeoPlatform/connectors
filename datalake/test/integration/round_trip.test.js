@@ -20,7 +20,6 @@ let client;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -30,7 +29,6 @@ describe('Round-trip: 100-event fact load', function() {
 	const qualifiedTable = () => `\`${dbconfig.catalog}\`.\`${dbconfig.schema}\`.\`${TABLE}\``;
 
 	before(async function() {
-		if (!dbconfig) return this.skip();
 		client = dwconnectFactory(dbconfig);
 		await runQuery(client, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
 		client.clearSchemaCache();
@@ -45,7 +43,6 @@ describe('Round-trip: 100-event fact load', function() {
 	});
 
 	it('loads 100 records via importFact', async function() {
-		if (!dbconfig) return this.skip();
 		const records = makeRecords(100);
 		await new Promise((resolve, reject) => {
 			client.importFact(
@@ -71,7 +68,6 @@ describe('Round-trip: 100-event fact load', function() {
 	});
 
 	it('sampled rows match input', async function() {
-		if (!dbconfig) return this.skip();
 		const expected = makeRecords(100);
 		const sampleIds = [1, 50, 100];
 		const rows = await runQuery(
@@ -92,7 +88,6 @@ describe('Round-trip: 100-event fact load', function() {
 	});
 
 	it('surrogate keys match Node-side fingerprint64 recompute', async function() {
-		if (!dbconfig) return this.skip();
 		// Cast BIGINT to STRING in SQL — JS Number loses precision past 2^53,
 		// so reading `sk` as a Number would round and break the comparison.
 		const rows = await runQuery(

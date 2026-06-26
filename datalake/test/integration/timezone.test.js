@@ -25,7 +25,6 @@ let client;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -33,13 +32,11 @@ describe('Timezone handling', function() {
 	this.timeout(120000);
 
 	before(function() {
-		if (!dbconfig) return this.skip();
 		client = connectFactory(dbconfig);
 	});
 
 	describe('Session parameters (item #5)', function() {
 		it('current_timezone() returns UTC', async function() {
-			if (!dbconfig) return this.skip();
 			const rows = await runQuery(client, 'SELECT current_timezone() AS tz');
 			// Databricks normalizes 'UTC' to the IANA alias 'Etc/UTC' on read-back.
 			// Both denote the same zero-offset zone — accept either form.
@@ -66,14 +63,13 @@ describe('Timezone handling', function() {
 		let stagingPath;
 
 		before(async function() {
-			if (!dbconfig) return this.skip();
 			const result = await stageAndReadProbes(client, dbconfig, probes);
 			resultsByLabel = result.rows;
 			stagingPath = result.stagingPath;
 		});
 
 		after(async function() {
-			if (!dbconfig || !stagingPath) return;
+			if (!stagingPath) return;
 			const s3 = new S3Client({ region: dbconfig.region });
 			await s3.send(new DeleteObjectCommand({
 				Bucket: stagingPath.bucket,
@@ -82,14 +78,12 @@ describe('Timezone handling', function() {
 		});
 
 		it('naked ISO local — preserved as wall-clock', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.naked_iso;
 			expect(r.is_null, 'naked ISO local should parse').to.equal(false);
 			expect(r.rendered).to.equal('2026-03-15 14:30:00');
 		});
 
 		it('naked ISO with fractional seconds — preserved', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.millis_naked;
 			expect(r.is_null, 'naked with millis should parse').to.equal(false);
 			// We assert on the seconds-rendered form (date_format yyyy-MM-dd HH:mm:ss),
@@ -106,21 +100,18 @@ describe('Timezone handling', function() {
 		// drift means either the strip regressed or PERMISSIVE mode silently
 		// shifted, both of which would corrupt coexistence with Redshift.
 		it('trailing Z — connector strips, wall-clock preserved', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.z_suffix;
 			expect(r.is_null, 'Z-suffixed value should normalize and parse, not null').to.equal(false);
 			expect(r.rendered, 'Z stripped pre-staging → wall-clock preserved').to.equal('2026-03-15 14:30:00');
 		});
 
 		it('explicit negative offset — connector strips, wall-clock preserved', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.neg_offset;
 			expect(r.is_null, '-08:00 value should normalize and parse, not null').to.equal(false);
 			expect(r.rendered, 'offset stripped pre-staging → wall-clock preserved (no TZ conversion)').to.equal('2026-03-15 14:30:00');
 		});
 
 		it('explicit positive offset — connector strips, wall-clock preserved', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.pos_offset;
 			expect(r.is_null, '+05:30 value should normalize and parse, not null').to.equal(false);
 			expect(r.rendered, 'offset stripped pre-staging → wall-clock preserved (no TZ conversion)').to.equal('2026-03-15 14:30:00');
@@ -131,14 +122,12 @@ describe('Timezone handling', function() {
 		// Pacific. With NTZ there is no zone, so both must round-trip as wall-clocks
 		// with no exception, no nulling, no correction.
 		it('DST spring-forward skipped hour (naked) — preserved as wall-clock', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.dst_spring_skip;
 			expect(r.is_null, 'NTZ has no DST awareness — should parse').to.equal(false);
 			expect(r.rendered).to.equal('2026-03-08 02:30:00');
 		});
 
 		it('DST fall-back ambiguous hour (naked) — preserved as wall-clock', function() {
-			if (!dbconfig) return this.skip();
 			const r = resultsByLabel.dst_fall_amb;
 			expect(r.is_null, 'NTZ has no DST awareness — should parse').to.equal(false);
 			expect(r.rendered).to.equal('2026-11-01 01:30:00');

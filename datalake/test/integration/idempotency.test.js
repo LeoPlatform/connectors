@@ -15,7 +15,6 @@ let dbconfig;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -29,7 +28,6 @@ describe('Idempotency: same batch twice', function() {
 	let secondAuditdate;
 
 	before(async function() {
-		if (!dbconfig) return this.skip();
 		client = dwconnectFactory(dbconfig);
 		// Clean slate: drop table so audit dates from prior round_trip don't contaminate.
 		await runQuery(client, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
@@ -44,7 +42,6 @@ describe('Idempotency: same batch twice', function() {
 	});
 
 	it('first load sets row count to 100', async function() {
-		if (!dbconfig) return this.skip();
 		firstAuditdate = client.auditdate;
 		await runImport(client, makeRecords(100));
 		const rows = await runQuery(client, `SELECT COUNT(*) AS n FROM ${qualifiedTable()}`);
@@ -52,7 +49,6 @@ describe('Idempotency: same batch twice', function() {
 	});
 
 	it('second load of the same batch keeps row count at 100', async function() {
-		if (!dbconfig) return this.skip();
 		// Sleep briefly so the refreshed auditdate is strictly greater than the first.
 		await new Promise(r => setTimeout(r, 1500));
 		// Refresh the shared client's auditdate rather than creating a new factory.
@@ -66,7 +62,6 @@ describe('Idempotency: same batch twice', function() {
 	});
 
 	it('_auditdate updated to the second load', async function() {
-		if (!dbconfig) return this.skip();
 		// Compare against the second auditdate. auditdate is stored as a quoted literal
 		// in dwConnect.auditdate (e.g., "'2026-05-26T19:01:23Z'"); strip the quotes for
 		// the value comparison.

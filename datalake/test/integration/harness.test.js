@@ -15,7 +15,6 @@ let client;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -23,13 +22,11 @@ describe('Integration harness', function() {
 	this.timeout(60000);
 
 	before(function() {
-		if (!dbconfig) return this.skip();
 		const connect = require('../../lib/connect.js');
 		client = connect(dbconfig);
 	});
 
 	it('can execute a query', async function() {
-		if (!dbconfig) return this.skip();
 		await new Promise((resolve, reject) => {
 			client.query('SELECT 1 AS n', [], (err, rows) => {
 				if (err) return reject(err);
@@ -40,7 +37,6 @@ describe('Integration harness', function() {
 	});
 
 	it('target schema exists in information_schema', async function() {
-		if (!dbconfig) return this.skip();
 		await new Promise((resolve, reject) => {
 			client.query(
 				`SELECT schema_name FROM ${dbconfig.catalog}.information_schema.schemata WHERE schema_name = ?`,
@@ -55,7 +51,6 @@ describe('Integration harness', function() {
 	});
 
 	it('staging location resolves to a valid s3:// URI', function() {
-		if (!dbconfig) return this.skip();
 		// Exercises the staging-location resolution contract that streamToTableFromS3 relies on.
 		// In local dev the helper supplies explicit s3Bucket/s3Prefix; in environments where
 		// the schema has a managed RootLocation, connect.js can fall back to UC lookup.

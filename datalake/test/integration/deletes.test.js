@@ -39,7 +39,6 @@ let client;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -49,7 +48,6 @@ describe('Soft-delete: tricky string natural keys', function() {
 	const qualifiedTable = () => `\`${dbconfig.catalog}\`.\`${dbconfig.schema}\`.\`${TABLE}\``;
 
 	before(async function() {
-		if (!dbconfig) return this.skip();
 		client = dwconnectFactory(dbconfig);
 		await runQuery(client, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
 		client.clearSchemaCache();
@@ -64,7 +62,6 @@ describe('Soft-delete: tricky string natural keys', function() {
 	});
 
 	it('loads initial records including tricky-character SKUs', async function() {
-		if (!dbconfig) return this.skip();
 		const records = ALL_SKUS.map(sku => ({ sku, name: `name for ${sku}` }));
 		await importFact(client, TABLE, ['sku'], tableDef, records);
 		const rows = await runQuery(client, `SELECT COUNT(*) AS n FROM ${qualifiedTable()}`);
@@ -72,7 +69,6 @@ describe('Soft-delete: tricky string natural keys', function() {
 	});
 
 	it('soft-deletes tricky-character SKUs via __leo_delete__ markers', async function() {
-		if (!dbconfig) return this.skip();
 		const deletes = TRICKY_SKUS.map(sku => ({
 			__leo_delete__: 'sku',
 			__leo_delete_id__: sku,

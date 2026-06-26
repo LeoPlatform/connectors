@@ -13,8 +13,8 @@
 // Individual env vars still override any field.
 //
 // If neither env nor profile yields host + auth (token OR client_id/client_secret),
-// `getConfig()` returns null and the caller should `this.skip()` so `npm run test:int-local`
-// stays green offline.
+// `getConfig()` throws — running the integration suite without credentials is a
+// configuration error, not a skip condition.
 //
 // AWS credentials for S3 staging come from the standard chain (~/.aws, SSO, env).
 // Cross-account write to the DE bucket is granted by the bucket policy attached in
@@ -118,7 +118,12 @@ function getConfig() {
 
 	const hasAuth = !!(token || (clientId && clientSecret));
 	if (!host || !hasAuth) {
-		return null; // caller should this.skip()
+		const profileNote = `profile [${profileName}] in ~/.databrickscfg`;
+		const missing = !host ? 'host' : 'auth (token or client_id+client_secret)';
+		throw new Error(
+			`Integration tests require Databricks credentials — ${missing} not found in ${profileNote} or env vars. ` +
+			`Set up ~/.databrickscfg [${profileName}] or set DATABRICKS_HOST / DATABRICKS_TOKEN / DATABRICKS_CLIENT_ID+SECRET.`
+		);
 	}
 
 	const envKey = Object.keys(DEFAULTS_BY_HOST).find(k => host.includes(k));

@@ -22,7 +22,6 @@ let client;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -30,7 +29,6 @@ describe('Session pooling and STATEMENT_TIMEOUT', function() {
 	this.timeout(300000); // 5 min outer: Test 1 can take up to ~60s for the abort
 
 	before(async function() {
-		if (!dbconfig) return this.skip();
 		client = connectFactory(dbconfig);
 		// Pre-warm: STATEMENT_TIMEOUT applies only to executing queries, not warehouse
 		// startup time. Run a trivial query first so the warehouse is definitely ready
@@ -51,7 +49,6 @@ describe('Session pooling and STATEMENT_TIMEOUT', function() {
 	// the before() hook so STATEMENT_TIMEOUT applies to execution, not startup.
 	describe('STATEMENT_TIMEOUT aborts a runaway query', function() {
 		it('kills the query within statementTimeoutSeconds (5s)', async function() {
-			if (!dbconfig) return this.skip();
 			this.timeout(60000); // 60s ceiling for this test specifically
 
 			const tightClient = connectFactory(Object.assign({}, dbconfig, {
@@ -113,8 +110,6 @@ describe('Session pooling and STATEMENT_TIMEOUT', function() {
 	// otherwise we just verify all queries succeed and log timing.
 	describe('Connection reuse across multiple queries', function() {
 		it('reuses the pooled session (subsequent queries not slower than first)', async function() {
-			if (!dbconfig) return this.skip();
-
 			// Fresh client so the first query pays the full connection establishment cost.
 			const freshClient = connectFactory(dbconfig);
 			try {
@@ -152,8 +147,6 @@ describe('Session pooling and STATEMENT_TIMEOUT', function() {
 	// This verifies the isConnectionError() path: SQL errors → query-class → release.
 	describe('Pool resilience: SQL error does not poison the session', function() {
 		it('session survives a SQL compilation error; next query succeeds', async function() {
-			if (!dbconfig) return this.skip();
-
 			// A table that definitely does not exist.
 			const sqlErr = await runQueryCatch(client, 'SELECT * FROM this_table_does_not_exist_abc123xyz');
 			expect(sqlErr, 'SQL error should propagate to caller').to.exist;
@@ -169,7 +162,6 @@ describe('Session pooling and STATEMENT_TIMEOUT', function() {
 	// Regression test for the drain-deadlock fixed in drainPool().
 	describe('end() completes cleanly after queries', function() {
 		it('drains the pool and closes the client without hanging', async function() {
-			if (!dbconfig) return this.skip();
 			this.timeout(15000); // tight timeout: end() must resolve in <15s
 			const c = connectFactory(dbconfig);
 			await runQuery(c, 'SELECT 1');

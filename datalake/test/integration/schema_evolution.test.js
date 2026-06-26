@@ -21,7 +21,6 @@ let dbconfig;
 
 before(function() {
 	dbconfig = getConfig();
-	if (!dbconfig) return this.skip();
 	checkAllowedHost(dbconfig.host);
 });
 
@@ -33,7 +32,6 @@ describe('Schema evolution: add column mid-flight', function() {
 	let client;
 
 	before(async function() {
-		if (!dbconfig) return this.skip();
 		client = dwconnectFactory(dbconfig);
 		await runQuery(client, `DROP TABLE IF EXISTS ${qualifiedTable()}`);
 		client.clearSchemaCache();
@@ -49,7 +47,6 @@ describe('Schema evolution: add column mid-flight', function() {
 	});
 
 	it('changeTableStructure with extra_col reports Modified and adds the column', async function() {
-		if (!dbconfig) return this.skip();
 		client.clearSchemaCache();
 		const result = await client.changeTableStructure({ [TABLE]: tableDefWithExtraColumn() });
 		expect(result[TABLE]).to.equal('Modified');
@@ -65,7 +62,6 @@ describe('Schema evolution: add column mid-flight', function() {
 	});
 
 	it('loads 10 more rows with extra_col set; prior rows show null', async function() {
-		if (!dbconfig) return this.skip();
 		const extraRecords = [];
 		for (let i = 101; i <= 110; i++) {
 			extraRecords.push(Object.assign({}, makeRecords(i)[i - 1], {
