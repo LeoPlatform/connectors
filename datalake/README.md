@@ -114,6 +114,20 @@ The host allowlist in [`helpers/databricks.js`](test/integration/helpers/databri
 - **`AccessDenied … s3:PutObject`** — your AWS chain isn't resolving to `dsco-aws-poweruser`, or the bucket policy hasn't deployed in your env. `aws sts get-caller-identity` to confirm, then check the [`dsco_cross_account_stack.py`](../../data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py) deploy status in dev.
 - **`PERMISSION_DENIED … MODIFY` on `ALTER TABLE`** — the SP behind your profile lacks `MODIFY` on `de_cup_dev_us.public_stage_local`. Check Unity Catalog grants.
 
+## Publishing
+
+Releases are published manually to the [`leoinsights` org on npmjs.com](https://www.npmjs.com/~leoinsights). There is no automated publish workflow — the `.github/workflows/` directory does not contain one.
+
+Before publishing a new version:
+
+1. Run the full integration suite (`npm run test:int-local`) and confirm it passes.
+2. Bump the version in `package.json` (`npm version <newversion>`).
+3. Publish from the `development` branch (or a branch that is current with it):
+   ```sh
+   npm publish --access public
+   ```
+   You need an npm token with publish rights to the `leoinsights` org. The token in a developer's personal `~/.npmrc` may not have org publish access — confirm before attempting.
+
 ## Architecture
 
 See [`docs/build_plan.md`](docs/build_plan.md) for the 12-step build sequence and the Status section that summarizes every resolved decision.
