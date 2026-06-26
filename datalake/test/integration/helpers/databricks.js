@@ -4,7 +4,7 @@
 //
 // Resolution order per field:
 //   1. Environment variable (DATABRICKS_HOST, DATABRICKS_CLIENT_ID, etc.) — explicit override
-//   2. ~/.databrickscfg [<profile>] — default `dev-cup`, override via DATABRICKS_CONFIG_PROFILE
+//   2. ~/.databrickscfg [<profile>] — section named by DATABRICKS_CONFIG_PROFILE (no default; must be set explicitly)
 //   3. Per-workspace defaults auto-selected by host (see DEFAULTS_BY_HOST below)
 //
 // LEO_LOCAL=true (test:int-local) selects the `public_stage_local` schema; omitting it
@@ -12,9 +12,13 @@
 // Databricks workspace. Follows the same leo-config convention bots use.
 // Individual env vars still override any field.
 //
-// If neither env nor profile yields host + auth (token OR client_id/client_secret),
+// If neither env vars nor a named profile yields host + auth (token OR client_id/client_secret),
 // `getConfig()` throws — running the integration suite without credentials is a
 // configuration error, not a skip condition.
+//
+// Set DATABRICKS_CONFIG_PROFILE to the section name in ~/.databrickscfg that holds your
+// credentials, or supply DATABRICKS_HOST + DATABRICKS_TOKEN (or CLIENT_ID+SECRET) directly
+// as env vars. There is no default profile name — it must be configured explicitly.
 //
 // AWS credentials for S3 staging come from the standard chain (~/.aws, SSO, env).
 // Cross-account write to the DE bucket is granted by the bucket policy attached in
@@ -31,8 +35,6 @@ if (!process.env.Resources) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-
-const DEFAULT_PROFILE = 'dev-cup';
 
 // Per-environment defaults keyed by host fragment.
 // s3Prefix follows build_plan.md §6: per-schema under `stage/data/internal/rithum/`.
@@ -108,8 +110,8 @@ function stripScheme(host) {
 }
 
 function getConfig() {
-	const profileName = process.env.DATABRICKS_CONFIG_PROFILE || DEFAULT_PROFILE;
-	const profile = loadProfile(profileName) || {};
+	const profileName = process.env.DATABRICKS_CONFIG_PROFILE;
+	const profile = profileName ? (loadProfile(profileName) || {}) : {};
 
 	const host = stripScheme(process.env.DATABRICKS_HOST || profile.host);
 	const token = process.env.DATABRICKS_TOKEN || profile.token;
@@ -118,11 +120,14 @@ function getConfig() {
 
 	const hasAuth = !!(token || (clientId && clientSecret));
 	if (!host || !hasAuth) {
-		const profileNote = `profile [${profileName}] in ~/.databrickscfg`;
 		const missing = !host ? 'host' : 'auth (token or client_id+client_secret)';
+		const profileHint = profileName
+			? `profile [${profileName}] in ~/.databrickscfg or `
+			: '';
 		throw new Error(
-			`Integration tests require Databricks credentials — ${missing} not found in ${profileNote} or env vars. ` +
-			`Set up ~/.databrickscfg [${profileName}] or set DATABRICKS_HOST / DATABRICKS_TOKEN / DATABRICKS_CLIENT_ID+SECRET.`
+			`Integration tests require Databricks credentials — ${missing} not found in ${profileHint}env vars. ` +
+			`Set DATABRICKS_CONFIG_PROFILE to a ~/.databrickscfg section name, or supply ` +
+			`DATABRICKS_HOST / DATABRICKS_TOKEN / DATABRICKS_CLIENT_ID+SECRET directly.`
 		);
 	}
 

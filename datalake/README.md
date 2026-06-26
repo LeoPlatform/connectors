@@ -22,7 +22,7 @@ npm run test:int-ci      # CI run — targets public_stage schema
 
 Both scripts hit the same shared dev Databricks workspace (`dbc-0b0acbc9-467a`). The difference is the target schema: `test:int-local` sets `LEO_LOCAL=true` which selects `public_stage_local`; `test:int-ci` uses `public_stage`. Use `test:int-local` for day-to-day local development.
 
-The suite skips silently when credentials aren't configured, so an unconfigured `npm run test:int-local` exits 0 — it's the configured-but-failing case that signals a regression. Set up once per developer:
+The suite **fails (non-zero exit)** when credentials aren't configured — missing credentials are a configuration error, not a skip condition. Set up once per developer:
 
 ### 1. AWS access — already in place for Dsco developers
 
@@ -35,9 +35,9 @@ aws sts get-caller-identity
 # Arn should end in :assumed-role/dsco-aws-poweruser/<you>
 ```
 
-### 2. Databricks `[dev-cup]` profile in `~/.databrickscfg`
+### 2. Databricks credentials in `~/.databrickscfg`
 
-The integration helper parses `~/.databrickscfg` directly and reads the `[dev-cup]` section. The connector uses OAuth M2M (service-principal `client_id` + `client_secret`); a PAT is also supported as a fallback.
+The integration helper reads a named section from `~/.databrickscfg` — you choose the section name and point to it via `DATABRICKS_CONFIG_PROFILE`. The connector uses OAuth M2M (service-principal `client_id` + `client_secret`); a PAT is also supported as a fallback.
 
 **Recommended — fetch the CI service-principal credentials from Secrets Manager, in the Data Emporium Nonprod account (641864320185), not dsco (220162591379):**
 
@@ -50,13 +50,19 @@ aws --profile data-emporium-nonprod secretsmanager get-secret-value \
   --query SecretString --output text
 ```
 
-Then add to `~/.databrickscfg`:
+Then add to `~/.databrickscfg` using whatever section name you prefer (e.g. `my-dev-cup`):
 
 ```ini
-[dev-cup]
+[my-dev-cup]
 host          = https://dbc-0b0acbc9-467a.cloud.databricks.com
 client_id     = <value from CUP_DATABRICKS_CLIENT_ID>
 client_secret = <value from CUP_DATABRICKS_CLIENT_SECRET>
+```
+
+Export the matching env var before running tests:
+
+```sh
+export DATABRICKS_CONFIG_PROFILE=my-dev-cup
 ```
 
 **Alternative — personal access token (PAT):**
@@ -65,10 +71,12 @@ client_secret = <value from CUP_DATABRICKS_CLIENT_SECRET>
 2. Add to `~/.databrickscfg`:
 
 ```ini
-[dev-cup]
+[my-dev-cup]
 host  = https://dbc-0b0acbc9-467a.cloud.databricks.com
 token = <your PAT>
 ```
+
+3. `export DATABRICKS_CONFIG_PROFILE=my-dev-cup`
 
 The connector's auth selection in [`lib/connect.js`](lib/connect.js) prefers `client_id`/`client_secret` (OAuth M2M) when both are present; otherwise it falls back to `token` (PAT). For day-to-day local dev either works; for anything that needs the same identity as the production bot, use the service-principal credentials.
 
@@ -86,7 +94,7 @@ Every locked default in [`test/integration/helpers/databricks.js`](test/integrat
 
 | Env var | Default | Source |
 |---|---|---|
-| `DATABRICKS_CONFIG_PROFILE` | `dev-cup` | which section of `~/.databrickscfg` to read |
+| `DATABRICKS_CONFIG_PROFILE` | *(required)* | which section of `~/.databrickscfg` to read |
 | `DATABRICKS_HOST` | from profile | hostname (with or without `https://`) |
 | `DATABRICKS_HTTP_PATH` | `/sql/1.0/warehouses/5d84579f11466e3f` | SQL warehouse HTTP path |
 | `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` | from profile | OAuth M2M |
@@ -101,10 +109,10 @@ The host allowlist in [`helpers/databricks.js`](test/integration/helpers/databri
 
 ### Troubleshooting
 
-- **All tests skip with no output** — `[dev-cup]` profile missing or has no `client_id`/`client_secret`/`token`. Helper returns `null`, every test calls `this.skip()`.
-- **`SAFETY: DATABRICKS_HOST … not in nonprod allowlist`** — host doesn't match the allowlist; either you set `DATABRICKS_HOST` to a non-dev workspace, or `[dev-cup]`'s `host` is wrong.
+- **`Integration tests require Databricks credentials…`** — `DATABRICKS_CONFIG_PROFILE` not set, or the named profile section doesn't exist or has no `client_id`/`client_secret`/`token`. Set the env var to your profile section name, or supply `DATABRICKS_HOST` + auth directly as env vars.
+- **`SAFETY: DATABRICKS_HOST … not in nonprod allowlist`** — host doesn't match the allowlist; either you set `DATABRICKS_HOST` to a non-dev workspace, or your profile's `host` is wrong.
 - **`AccessDenied … s3:PutObject`** — your AWS chain isn't resolving to `dsco-aws-poweruser`, or the bucket policy hasn't deployed in your env. `aws sts get-caller-identity` to confirm, then check the [`dsco_cross_account_stack.py`](../../data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py) deploy status in dev.
-- **`PERMISSION_DENIED … MODIFY` on `ALTER TABLE`** — the SP behind your `[dev-cup]` profile lacks `MODIFY` on `de_cup_dev_us.public_stage_local`. Check Unity Catalog grants.
+- **`PERMISSION_DENIED … MODIFY` on `ALTER TABLE`** — the SP behind your profile lacks `MODIFY` on `de_cup_dev_us.public_stage_local`. Check Unity Catalog grants.
 
 ## Architecture
 

@@ -11,7 +11,7 @@
 //      next query on the same client succeeds (session was released, not destroyed).
 //   4. end() completes cleanly — no hang after normal queries finish.
 //
-// Skips when ~/.databrickscfg [dev-cup] (or env override) is unavailable.
+// Throws (fails) when DATABRICKS_CONFIG_PROFILE + ~/.databrickscfg or DATABRICKS_HOST+auth env vars are not configured.
 
 const { expect } = require('chai');
 const { getConfig, checkAllowedHost } = require('./helpers/databricks.js');

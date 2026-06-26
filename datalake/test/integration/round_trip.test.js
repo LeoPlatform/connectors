@@ -6,7 +6,7 @@
 //   - sampled rows match input values
 //   - surrogate keys match Node-side fingerprint64 recomputation
 //
-// Skips when ~/.databrickscfg [dev-cup] (or env override) is unavailable.
+// Throws (fails) when DATABRICKS_CONFIG_PROFILE + ~/.databrickscfg or DATABRICKS_HOST+auth env vars are not configured.
 
 const { Readable } = require('stream');
 const { expect } = require('chai');
