@@ -57,7 +57,9 @@ const TYPE_MAP = {
 };
 
 function mapType(rawType) {
-	if (!rawType) return 'STRING';
+	if (!rawType || !rawType.trim()) {
+		throw new Error('mapType: type is required');
+	}
 	const t = rawType.trim().toLowerCase();
 
 	if (TYPE_MAP[t]) return TYPE_MAP[t];
@@ -65,8 +67,8 @@ function mapType(rawType) {
 	// varchar(n), char(n), nvarchar(n) → STRING (Databricks has no length-bounded string type)
 	if (t.startsWith('varchar') || t.startsWith('char') || t.startsWith('nvarchar')) return 'STRING';
 
-	// TIME and TIMETZ have no native Databricks equivalent — fail explicitly rather
-	// than silently degrading to STRING and losing time semantics.
+	// TIME and TIMETZ have no native Databricks equivalent — explicit error with
+	// a more informative message than the generic unmapped-type error below.
 	if (t === 'time' || t === 'timetz' ||
 		t === 'time without time zone' || t === 'time with time zone') {
 		throw new Error(`mapType: no Databricks equivalent for '${rawType}' — add explicit column handling`);
@@ -79,7 +81,7 @@ function mapType(rawType) {
 	// decimal(p,s) → pass through verbatim, uppercased
 	if (t.startsWith('decimal(')) return rawType.trim().toUpperCase();
 
-	return 'STRING';
+	throw new Error(`mapType: unrecognized type '${rawType}' — add to TYPE_MAP if this is a valid mapping`);
 }
 
 // Emit a column definition string using the client's escapeId for identifier quoting.

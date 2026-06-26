@@ -48,8 +48,14 @@ describe('sql.js', () => {
 			});
 		});
 
-		it('returns STRING for unknown types', () => {
-			expect(mapType('unknowntype')).to.equal('STRING');
+		[null, undefined, '', '   '].forEach(t => {
+			it(`throws for missing/empty type: ${JSON.stringify(t)}`, () => {
+				expect(() => mapType(t)).to.throw(/type is required/);
+			});
+		});
+
+		it('throws for unrecognized types', () => {
+			expect(() => mapType('unknowntype')).to.throw(/unrecognized type/);
 		});
 
 		['time', 'timetz', 'TIME', 'TIMETZ', 'time without time zone', 'time with time zone'].forEach(t => {
