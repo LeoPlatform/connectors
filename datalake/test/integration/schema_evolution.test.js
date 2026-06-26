@@ -9,7 +9,7 @@
 //   - prior rows have null for the new column
 //
 // Requires the assumed service principal to have MODIFY on the target schema/table
-// (BUILD_PLAN.md §5). If MODIFY is missing the ALTER will fail loudly.
+// (build_plan.md §5). If MODIFY is missing the ALTER will fail loudly.
 
 const { Readable } = require('stream');
 const { expect } = require('chai');

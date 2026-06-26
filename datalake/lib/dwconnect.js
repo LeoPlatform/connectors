@@ -314,7 +314,7 @@ module.exports = function(dbconfig, options) {
 	// before the MERGE — no post-MERGE SQL update is needed. This diverges from postgres,
 	// where FARMFINGERPRINT64() in an UPDATE handles this; Databricks SQL has no
 	// FARMFINGERPRINT64 equivalent, so the computation moves to Node.js. See
-	// docs/porting-decisions.md and docs/BUILD_PLAN.md §Step 6 extension.
+	// docs/porting_decisions.md and docs/build_plan.md §Step 6 extension.
 	client.linkDimensions = function(table, links, nk, done) {
 		done(null);
 	};

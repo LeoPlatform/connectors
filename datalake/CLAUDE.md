@@ -28,7 +28,7 @@ connectors/datalake/
 │   ├── checksum.js    # Checksumming (adapted from ../redshift/lib/checksum.js)
 │   └── dol.js         # Domain Object Layer — Databricks SQL dialect query builder
 ├── docs/              # Design docs and principles
-│   └── project-principles.md
+│   └── project_principles.md
 └── test/
     ├── unit/          # Per lib/ module (mocha + chai)
     └── integration/   # Against Databricks dev workspace
@@ -92,7 +92,7 @@ When porting a function from `../postgres/`, **preserve every branch** in the or
 - **Configuration gates.** Postgres often gates a feature on `config.hashedSurrogateKeys`, `config.version`, etc. If the datalake side only supports one branch today, keep the conditional and `throw` (or no-op) the unsupported branch — don't delete it. Future contributors need to see the shape.
 - **Validate with a postgres-side grep, not the unit tests.** The unit-test fixtures in this repo were written alongside the port and can encode the same flattening bug — a passing test proves consistency with the test, not with the postgres source. When in doubt, `grep -n "<helper>" ../postgres/lib/dwconnect.js` and read the surrounding 30–50 lines.
 
-Separately: some review-flagged patterns *should* match postgres and were kept on purpose. Before "improving" something that looks unidiomatic, check [docs/porting-decisions.md](docs/porting-decisions.md) — that's the closed list of intentionally-not-fixed items.
+Separately: some review-flagged patterns *should* match postgres and were kept on purpose. Before "improving" something that looks unidiomatic, check [docs/porting_decisions.md](docs/porting_decisions.md) — that's the closed list of intentionally-not-fixed items.
 
 ## Coding Rules
 
@@ -174,4 +174,4 @@ Additionally:
 
 ## Project Principles
 
-See [docs/project-principles.md](docs/project-principles.md).
+See [docs/project_principles.md](docs/project_principles.md).

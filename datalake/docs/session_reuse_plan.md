@@ -1,5 +1,9 @@
 # Plan: Session/Connection Pooling for the Datalake Connector
 
+## Status — COMPLETE
+
+Connection pooling is implemented in `lib/connect.js` using `generic-pool`. A single shared `DBSQLClient` is created at startup; a bounded pool of Databricks SQL sessions is managed via `createPool` / `destroyPool`. Validate-on-borrow, idle eviction, and peak-stats observability (`peakBorrowed`, `peakPending`) are all in place. Statement timeout is configurable (floored + capped). The interface (`connect`/`query`/`release`/`disconnect`/`end`) is unchanged from the pre-pool shape.
+
 ## Context
 
 The datalake connector's top-level `query()` opens a brand-new connection on **every call**:

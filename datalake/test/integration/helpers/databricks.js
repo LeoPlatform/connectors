@@ -35,7 +35,7 @@ const path = require('path');
 const DEFAULT_PROFILE = 'dev-cup';
 
 // Per-environment defaults keyed by host fragment.
-// s3Prefix follows BUILD_PLAN.md §6: per-schema under `stage/data/internal/rithum/`.
+// s3Prefix follows build_plan.md §6: per-schema under `stage/data/internal/rithum/`.
 // Both workspaces default to the shared `public_stage` schema. Set LEO_LOCAL=true to use
 // the `public_stage_local` isolation schema instead (same leo-config convention bots use).
 // Catalog naming: `de_cup_{env}_us` convention.

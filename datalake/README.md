@@ -108,7 +108,7 @@ The host allowlist in [`helpers/databricks.js`](test/integration/helpers/databri
 
 ## Architecture
 
-See [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md) for the 12-step build sequence and the Status section that summarizes every resolved decision.
+See [`docs/build_plan.md`](docs/build_plan.md) for the 12-step build sequence and the Status section that summarizes every resolved decision.
 
 Key files:
 - [`lib/connect.js`](lib/connect.js) — Databricks session + OAuth/PAT auth selection; staging pipeline via `leo-sdk.streams.toS3`; `buildStagingSelect` for inline `read_files(...)` in MERGE.
@@ -119,4 +119,4 @@ Key files:
 
 ## Identifier casing
 
-All identifiers are lowercased at SQL generation time via `client.escapeId`. See BUILD_PLAN.md §"Open questions" #7 for the rationale.
+All identifiers are lowercased at SQL generation time via `client.escapeId`. See build_plan.md §"Open questions" #7 for the rationale.

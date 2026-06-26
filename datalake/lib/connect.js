@@ -303,7 +303,7 @@ module.exports = function(config) {
 
 		// ── Identifier quoting ────────────────────────────────────────────────
 		// Databricks SQL uses backtick quoting. Lowercases all identifiers per the
-		// lowercase-everywhere convention (open question #7 in BUILD_PLAN.md).
+		// lowercase-everywhere convention (open question #7 in build_plan.md).
 		escapeId: (name) => {
 			return '`' + String(name).toLowerCase().replace(/`/g, '') + '`';
 		},
@@ -358,7 +358,7 @@ module.exports = function(config) {
 		// inline `read_files(...)` subquery rather than a CREATE TEMPORARY VIEW —
 		// sessions are pooled and reused across queries, so a session-scoped temp
 		// view from one acquire may not be visible to a later acquire.
-		// See BUILD_PLAN.md Step 7 for the per-option rationale of the read_files arguments.
+		// See build_plan.md Step 7 for the per-option rationale of the read_files arguments.
 		streamToTableFromS3: (table, opts) => {
 			return doStreamToTableFromS3(client, table, opts);
 		},

@@ -1,7 +1,7 @@
 'use strict';
 
 // Synthetic fact-table fixture used by round_trip / idempotency / schema_evolution.
-// Mixed-type structure exercises the type-mapping table from BUILD_PLAN.md Step 5:
+// Mixed-type structure exercises the type-mapping table from build_plan.md Step 5:
 // bigint NK, varchar→STRING, timestamp→TIMESTAMP_NTZ, boolean, decimal(p,s), int.
 
 const TABLE = 'f_datalake_connector_test';

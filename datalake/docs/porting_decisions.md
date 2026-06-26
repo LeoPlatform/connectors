@@ -66,7 +66,7 @@ The datalake connector is a fork of the postgres connector adapted for Databrick
 - **Why kept this way:** Postgres `linkDimensions` runs a post-MERGE `UPDATE` using `FARMFINGERPRINT64()` in SQL. Databricks SQL has no `FARMFINGERPRINT64` equivalent. To preserve hash-output parity with the dimension row SK (both computed via `fingerprint64` in `lib/surrogate_key.js`), FK surrogate-key values are instead computed in Node.js inside the `importFact` / `importDimension` enrichFns (`buildFkEnrichers`) and written into the staging CSV before the MERGE. The MERGE then populates the FK columns directly, making a post-MERGE SQL update unnecessary.
 - **This is not the same as `insertMissingDimensions`.** `insertMissingDimensions` is a no-op because postgres also skips it under `hashedSurrogateKeys=true`. `linkDimensions` does real work in postgres regardless — the datalake no-op is a platform-forced divergence, not a shared pattern.
 - **Do not add a SQL UPDATE path here.** The staging CSV already carries the computed FK values; a redundant UPDATE would overwrite them with the same values but introduce a second round-trip and break the "enrichFn owns FK columns" invariant. If this needs revisiting (e.g. for composite-NK dimensions), extend `buildFkEnrichers` in the enrichFn, not `linkDimensions`.
-- **Reference:** `docs/BUILD_PLAN.md` §Step 6 extension.
+- **Reference:** `docs/build_plan.md` §Step 6 extension.
 
 ### `clusterKey` / `naturalKeyFilter` / `MIN`-prune apparatus removed (deliberate divergence)
 
@@ -74,7 +74,7 @@ The datalake connector is a fork of the postgres connector adapted for Databrick
 - **Looks like:** postgres computes a `MIN` bound over the staging batch and adds a `>= <bound>` predicate to the UPDATE/DELETE to let Redshift skip SORTKEY blocks. The datalake connector has **no** such predicate, no `clusterKey` dw_fields field, and no `pruneCol`/`literalForType` helper.
 - **Why diverged:** Redshift block-skipping via SORTKEY has no Delta equivalent. File-skipping on Delta tables is driven by Photon's transaction-log column min/max statistics, which clustering maintains automatically — so every table is created with `CLUSTER BY AUTO` ([`lib/sql.js`](../lib/sql.js) `createTable`) and the manual prune predicate is unnecessary. Carrying it would add a `MIN` round-trip per batch with no benefit. The whole apparatus (`clusterKey` field, `MIN` pruning query, `literalForType`, associated params) was removed.
 - **Consequence captured elsewhere:** the staging-row count returned to the orchestrator is now taken from an explicit `SELECT CAST(COUNT(*) AS INT)` before the MERGE rather than the old `MIN`-query `cnt`.
-- **This is a platform-forced divergence, not a port.** Don't re-introduce a manual prune predicate; if MERGE scan cost ever becomes a problem, tune clustering, not SQL. **Reference:** `docs/BUILD_PLAN.md` §Step 5 ("MERGE scan — no manual pruning").
+- **This is a platform-forced divergence, not a port.** Don't re-introduce a manual prune predicate; if MERGE scan cost ever becomes a problem, tune clustering, not SQL. **Reference:** `docs/build_plan.md` §Step 5 ("MERGE scan — no manual pruning").
 
 ### `streamToTable` (non-S3 direct-write path) is a permanent `throw`
 

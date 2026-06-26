@@ -2,7 +2,7 @@
 
 ## Context
 
-`connectors/datalake/` is the main deliverable of the EDW Redshift→Databricks migration: a new RStreams connector library that mirrors today's Redshift loader pipeline but writes Delta tables in Unity Catalog. As of today the directory contains only `CLAUDE.md` and `docs/project-principles.md` — no code, no `package.json`. The Redshift pipeline must remain independently deployable throughout; the datalake connector is an additive sibling, not a replacement.
+`connectors/datalake/` is the main deliverable of the EDW Redshift→Databricks migration: a new RStreams connector library that mirrors today's Redshift loader pipeline but writes Delta tables in Unity Catalog. As of today the directory contains only `CLAUDE.md` and `docs/project_principles.md` — no code, no `package.json`. The Redshift pipeline must remain independently deployable throughout; the datalake connector is an additive sibling, not a replacement.
 
 This plan covers **Deliverable #1 only** (locked with Paul): the entity-group queue loader as a library package. VARIANT event tables and the retabulation library are deferred. The `offload_to_datalake.js` bot that wraps this library is also out of scope, but the plan leaves a clean seam so the bot can call the library the same way `general/lib/offload_to_redshift.js` calls `leo-connector-postgres/lib/dwconnect.js` today.
 
@@ -17,7 +17,7 @@ Locked decisions:
 
 **This build plan is complete. Deliverable #1 — the datalake connector library — is built, tested, and published; there is no remaining work on the plan itself.**
 
-Steps 1–11 are done and passing locally: `npm test` + `npm run test:int-local` green against `dbc-0b0acbc9-467a.cloud.databricks.com` / catalog `de_cup_dev_us` / schema `public_stage_local` (fact + dim paths, schema evolution, idempotency). The divergence-from-postgres review converged and all flagged correctness bugs are fixed; deliberate divergences are recorded in [porting-decisions.md](porting-decisions.md).
+Steps 1–11 are done and passing locally: `npm test` + `npm run test:int-local` green against `dbc-0b0acbc9-467a.cloud.databricks.com` / catalog `de_cup_dev_us` / schema `public_stage_local` (fact + dim paths, schema evolution, idempotency). The divergence-from-postgres review converged and all flagged correctness bugs are fixed; deliberate divergences are recorded in [porting_decisions.md](porting_decisions.md).
 
 **Step 12 (equivalence check) is reclassified as migration validation, not a connector-library release gate.** It — along with everything else needed to put the connector into production and retire Redshift (the offload bot, CI/infra, the retirement gates, and the connector enhancements deferred past initial release) — is tracked as migration work outside this repo, not in the connector build plan. The `test/equivalence/run.js` stub remains in this repo as that migration-validation tooling; its absence does not make the library incomplete.
 
@@ -40,7 +40,7 @@ The detail below is retained as the build record (what was built and why).
 Local AWS identity (`dsco-aws-poweruser` in account 220162591379) needs to PutObject to the DE-account staging bucket. Earlier attempts used `sts:AssumeRole` in the test helper, but that violated the Dsco convention that developers shouldn't need per-resource credential handling. **Resolution:** added a bucket-policy grant in `data-lake-infrastructure/src/data_lake/dsco_cross_account_stack.py` (`_create_dsco_developer_resource_policy`, dev+test only) that mirrors the `de-ingestion-bot-{env}-role` S3 surface onto `arn:aws:iam::220162591379:role/dsco-aws-poweruser`. The connector and the test helper now use the standard AWS credential chain — no assume-role, no special profiles, no env-var manipulation.
 
 **S3 staging-location design corrected:**
-- BUILD_PLAN.md originally assumed schema-managed `RootLocation` lookup via `DESCRIBE SCHEMA EXTENDED`. The actual `public_stage_local` schema has no managed location — it inherits from the catalog's `Storage Root` (`dl/cup`, which is the managed-table area, not a staging convention).
+- build_plan.md originally assumed schema-managed `RootLocation` lookup via `DESCRIBE SCHEMA EXTENDED`. The actual `public_stage_local` schema has no managed location — it inherits from the catalog's `Storage Root` (`dl/cup`, which is the managed-table area, not a staging convention).
 - The `datalake-dev-external-location-stage` external location points at a **separate** `datalake-stage-dev-…` bucket — that's a Databricks-only staging area; the ingestion-bot role does not have write access there.
 - **Resolved:** staging is explicit in `dbconfig.s3Bucket` / `dbconfig.s3Prefix`, defaulting to `s3://datalake-dev-641864320185-us-east-1/stage/data/internal/rithum/public_stage_local` — the main data-lake bucket the offload bot already writes to and the `datalake-dev-external-location` covers. Resolution is pinned on the client via `client.ensureStagingLocation()` (single source of truth for `client.s3Bucket` / `client.s3Prefix`); UC `RootLocation` lookup remains the fallback for environments that configure schema-managed locations.
 
@@ -118,7 +118,7 @@ Lock separator + null-rendering against the Redshift `FARMFINGERPRINT64()` conve
 
   **Physical layout — `CLUSTER BY AUTO`:** Every table is created with `CLUSTER BY AUTO`. With Predictive Optimization enabled on the catalog and a recent DBR / serverless SQL Warehouse, Databricks chooses clustering columns from observed query patterns — for MERGE-heavy connector workloads this converges on the natural key without any human hint. Existing tables created with explicit `CLUSTER BY` should be migrated via `ALTER TABLE … CLUSTER BY AUTO` (one-time DDL from a notebook).
 
-  **MERGE scan — no manual pruning:** file-skipping on Delta tables happens via Photon's transaction-log column min/max statistics, driven by clustering. The manual `MIN(staging_col) >= target_col` predicate the postgres connector uses for Redshift SORTKEY-based block skipping is not needed (and was removed from this connector — see porting-decisions.md).
+  **MERGE scan — no manual pruning:** file-skipping on Delta tables happens via Photon's transaction-log column min/max statistics, driven by clustering. The manual `MIN(staging_col) >= target_col` predicate the postgres connector uses for Redshift SORTKEY-based block skipping is not needed (and was removed from this connector — see porting_decisions.md).
 **Done when:** Snapshot tests cover createTable on `d_order.json`, alterAddColumn, mergeFact on an `f_*` table, every row of the type-mapping table above (`varchar(n)`→`STRING`, `timestamp`→`TIMESTAMP_NTZ`, `timestamptz`→`TIMESTAMP`, `decimal` no-precision→`DECIMAL(18,0)`, `boolean`→`BOOLEAN`, etc.), identifier lowercasing via `escapeId`, `CLUSTER BY AUTO` present on all created tables.
 
 ### Step 6 — `lib/dwconnect.js`: factory + schema mutation
@@ -133,10 +133,10 @@ Port the schema-mutation half of `connectors/postgres/lib/dwconnect.js` — on t
 
 #### Step 6 extension — `linkDimensions` (DONE)
 
-`load.js:305` calls `linkDimensions` for every table whose `dw_fields` contains at least one `"dimension"` field — ALL tables in all three queues (`dim`, `quantity`, `supplier_catalog`), not just dim tables. Implemented as described below; `linkDimensions` is now a structural no-op and the decision is recorded in [porting-decisions.md](porting-decisions.md).
+`load.js:305` calls `linkDimensions` for every table whose `dw_fields` contains at least one `"dimension"` field — ALL tables in all three queues (`dim`, `quantity`, `supplier_catalog`), not just dim tables. Implemented as described below; `linkDimensions` is now a structural no-op and the decision is recorded in [porting_decisions.md](porting_decisions.md).
 
 **Approach: pre-stage enrichment; `linkDimensions` becomes a no-op.**
-`FARMFINGERPRINT64()` is Redshift SQL with no Databricks equivalent. Compute FK surrogate keys in Node.js inside the `importFact`/`importDimension` enrichFns, write them into the staging CSV before the MERGE, then make `linkDimensions` a structural no-op — same argument as `insertMissingDimensions`. Document in `porting-decisions.md`.
+`FARMFINGERPRINT64()` is Redshift SQL with no Databricks equivalent. Compute FK surrogate keys in Node.js inside the `importFact`/`importDimension` enrichFns, write them into the staging CSV before the MERGE, then make `linkDimensions` a structural no-op — same argument as `insertMissingDimensions`. Document in `porting_decisions.md`.
 
 **Two FK types:**
 
@@ -157,7 +157,7 @@ Parse `[y,m,d]` and `[h,m,s]` by splitting the stored wall-clock string on space
 2. `lib/dwconnect.js` — `changeTableStructure`: same ADD COLUMN check (FK columns must exist before `describeTable` includes them in `allCols` → staging CSV)
 3. `lib/dwconnect.js` — `importFact` and `importDimension` enrichFns: compute FK values for each `field.dimension` entry before writing to CSV
 4. `lib/dwconnect.js` — `linkDimensions`: replace error-throw with `done(null)` + comment
-5. `docs/porting-decisions.md`: add `linkDimensions` as an intentional no-op (work moved to enrichFn)
+5. `docs/porting_decisions.md`: add `linkDimensions` as an intentional no-op (work moved to enrichFn)
 
 ### Step 7 — `lib/dwconnect.js`: `importFact()` hot path
 
