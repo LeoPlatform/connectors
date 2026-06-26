@@ -102,7 +102,7 @@ function mapType(rawType) {
 	// TRY_PARSE_JSON casting; MERGE COALESCE semantics differ). See CONNECTOR_MIGRATION.md
 	// Deliverable #2 — VARIANT event tables.
 	if (t === 'super' || t === 'variant') {
-		throw new Error(`mapType: '${rawType}' requires staging pipeline changes beyond a type mapping — see Deliverable #2 in CONNECTOR_MIGRATION.md`);
+		throw new Error(`mapType: '${rawType}' requires staging pipeline changes beyond a type mapping — CSV staging serializes nested JSON as STRING; implement TRY_PARSE_JSON casting and updated MERGE semantics before using this type`);
 	}
 
 	// decimal/numeric with no precision → DECIMAL(18,0) to match Redshift default.

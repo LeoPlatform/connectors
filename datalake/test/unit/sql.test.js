@@ -97,7 +97,7 @@ describe('sql.js', () => {
 		});
 
 		['super', 'SUPER', 'variant', 'VARIANT'].forEach(t => {
-			it(`throws for semi-structured type: ${t}`, () => {
+			it(`throws for semi-structured type requiring pipeline changes: ${t}`, () => {
 				expect(() => mapType(t)).to.throw(/staging pipeline changes/);
 			});
 		});
