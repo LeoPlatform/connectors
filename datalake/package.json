@@ -33,7 +33,6 @@
 		"leo-connector-common": "4.0.13-rc",
 		"leo-logger": "1.0.7",
 		"leo-sdk": "7.1.12",
-		"leo-streams": "2.0.0",
 		"lodash": "^4.17.21"
 	},
 	"devDependencies": {

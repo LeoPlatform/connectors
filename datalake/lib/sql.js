@@ -36,38 +36,89 @@
 // Databricks SQL keywords (including type names) are case-insensitive — `int` and
 // `INT` both work. Uppercase here is stylistic, for readability of generated DDL.
 const TYPE_MAP = {
+	// boolean
 	'boolean': 'BOOLEAN',
+	// date
 	'date': 'DATE',
-	'float': 'FLOAT',
-	'int': 'INT',
-	'integer': 'INT',
-	'bigint': 'BIGINT',
-	'timestamp': 'TIMESTAMP_NTZ',
-	'timestamptz': 'TIMESTAMP',
+	// integers
+	'smallint': 'SMALLINT',
+	'int2':     'SMALLINT',
+	'int':      'INT',
+	'int4':     'INT',
+	'integer':  'INT',
+	'bigint':   'BIGINT',
+	'int8':     'BIGINT',
+	// floating-point
+	// NOTE: Redshift FLOAT = DOUBLE PRECISION (8 bytes), not REAL (4 bytes).
+	// Databricks FLOAT is single-precision; DOUBLE is double-precision.
+	'real':             'FLOAT',
+	'float4':           'FLOAT',
+	'float':            'DOUBLE',   // Redshift FLOAT = DOUBLE PRECISION
+	'float8':           'DOUBLE',
+	'double precision': 'DOUBLE',
+	// strings
+	'string':   'STRING',
+	'char':     'STRING',
+	'character':'STRING',
+	'nchar':    'STRING',
+	'varchar':  'STRING',
+	'nvarchar': 'STRING',
+	'bpchar':   'STRING',
+	'text':     'STRING',
+	// binary
+	'varbyte':        'BINARY',
+	'varbinary':      'BINARY',
+	'binary varying': 'BINARY',
+	// timestamps (zone-naive → NTZ; zone-aware → TIMESTAMP)
+	'timestamp':                    'TIMESTAMP_NTZ',
+	'timestamp without time zone':  'TIMESTAMP_NTZ',
+	'timestamptz':                  'TIMESTAMP',
+	'timestamp with time zone':     'TIMESTAMP',
 };
 
 function mapType(rawType) {
-	if (!rawType) return 'STRING';
+	if (!rawType || !rawType.trim()) {
+		throw new Error('mapType: type is required');
+	}
 	const t = rawType.trim().toLowerCase();
 
 	if (TYPE_MAP[t]) return TYPE_MAP[t];
 
-	// varchar(n) → STRING (Databricks has no length-bounded string type)
-	if (t.startsWith('varchar')) return 'STRING';
+	// varchar(n), char(n), nvarchar(n) → STRING (Databricks has no length-bounded string type)
+	if (t.startsWith('varchar') || t.startsWith('char') || t.startsWith('nvarchar')) return 'STRING';
 
-	// decimal with no precision → DECIMAL(18,0) to match Redshift default.
+	// varbyte(n), varbinary(n), binary varying(n) → BINARY
+	if (t.startsWith('varbyte') || t.startsWith('varbinary') || t.startsWith('binary varying')) return 'BINARY';
+
+	// TIME and TIMETZ have no native Databricks equivalent — explicit error with
+	// a more informative message than the generic unmapped-type error below.
+	if (t === 'time' || t === 'timetz' ||
+		t === 'time without time zone' || t === 'time with time zone') {
+		throw new Error(`mapType: no Databricks equivalent for '${rawType}' — add explicit column handling`);
+	}
+
+	// SUPER/VARIANT require changes to the staging pipeline beyond a type mapping
+	// (CSV round-trip serializes nested JSON as STRING; read_files needs explicit
+	// TRY_PARSE_JSON casting; MERGE COALESCE semantics differ). See CONNECTOR_MIGRATION.md
+	// Deliverable #2 — VARIANT event tables.
+	if (t === 'super' || t === 'variant') {
+		throw new Error(`mapType: '${rawType}' requires staging pipeline changes beyond a type mapping — CSV staging serializes nested JSON as STRING; implement TRY_PARSE_JSON casting and updated MERGE semantics before using this type`);
+	}
+
+	// decimal/numeric with no precision → DECIMAL(18,0) to match Redshift default.
 	// Databricks default is DECIMAL(10,0) — do NOT rely on it.
-	if (t === 'decimal') return 'DECIMAL(18,0)';
+	if (t === 'decimal' || t === 'numeric') return 'DECIMAL(18,0)';
 
-	// decimal(p,s) → pass through verbatim, uppercased
+	// decimal(p,s) / numeric(p,s) → DECIMAL(p,s), verbatim precision/scale
 	if (t.startsWith('decimal(')) return rawType.trim().toUpperCase();
+	if (t.startsWith('numeric(')) return 'DECIMAL' + rawType.trim().slice('numeric'.length).toUpperCase();
 
-	return 'STRING';
+	throw new Error(`mapType: unrecognized type '${rawType}' — add to TYPE_MAP if this is a valid mapping`);
 }
 
 // Emit a column definition string using the client's escapeId for identifier quoting.
-function colDef(name, rawType, escapeId) {
-	return `${escapeId(name)} ${mapType(rawType)}`;
+function colDef(name, rawType, escapeId, mapTypeFn) {
+	return `${escapeId(name)} ${mapTypeFn(rawType)}`;
 }
 
 /**
@@ -87,7 +138,7 @@ function colDef(name, rawType, escapeId) {
  * @param {function} escapeId      - identifier quoting function from connect.js
  * @returns {string} SQL DDL
  */
-function createTable(qualifiedTable, definition, columnConfig, escapeId) {
+function createTable(qualifiedTable, definition, columnConfig, escapeId, mapTypeFn = mapType, storageClause = 'USING DELTA\nCLUSTER BY AUTO') {
 	const cols = [];
 
 	Object.keys(definition.structure).forEach(key => {
@@ -101,7 +152,7 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 			field = { type: field };
 		}
 		if (!field.type) return;
-		cols.push(colDef(key, field.type, escapeId));
+		cols.push(colDef(key, field.type, escapeId, mapTypeFn));
 
 		// FK surrogate-key column for dimension links
 		if (field.dimension && typeof columnConfig.dimColumnTransform === 'function') {
@@ -123,32 +174,32 @@ function createTable(qualifiedTable, definition, columnConfig, escapeId) {
 		}
 	});
 
-	cols.push(`${escapeId(columnConfig._auditdate)} TIMESTAMP_NTZ`);
+	cols.push(`${escapeId(columnConfig._auditdate)} ${mapTypeFn('timestamp')}`);
 	if (definition.isDimension) {
-		cols.push(`${escapeId(columnConfig._startdate)} TIMESTAMP_NTZ`);
-		cols.push(`${escapeId(columnConfig._enddate)} TIMESTAMP_NTZ`);
-		cols.push(`${escapeId(columnConfig._current)} BOOLEAN`);
+		cols.push(`${escapeId(columnConfig._startdate)} ${mapTypeFn('timestamp')}`);
+		cols.push(`${escapeId(columnConfig._enddate)} ${mapTypeFn('timestamp')}`);
+		cols.push(`${escapeId(columnConfig._current)} ${mapTypeFn('boolean')}`);
 	} else {
-		cols.push(`${escapeId(columnConfig._deleted)} BOOLEAN`);
+		cols.push(`${escapeId(columnConfig._deleted)} ${mapTypeFn('boolean')}`);
 	}
-	cols.push(`${escapeId(columnConfig._rescued_data)} STRING`);
+	cols.push(`${escapeId(columnConfig._rescued_data)} ${mapTypeFn('string')}`);
 
-	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) USING DELTA\nCLUSTER BY AUTO`;
+	return `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (\n  ${cols.join(',\n  ')}\n) ${storageClause}`;
 }
 
 /**
  * Generate ALTER TABLE ... ADD COLUMN DDL.
  */
-function alterAddColumn(qualifiedTable, columnName, rawType, escapeId) {
-	return `ALTER TABLE ${qualifiedTable} ADD COLUMN ${escapeId(columnName)} ${mapType(rawType)}`;
+function alterAddColumn(qualifiedTable, columnName, rawType, escapeId, mapTypeFn = mapType) {
+	return `ALTER TABLE ${qualifiedTable} ADD COLUMN ${escapeId(columnName)} ${mapTypeFn(rawType)}`;
 }
 
 /**
  * Generate ALTER TABLE ... ALTER COLUMN ... TYPE DDL.
  * Throws if attempting to narrow a type (Databricks only widens).
  */
-function alterColumnType(qualifiedTable, columnName, newRawType, escapeId) {
-	return `ALTER TABLE ${qualifiedTable} ALTER COLUMN ${escapeId(columnName)} TYPE ${mapType(newRawType)}`;
+function alterColumnType(qualifiedTable, columnName, newRawType, escapeId, mapTypeFn = mapType) {
+	return `ALTER TABLE ${qualifiedTable} ALTER COLUMN ${escapeId(columnName)} TYPE ${mapTypeFn(newRawType)}`;
 }
 
 /**
@@ -253,4 +304,4 @@ function mergeDim(target, staging, nks, dataCols, columnConfig, escapeId) {
 	].join('\n');
 }
 
-module.exports = { mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim };
+module.exports = { TYPE_MAP, mapType, createTable, alterAddColumn, alterColumnType, mergeFact, mergeDim };

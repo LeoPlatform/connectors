@@ -18,24 +18,60 @@ describe('sql.js', () => {
 
 	describe('mapType', () => {
 		const cases = [
+			// boolean
+			['boolean', 'BOOLEAN'],
+			['BOOLEAN', 'BOOLEAN'],
+			// date
+			['date', 'DATE'],
+			// integers
+			['smallint', 'SMALLINT'],
+			['int2', 'SMALLINT'],
+			['int', 'INT'],
+			['int4', 'INT'],
+			['integer', 'INT'],
+			['bigint', 'BIGINT'],
+			['int8', 'BIGINT'],
+			// floating-point
+			['real', 'FLOAT'],
+			['float4', 'FLOAT'],
+			['float', 'DOUBLE'],
+			['FLOAT', 'DOUBLE'],
+			['float8', 'DOUBLE'],
+			['double precision', 'DOUBLE'],
+			['DOUBLE PRECISION', 'DOUBLE'],
+			// strings
 			['varchar(300)', 'STRING'],
 			['varchar(1)', 'STRING'],
 			['VARCHAR(100)', 'STRING'],
-			['timestamp', 'TIMESTAMP_NTZ'],
-			['TIMESTAMP', 'TIMESTAMP_NTZ'],
-			['timestamptz', 'TIMESTAMP'],
-			['TIMESTAMPTZ', 'TIMESTAMP'],
-			['date', 'DATE'],
-			['boolean', 'BOOLEAN'],
-			['BOOLEAN', 'BOOLEAN'],
-			['int', 'INT'],
-			['integer', 'INT'],
-			['bigint', 'BIGINT'],
-			['float', 'FLOAT'],
+			['char(10)', 'STRING'],
+			['nvarchar(50)', 'STRING'],
+			['text', 'STRING'],
+			['bpchar', 'STRING'],
+			// binary
+			['varbyte', 'BINARY'],
+			['varbyte(100)', 'BINARY'],
+			['varbinary', 'BINARY'],
+			['varbinary(256)', 'BINARY'],
+			['binary varying', 'BINARY'],
+			['binary varying(512)', 'BINARY'],
+			// decimal / numeric
 			['decimal', 'DECIMAL(18,0)'],
 			['DECIMAL', 'DECIMAL(18,0)'],
 			['decimal(10,2)', 'DECIMAL(10,2)'],
 			['DECIMAL(38,10)', 'DECIMAL(38,10)'],
+			['numeric', 'DECIMAL(18,0)'],
+			['NUMERIC', 'DECIMAL(18,0)'],
+			['numeric(10,2)', 'DECIMAL(10,2)'],
+			['NUMERIC(38,10)', 'DECIMAL(38,10)'],
+			// timestamps
+			['timestamp', 'TIMESTAMP_NTZ'],
+			['TIMESTAMP', 'TIMESTAMP_NTZ'],
+			['timestamp without time zone', 'TIMESTAMP_NTZ'],
+			['TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP_NTZ'],
+			['timestamptz', 'TIMESTAMP'],
+			['TIMESTAMPTZ', 'TIMESTAMP'],
+			['timestamp with time zone', 'TIMESTAMP'],
+			['TIMESTAMP WITH TIME ZONE', 'TIMESTAMP'],
 		];
 
 		cases.forEach(([input, expected]) => {
@@ -44,8 +80,26 @@ describe('sql.js', () => {
 			});
 		});
 
-		it('returns STRING for unknown types', () => {
-			expect(mapType('unknowntype')).to.equal('STRING');
+		[null, undefined, '', '   '].forEach(t => {
+			it(`throws for missing/empty type: ${JSON.stringify(t)}`, () => {
+				expect(() => mapType(t)).to.throw(/type is required/);
+			});
+		});
+
+		it('throws for unrecognized types', () => {
+			expect(() => mapType('unknowntype')).to.throw(/unrecognized type/);
+		});
+
+		['time', 'timetz', 'TIME', 'TIMETZ', 'time without time zone', 'time with time zone'].forEach(t => {
+			it(`throws for unsupported type: ${t}`, () => {
+				expect(() => mapType(t)).to.throw(/no Databricks equivalent/);
+			});
+		});
+
+		['super', 'SUPER', 'variant', 'VARIANT'].forEach(t => {
+			it(`throws for semi-structured type requiring pipeline changes: ${t}`, () => {
+				expect(() => mapType(t)).to.throw(/staging pipeline changes/);
+			});
 		});
 	});
 
@@ -210,6 +264,27 @@ describe('sql.js', () => {
 				expect(ddl).to.not.include('`d_item`');
 			});
 		});
+
+		describe('custom mapTypeFn and storageClause', () => {
+			const simpleDef = { isDimension: false, structure: { 'amount': { type: 'float' } } };
+
+			it('uses custom mapTypeFn for data columns', () => {
+				const customMap = t => t === 'float' ? 'REAL' : 'TEXT';
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId, customMap);
+				expect(ddl).to.include('`amount` REAL');
+			});
+
+			it('uses custom storageClause', () => {
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId, mapType, 'USING ICEBERG');
+				expect(ddl).to.match(/\) USING ICEBERG$/);
+				expect(ddl).to.not.include('USING DELTA');
+			});
+
+			it('defaults to USING DELTA CLUSTER BY AUTO when neither override is provided', () => {
+				const ddl = createTable('cat.sch.f_test', simpleDef, columnConfig, escapeId);
+				expect(ddl).to.match(/\) USING DELTA\nCLUSTER BY AUTO$/);
+			});
+		});
 	});
 
 	describe('alterAddColumn', () => {
@@ -217,12 +292,22 @@ describe('sql.js', () => {
 			const ddl = alterAddColumn('cat.sch.d_order', 'extra_col', 'varchar(50)', escapeId);
 			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ADD COLUMN `extra_col` STRING');
 		});
+		it('uses custom mapTypeFn when provided', () => {
+			const customMap = () => 'TEXT';
+			const ddl = alterAddColumn('cat.sch.d_order', 'extra_col', 'varchar(50)', escapeId, customMap);
+			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ADD COLUMN `extra_col` TEXT');
+		});
 	});
 
 	describe('alterColumnType', () => {
 		it('emits ALTER COLUMN TYPE', () => {
 			const ddl = alterColumnType('cat.sch.d_order', 'cost', 'bigint', escapeId);
 			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ALTER COLUMN `cost` TYPE BIGINT');
+		});
+		it('uses custom mapTypeFn when provided', () => {
+			const customMap = () => 'NUMBER';
+			const ddl = alterColumnType('cat.sch.d_order', 'cost', 'bigint', escapeId, customMap);
+			expect(ddl).to.equal('ALTER TABLE cat.sch.d_order ALTER COLUMN `cost` TYPE NUMBER');
 		});
 	});
 
