@@ -25,6 +25,16 @@ module.exports = class Dol extends parent {
 		});
 	}
 
+	// connect.js derives `fields` from Object.keys(rows[0]), so an empty result set
+	// produces fields=[] — which causes mapResults (common/dol.js:512) to crash on
+	// `last.end = fields.length` when last is still null.  processJoinQuery already
+	// short-circuits for empty results; this override adds the same guard here.
+	processDomainQuery(domainObject, domains, done, err, results, fields) {
+		if (err) return done(err);
+		if (!results || !results.length) return done();
+		return super.processDomainQuery(domainObject, domains, done, err, results, fields);
+	}
+
 	buildJoinQuery(joinObject, name, domains, query, queryIds, done) {
 		query = sqlstring.format(query, queryIds);
 		logger.debug('Formatted Join Query', query);
