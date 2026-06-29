@@ -1,6 +1,0 @@
-{
-	"include": ["index.js", "lib/**/*.js"],
-	"exclude": ["test/**"],
-	"reporter": ["text", "html", "lcov"],
-	"all": true
-}
