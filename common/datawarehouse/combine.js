@@ -1,11 +1,11 @@
 const exec = require('child_process').exec;
 const fs = require("fs");
 const path = require("path");
-const merge = require("lodash/merge");
 const PassThrough = require("stream").PassThrough;
 const leo = require("leo-sdk");
 const ls = leo.streams;
 const transform = require("./transform.js");
+const combineRecords = require("./combine-records.js");
 const async = require("async");
 const crypto = require("crypto");
 
@@ -118,14 +118,10 @@ function combine(file) {
 				process.exit();
 			}
 			if (lastObj && id === lastId) {
-				if (data.__leo_delete__ || lastObj.__leo_delete__) {
-					// if our current row is a delete, then we throw away the previous updates
-					// if our previous row was a delete, but the current one is not, we throw away the delete, because it was updated
-					// after the delete, so it should NOT be deleted.
-					lastObj = data;
-				} else {
-					lastObj = merge(lastObj, data);
-				}
+				// Collapse same-natural-key records in arrival order. A delete is a
+				// soft close, so the row's data must survive the collapse — see
+				// combine-records.js (RPL-5795).
+				lastObj = combineRecords(lastObj, data);
 			} else {
 				if (lastObj) {
 					push(lastObj);
