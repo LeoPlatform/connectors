@@ -4,7 +4,8 @@
 	"description": "A Leo entity table connector",
 	"repository": {
 		"type": "git",
-		"url": "git://github.com/LeoPlatform/connectors.git"
+		"url": "git+https://github.com/LeoPlatform/connectors.git",
+		"directory": "entity-table"
 	},
 	"main": "index.js",
 	"scripts": {

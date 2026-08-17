@@ -9,7 +9,8 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/LeoPlatform/connectors.git"
+		"url": "git+https://github.com/LeoPlatform/connectors.git",
+		"directory": "common"
 	},
 	"author": "",
 	"license": "MIT",
