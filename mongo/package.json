@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-mongo",
-	"version": "3.0.7",
+	"version": "4.1.0",
 	"description": "",
 	"main": "index.js",
 	"repository": {

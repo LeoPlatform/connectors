@@ -1,6 +1,6 @@
 {
 	"name": "leo-connector-redshift",
-	"version": "3.0.3",
+	"version": "4.1.0",
 	"description": "A Redshift database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
