@@ -288,13 +288,24 @@ function classifyCommits(commits) {
 // npm baseline
 // ---------------------------------------------------------------------------
 
+// TEMPORARY per-package major-version ceilings. leo-connector-common's v5
+// line is being developed on a separate branch and is not ready to publish;
+// this repo's automation must keep publishing v4 until that work lands.
+// Remove (or raise) an entry once its package is cleared to move past the
+// ceiling.
+const VERSION_CEILINGS = {
+  'leo-connector-common': 4,
+};
+
 function npmMaxStable(pkgName, fallback) {
+  const ceiling = VERSION_CEILINGS[pkgName];
   try {
     const raw = execFileSync('npm', ['view', pkgName, 'versions', '--json'], { encoding: 'utf8' });
     const parsed = JSON.parse(raw);
     const versions = Array.isArray(parsed) ? parsed : [parsed];
-    const stable = versions.filter(isStable);
-    if (!stable.length) throw new Error('no stable versions published');
+    let stable = versions.filter(isStable);
+    if (ceiling !== undefined) stable = stable.filter((v) => parseVersion(v).major <= ceiling);
+    if (!stable.length) throw new Error(`no stable versions published${ceiling !== undefined ? ` at or below v${ceiling}` : ''}`);
     return stable.reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b));
   } catch (e) {
     log(`plan-release: ${pkgName} — could not read npm versions (${e.message}); using package.json version ${fallback} as baseline`);
@@ -325,12 +336,29 @@ const resolved = packages.map((pkg) => {
   let candidate = null;
   let next = pkg.version;
   let alreadySet = true;
+  let blockedReason = null;
 
   if (included) {
     npmMax = npmMaxStable(pkg.name, pkg.version);
     candidate = increment(npmMax, bump);
-    next = maxVersion(candidate, pkg.version);
-    alreadySet = compareVersions(pkg.version, candidate) >= 0;
+
+    const ceiling = VERSION_CEILINGS[pkg.name];
+    if (ceiling !== undefined && parseVersion(candidate).major > ceiling) {
+      // A bump (usually a BREAKING CHANGE commit) would cross out of the
+      // ceiling — e.g. into leo-connector-common's reserved v5 line. Exclude
+      // the package from this release entirely rather than silently
+      // publishing into territory that's off-limits for now.
+      blockedReason = `${candidate} would exceed the temporary v${ceiling} ceiling for ${pkg.name}`;
+      log(`plan-release: ${pkg.name} — ${blockedReason}; excluding from this release`);
+      included = false;
+      bump = null;
+      candidate = null;
+      next = pkg.version;
+      alreadySet = true;
+    } else {
+      next = maxVersion(candidate, pkg.version);
+      alreadySet = compareVersions(pkg.version, candidate) >= 0;
+    }
   }
 
   return {
@@ -344,6 +372,7 @@ const resolved = packages.map((pkg) => {
     candidate,
     next,
     alreadySet,
+    blockedReason,
     distTag: IS_MASTER ? 'latest' : 'rc',
   };
 });
@@ -463,6 +492,11 @@ const summaryLines = [
     `| ${p.name} | ${p.included ? 'yes' : 'no'} | ${p.bump || '-'} | ${p.npmMax || '-'} | ${p.included ? p.next : '-'} | ${p.included ? (p.alreadySet ? 'yes' : 'no') : '-'} | ${p.commitCount} |`,
   ),
 ];
+
+const blocked = resolved.filter((p) => p.blockedReason);
+if (blocked.length) {
+  summaryLines.push('', '**Blocked by version ceiling:**', ...blocked.map((p) => `- ${p.name}: ${p.blockedReason}`));
+}
 
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Release plan (${REF_NAME})\n\n${summaryLines.join('\n')}\n`);
