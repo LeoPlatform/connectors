@@ -288,13 +288,22 @@ function classifyCommits(commits) {
 // npm baseline
 // ---------------------------------------------------------------------------
 
-// TEMPORARY per-package major-version ceilings. leo-connector-common's v5
-// line is being developed on a separate branch and is not ready to publish;
-// this repo's automation must keep publishing v4 until that work lands.
-// Remove (or raise) an entry once its package is cleared to move past the
-// ceiling.
+// TEMPORARY per-package major-version ceilings. The next major line for each
+// of these packages is being developed on the long-lived feature/aws-sdk-v3-again
+// branch and is not ready to publish; this repo's automation must keep
+// publishing the prior major until that work lands, or it will collide with
+// versions already published from that branch. Remove (or raise) an entry
+// once its package is cleared to move past the ceiling.
 const VERSION_CEILINGS = {
   'leo-connector-common': 4,
+  'leo-connector-elasticsearch': 2,
+  'leo-connector-entity-table': 3,
+  'leo-connector-mongo': 3,
+  'leo-connector-mysql': 3,
+  'leo-connector-oracle': 2,
+  'leo-connector-postgres': 4,
+  'leo-connector-redshift': 3,
+  'leo-connector-sqlserver': 4,
 };
 
 function npmMaxStable(pkgName, fallback) {
