@@ -11,7 +11,7 @@ name: Release
 
 on:
   push:
-    branches: [master, fix/rpl-5795-combine-soft-delete-ordering]
+    branches: [master, fix/rpl-5795-combine-soft-delete-ordering, fix/rpl-6780-fk-delete-natural-key-resolution]
   workflow_dispatch:
     inputs:
       packages:
