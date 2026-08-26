@@ -4,9 +4,6 @@ const async = require('async');
 const ls = require('leo-sdk').streams;
 const logger = require('leo-logger');
 
-// Max ids per resolution query in resolveDeleteKeys (RPL-6780).
-const RESOLVE_DELETE_CHUNK_SIZE = 1000;
-
 module.exports = function(config, columnConfig) {
 	let client = postgres(config);
 	let dwClient = client;
@@ -126,74 +123,6 @@ module.exports = function(config, columnConfig) {
 		}
 
 		return true;
-	};
-
-	/**
-	 * Resolve a delete that is keyed by something other than the table's natural key
-	 * into the natural keys it currently matches (RPL-6780).
-	 *
-	 * load.js calls this so the delete markers it emits carry each affected row's own
-	 * natural key. That puts them in the same combine group as any same-batch write
-	 * for the row, so combineRecords applies last-event-wins instead of the outcome
-	 * being decided by the fixed flushDeletes-before-MERGE order.
-	 *
-	 * Returns [] rather than erroring when the delete column is absent from the
-	 * table, mirroring the colLookup gate in deletesSetup: a delete keyed by a column
-	 * this table does not have deletes nothing, so it resolves to nothing.
-	 *
-	 * @param {string} table    unqualified table identifier
-	 * @param {string} field    column the delete is keyed by
-	 * @param {string} nk       the table's natural-key column
-	 * @param {Array} ids       values of `field` being deleted
-	 * @param {function} callback (err, naturalKeys[])
-	 */
-	client.resolveDeleteKeys = function (table, field, nk, ids, callback) {
-		if (!ids || !ids.length) {
-			return callback(null, []);
-		}
-
-		const qualifiedTable = `public.${table}`;
-
-		client.describeTable(table).then(fields => {
-			let cols = {};
-			fields.forEach(f => {
-				cols[f.column_name] = true;
-			});
-
-			if (!cols[field] || !cols[nk]) {
-				return callback(null, []);
-			}
-
-			// Dimension deletes are applied with a `_current = true` predicate (see the
-			// deletesSetup call in importDimension), so resolution has to narrow the same
-			// way. Without it a historical SCD row can contribute a natural key whose
-			// CURRENT version has a different value in `field` — and that current version
-			// would then be closed, which the previous column-keyed update never did.
-			// Only dimensions carry _current; facts stay unfiltered, matching importFact.
-			let currentOnly = cols[columnConfig._current]
-				? ` and ${client.escapeId(columnConfig._current)} = true`
-				: '';
-
-			// Chunk so a large delete does not build an unbounded IN list.
-			let chunks = [];
-			for (let i = 0; i < ids.length; i += RESOLVE_DELETE_CHUNK_SIZE) {
-				chunks.push(ids.slice(i, i + RESOLVE_DELETE_CHUNK_SIZE));
-			}
-
-			let keys = [];
-			async.eachSeries(chunks, (chunk, chunkDone) => {
-				let values = chunk.map(id => client.escapeValueNoToLower(id)).join(',');
-				client.query(`select distinct ${client.escapeId(nk)} as resolved_key
-							  from   ${qualifiedTable}
-							  where  ${client.escapeId(field)} in (${values})${currentOnly}`, (err, results) => {
-					if (err) {
-						return chunkDone(err);
-					}
-					(results || []).forEach(row => keys.push(row.resolved_key));
-					chunkDone();
-				});
-			}, err => callback(err, keys));
-		}).catch(callback);
 	};
 
 	client.importFact = function(stream, table, ids, callback) {
