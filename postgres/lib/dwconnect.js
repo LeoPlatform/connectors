@@ -152,6 +152,8 @@ module.exports = function(config, columnConfig) {
 			return callback(null, []);
 		}
 
+		const qualifiedTable = `public.${table}`;
+
 		client.describeTable(table).then(fields => {
 			let cols = {};
 			fields.forEach(f => {
@@ -172,7 +174,7 @@ module.exports = function(config, columnConfig) {
 			async.eachSeries(chunks, (chunk, chunkDone) => {
 				let values = chunk.map(id => client.escapeValueNoToLower(id)).join(',');
 				client.query(`select distinct ${client.escapeId(nk)} as resolved_key
-							  from   public.${table}
+							  from   ${qualifiedTable}
 							  where  ${client.escapeId(field)} in (${values})`, (err, results) => {
 					if (err) {
 						return chunkDone(err);
