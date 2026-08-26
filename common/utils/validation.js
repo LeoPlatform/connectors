@@ -66,14 +66,6 @@ module.exports = {
 			return true;
 		} else if (typeof value !== 'number') {
 			return false;
-		} else if (!Number.isInteger(value)) {
-			// A decimal in an integer column is invalid even when it is inside the
-			// integer range. Previously these passed validation and then failed at
-			// load time, taking the whole batch down instead of routing the one bad
-			// record to the error queue (DPT-2586). Number.isInteger also rejects
-			// NaN and Infinity, which the range checks below let through.
-			logger.error('Invalid integer', value);
-			return false;
 		} else if (value > 2147483647) { // above this, we're going into bigint territory
 			return false;
 		} else if (value < -2147483648) {
@@ -96,32 +88,10 @@ module.exports = {
 
 		if (value === fieldDefault) {
 			return true;
-		} else if (value === null || value === undefined) {
-			// Would previously have thrown a TypeError on .match() below.
+		} else if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
 			logger.error('Invalid bigint', value);
 			return false;
-		} else if (typeof value === 'number') {
-			// A number skipped every check below, because .length is undefined on a
-			// number — so decimals, NaN and Infinity all passed validation and then
-			// failed at load time, taking the batch down (DPT-2586).
-			if (!Number.isInteger(value)) {
-				logger.error('Invalid bigint', value);
-				return false;
-			}
-
-			return true;
-		} else if (typeof value !== 'string' || !value.match(/^-?\d{1,19}$/)) {
-			// {1,19} rather than {0,19}: an empty string and a lone '-' are not bigints.
-			logger.error('Invalid bigint', value);
-			return false;
-		}
-
-		// Compare magnitude only, so a negative is not skipped for being 20 chars
-		// with its sign. True min is -9223372036854775808, so that single value is
-		// rejected too — being one short is safer than overflowing the column.
-		value = value.replace(/^-/, '');
-
-		if (value.length === maxSize.length) {
+		} else if (value.length === maxSize.length) {
 			let maxBigIntArray = maxSize.split('');
 			let bigIntArray = value.split('');
 
