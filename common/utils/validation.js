@@ -66,6 +66,14 @@ module.exports = {
 			return true;
 		} else if (typeof value !== 'number') {
 			return false;
+		} else if (!Number.isInteger(value)) {
+			// A decimal in an integer column is invalid even when it is inside the
+			// integer range. Previously these passed validation and then failed at
+			// load time, taking the whole batch down instead of routing the one bad
+			// record to the error queue (DPT-2586). Number.isInteger also rejects
+			// NaN and Infinity, which the range checks below let through.
+			logger.error('Invalid integer', value);
+			return false;
 		} else if (value > 2147483647) { // above this, we're going into bigint territory
 			return false;
 		} else if (value < -2147483648) {

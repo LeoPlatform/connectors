@@ -5,6 +5,7 @@ const leo = require('leo-sdk');
 const ls = leo.streams;
 const streams = require('leo-streams');
 const combine = require('./combine.js');
+const deleteFanout = require('./delete-fanout.js');
 const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
@@ -40,32 +41,22 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	});
 
 	let checkforDelete = ls.through(function(obj, done) {
-		if (obj.payload.type === 'delete') {
-			let data = obj.payload.data || {};
-			let ids = data.in || [];
-			let entities = data.entities || [];
-			ids.map(id => {
-				entities.map(entity => {
-					let field = entity.field || 'id';
-					this.push(Object.assign({}, obj, {
-						payload: {
-							type: entity.type,
-							entity: entity.name,
-							command: 'delete',
-							field: field,
-							data: {
-								id: field === 'id' ? id : `_del_${id}`,
-								__leo_delete__: field,
-								__leo_delete_id__: id
-							}
-						}
-					}));
-				});
-			});
-			done();
-		} else {
-			done(null, obj);
+		if (obj.payload.type !== 'delete') {
+			return done(null, obj);
 		}
+
+		// Fan a delete out to one marker per affected row, resolving non-natural-key
+		// deletes to real natural keys where the connector supports it, so the markers
+		// land in the same combine group as that row's writes and are ordered against
+		// them (RPL-6780). See delete-fanout.js.
+		let self = this;
+		deleteFanout(obj, tableNks, client, (err, records) => {
+			if (err) {
+				return done(err);
+			}
+			records.forEach(record => self.push(record));
+			done();
+		});
 	});
 
 	let validateData = ls.through(function(obj, done) {
