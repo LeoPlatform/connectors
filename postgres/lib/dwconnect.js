@@ -164,6 +164,16 @@ module.exports = function(config, columnConfig) {
 				return callback(null, []);
 			}
 
+			// Dimension deletes are applied with a `_current = true` predicate (see the
+			// deletesSetup call in importDimension), so resolution has to narrow the same
+			// way. Without it a historical SCD row can contribute a natural key whose
+			// CURRENT version has a different value in `field` — and that current version
+			// would then be closed, which the previous column-keyed update never did.
+			// Only dimensions carry _current; facts stay unfiltered, matching importFact.
+			let currentOnly = cols[columnConfig._current]
+				? ` and ${client.escapeId(columnConfig._current)} = true`
+				: '';
+
 			// Chunk so a large delete does not build an unbounded IN list.
 			let chunks = [];
 			for (let i = 0; i < ids.length; i += RESOLVE_DELETE_CHUNK_SIZE) {
@@ -175,7 +185,7 @@ module.exports = function(config, columnConfig) {
 				let values = chunk.map(id => client.escapeValueNoToLower(id)).join(',');
 				client.query(`select distinct ${client.escapeId(nk)} as resolved_key
 							  from   ${qualifiedTable}
-							  where  ${client.escapeId(field)} in (${values})`, (err, results) => {
+							  where  ${client.escapeId(field)} in (${values})${currentOnly}`, (err, results) => {
 					if (err) {
 						return chunkDone(err);
 					}
