@@ -39,10 +39,22 @@ module.exports = function(tableIds, opts) {
 		// an out-of-order batch cannot resolve a key to a stale row (PMT-4302, current-state
 		// tables fed from sharded producers). Default: empty — every table keeps the existing
 		// arrival-order fold.
+		//
+		// KNOWN INTERACTION — delete markers on an ordered table (LeoPlatform/connectors#254):
+		// a marker built by checkforDelete carries no order value, so it pads to spaces and
+		// sorts FIRST in its group, changing how the fold resolves same-batch write+delete
+		// pairs relative to arrival order. Ordered tables are expected NOT to receive queue
+		// deletes (the Zero Inventory design routes deletions around the merge path entirely).
+		// Order-less rows sorting first is load-bearing and must not be "fixed": it is how a
+		// backfill row (no source_eid) loses the fold against live data. A warn is logged when
+		// a marker is written for an ordered table. The full truth table is characterized on
+		// the 4.x line (see #254), whose combineRecords semantics arrive here with the next
+		// development sync.
 		orderFields: {}
 	}, opts);
 	let dateFormat = opts.dateFormat;
 	let orderFields = opts.orderFields;
+	let warnedOrderedDeletes = {};
 
 	return ls.through((obj, done) => {
 		count++;
@@ -72,6 +84,11 @@ module.exports = function(tableIds, opts) {
 		Object.keys(values).forEach(f => stream.fields[f] = 1);
 		let id = crypto.createHash('md5');
 		id.update(tableIds[table].map(f => values[f]).join(','));
+
+		if (stream.ordered && values.__leo_delete__ && !warnedOrderedDeletes[table]) {
+			warnedOrderedDeletes[table] = true;
+			console.log(`[combine] WARN: delete marker written for ordered table ${table} — markers carry no ${orderFields[table]} value, sort first in their group, and change same-batch delete resolution (see LeoPlatform/connectors#254)`);
+		}
 
 		// Default line: `{32-char md5(nk)}-{9-digit arrival counter}{json}` — the fold keeps the
 		// last row per key by arrival. Ordered mode inserts a fixed-width order key between them:
