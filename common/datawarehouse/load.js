@@ -5,6 +5,8 @@ const leo = require('leo-sdk');
 const ls = leo.streams;
 const streams = require('leo-streams');
 const combine = require('./combine.js');
+const transform = require('./transform.js');
+const deleteMarkerData = require('./delete-marker.js');
 const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
@@ -47,17 +49,21 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 			ids.map(id => {
 				entities.map(entity => {
 					let field = entity.field || 'id';
+					// The marker's value under the natural-key column IS its combine group.
+					// Resolve the table's natural key so that column is actually populated —
+					// writing it under a hardcoded `id` leaves the real key undefined for any
+					// table whose natural key is named something else, collapsing every delete
+					// in the batch into one group (RPL-6780). See delete-marker.js.
+					let table = transform.parseTable({ type: entity.type, entity: entity.name });
+					let nks = (table && tableNks[table]) || [];
+					let nk = nks.length === 1 ? nks[0] : null;
 					this.push(Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
 							entity: entity.name,
 							command: 'delete',
 							field: field,
-							data: {
-								id: field === 'id' ? id : `_del_${id}`,
-								__leo_delete__: field,
-								__leo_delete_id__: id
-							}
+							data: deleteMarkerData(field, id, nk)
 						}
 					}));
 				});
