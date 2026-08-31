@@ -32,6 +32,13 @@ function combineRecords(lastObj, data) {
 		// rather than a bare tombstone.
 		lastObj.__leo_delete__ = data.__leo_delete__;
 		lastObj.__leo_delete_id__ = data.__leo_delete_id__;
+		// The collapsed record now represents the DELETE, so it must carry the delete's
+		// arrival sequence, not the earlier write's — otherwise a consumer comparing this
+		// record against another group's record would order it as of the wrong event
+		// (RPL-6780). Only present when combine() was constructed with emitSequence.
+		if (data.__leo_seq__ !== undefined) {
+			lastObj.__leo_seq__ = data.__leo_seq__;
+		}
 		return lastObj;
 	}
 	if (lastObj.__leo_delete__) {

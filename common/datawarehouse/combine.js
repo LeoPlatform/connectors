@@ -9,14 +9,32 @@ const combineRecords = require("./combine-records.js");
 const async = require("async");
 const crypto = require("crypto");
 
+// Field name for the opt-in per-record arrival sequence (see `emitSequence` below).
+// Underscore-prefixed to match this warehouse's internal-column convention, so a
+// connector's "does this record carry data columns?" checks (which exclude
+// `_`-prefixed keys) keep classifying a bare tombstone as data-less.
+const SEQUENCE_FIELD = '__leo_seq__';
+
 module.exports = function(tableIds, opts) {
 	let streams = {};
 	let count = 0;
 
+	// NOTE: the second argument was previously omitted, so `opts` was silently
+	// discarded and `dateFormat` could never be overridden. No in-repo caller passed
+	// opts, so restoring it is not a behavior change for existing callers.
 	opts = Object.assign({
-		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' ')
-	});
+		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' '),
+		emitSequence: false
+	}, opts || {});
 	let dateFormat = opts.dateFormat;
+	// Opt-in (RPL-6780). When on, every record carries the batch-global arrival counter
+	// it was assigned here, so a consumer can compare the relative order of two records
+	// that combine() placed in *different* natural-key groups — which is the one thing
+	// combineRecords' last-event-wins cannot do, because it only ever sees one group.
+	// The counter is assigned before grouping, so it reflects true stream arrival order.
+	// Default off: with emitSequence false the emitted records are byte-identical to
+	// before, so every existing connector (postgres/Redshift included) is unaffected.
+	let emitSequence = opts.emitSequence === true;
 
 	return ls.through((obj, done) => {
 		count++;
@@ -30,6 +48,11 @@ module.exports = function(tableIds, opts) {
 		}
 
 		let values = transform.parseValues(payload.data, dateFormat);
+		if (emitSequence) {
+			// Assigned after parseValues so the field name is never subject to its
+			// key-normalization rules.
+			values[SEQUENCE_FIELD] = count;
+		}
 
 		let stream = streams[table];
 		if (!stream) {
@@ -146,3 +169,5 @@ function combine(file) {
 	});
 	return pass;
 }
+
+module.exports.SEQUENCE_FIELD = SEQUENCE_FIELD;
