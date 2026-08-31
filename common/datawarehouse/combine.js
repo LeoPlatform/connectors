@@ -48,6 +48,16 @@ module.exports = function(tableIds, opts) {
 		// order, so an out-of-order batch cannot resolve a key to a stale row (current-state
 		// tables fed from sharded producers). Default: empty — every table keeps the existing
 		// arrival-order fold.
+		//
+		// KNOWN INTERACTION — delete markers on an ordered table (LeoPlatform/connectors#254):
+		// a marker built by checkforDelete carries no order value, so it pads to spaces and
+		// sorts FIRST in its group; if a write for the same key shares the batch, combineRecords
+		// takes its reactivate branch and the delete is silently dropped — even when the delete
+		// genuinely arrived last. Ordered tables are therefore expected NOT to receive queue
+		// deletes (the Zero Inventory design routes deletions around the merge path entirely).
+		// Order-less rows sorting first is load-bearing and must not be "fixed": it is how a
+		// backfill row (no source_eid) loses the fold against live data. A warn is logged when
+		// a marker is written for an ordered table.
 		orderFields: {}
 	}, opts || {});
 	let dateFormat = opts.dateFormat;
@@ -60,6 +70,7 @@ module.exports = function(tableIds, opts) {
 	// before, so every existing connector (postgres/Redshift included) is unaffected.
 	let emitSequence = opts.emitSequence === true;
 	let orderFields = opts.orderFields || {};
+	let warnedOrderedDeletes = {};
 
 	return ls.through((obj, done) => {
 		count++;
@@ -94,6 +105,11 @@ module.exports = function(tableIds, opts) {
 		Object.keys(values).forEach(f => stream.fields[f] = 1);
 		let id = crypto.createHash('md5');
 		id.update(tableIds[table].map(f => values[f]).join(','));
+
+		if (stream.ordered && values.__leo_delete__ && !warnedOrderedDeletes[table]) {
+			warnedOrderedDeletes[table] = true;
+			console.log(`[combine] WARN: delete marker written for ordered table ${table} — markers carry no ${orderFields[table]} value, sort first in their group, and lose to any same-batch write for the same key (see LeoPlatform/connectors#254)`);
+		}
 
 		// Default line: `{32-char md5(nk)}-{9-digit arrival counter}{json}` — the fold keeps the
 		// last row per key by arrival. Ordered mode inserts a fixed-width order key between them:

@@ -169,3 +169,65 @@ describe('datawarehouse combine fold', () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// KNOWN INTERACTION — delete markers on an ordered table (documented, not endorsed).
+// Characterization of the behavior analyzed and measured in LeoPlatform/connectors#254
+// review discussion: a checkforDelete marker carries no order value, so on an ordered
+// table it pads to spaces, sorts FIRST in its group, and combineRecords takes its
+// reactivate branch — the delete is dropped whenever a write for the same key shares
+// the batch, even when the delete genuinely arrived last.
+//
+// This is latent everywhere today: (a) no table sets combineOrder yet; (b) the one
+// planned ordered table (f_current_inventory_state) receives no queue deletes by
+// design — its sweep soft-deletes by direct SQL, its producer skips deletes, and its
+// guarded importFact rejects markers outright; (c) it keys on a composite NK, which a
+// single-column marker can never join. These tests pin the behavior so a change to it
+// is a deliberate act, not an accident. Do NOT "fix" this by sorting order-less rows
+// last: that is load-bearing for backfill rows losing the fold against live data
+// (asserted above), and a structural delete-wins rule is the defect RPL-6780 removed.
+// ---------------------------------------------------------------------------
+describe('ordered mode × delete markers (characterization, single-column NK)', () => {
+	const SNK_TABLE = 'f_single_nk';
+	const SNK = { [SNK_TABLE]: ['id'] };
+	const SNK_ORDERED = { orderFields: { [SNK_TABLE]: 'source_eid' } };
+	const snkEvt = (data) => ({ eid: 'q', payload: { entity: 'single_nk', type: 'fact', data } });
+	const snkWrite = () => ({ id: 'abc', status: 'open', source_eid: EID_1 });
+	const snkMarker = () => ({ id: 'abc', __leo_delete__: 'id', __leo_delete_id__: 'abc' });
+
+	function snkFold(events, opts) {
+		return new Promise((resolve, reject) => {
+			const c = require('../../datawarehouse/combine')(SNK, opts);
+			c.on('error', reject);
+			c.on('data', (tables) => {
+				const t = tables[SNK_TABLE];
+				if (!t) { return resolve([]); }
+				const rows = [];
+				t.stream.on('data', (r) => rows.push(r));
+				t.stream.on('error', reject);
+				t.stream.on('end', () => resolve(rows));
+			});
+			events.forEach((e) => c.write(e));
+			c.end();
+		});
+	}
+
+	it('write then delete (delete genuinely last): the delete is DROPPED on an ordered table', async () => {
+		const rows = await snkFold([snkEvt(snkWrite()), snkEvt(snkMarker())], SNK_ORDERED);
+		assert.lengthOf(rows, 1);
+		assert.isUndefined(rows[0].__leo_delete__, 'documented interaction: the order-less marker sorts first and loses');
+	});
+
+	it('control — same input without combineOrder: the delete survives with data (RPL-5795)', async () => {
+		const rows = await snkFold([snkEvt(snkWrite()), snkEvt(snkMarker())], {});
+		assert.lengthOf(rows, 1);
+		assert.equal(rows[0].__leo_delete__, 'id');
+		assert.equal(rows[0].status, 'open');
+	});
+
+	it('a lone delete with no competing write still survives on an ordered table', async () => {
+		const rows = await snkFold([snkEvt(snkMarker())], SNK_ORDERED);
+		assert.lengthOf(rows, 1);
+		assert.equal(rows[0].__leo_delete__, 'id');
+	});
+});
