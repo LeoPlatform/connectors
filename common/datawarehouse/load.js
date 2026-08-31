@@ -26,6 +26,7 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
+	let tableOrderFields = {};
 	Object.keys(tableConfig).forEach(t => {
 		let config = tableConfig[t];
 		Object.keys(config.structure).forEach(f => {
@@ -37,6 +38,15 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 					tableNks[t] = [];
 				}
 				tableNks[t].push(f);
+			}
+			// Opt-in fold ordering (PMT-4302): a field flagged `combineOrder` makes the in-batch
+			// fold keep the row with the highest value of this field per natural key, instead of
+			// the last row by arrival. Used by current-state tables fed from sharded producers,
+			// where arrival order is not chronological; every table without the flag keeps the
+			// existing arrival-order fold. Field-level, like `nk`/`sk`/`scd`, and carried in the
+			// shared dw_fields entry so every loader that reads the schema folds the same way.
+			if (field.combineOrder) {
+				tableOrderFields[t] = f;
 			}
 		});
 	});
@@ -204,7 +214,7 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	// (`__leo_seq__`) on every record combine() emits, so it can order a record against
 	// one from a different natural-key group. Every client that does not set it keeps
 	// today's records unchanged.
-	let combineOpts = { emitSequence: client.emitCombineSequence === true };
+	let combineOpts = { emitSequence: client.emitCombineSequence === true, orderFields: tableOrderFields };
 
 	ls.pipe(stream, validateData, checkforDelete, combine(tableNks, combineOpts), ls.write((obj, done) => {
 		let tasks = [];
