@@ -193,7 +193,14 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	});
 
 	let usedTables = {};
-	ls.pipe(stream, validateData, checkforDelete, combine(tableNks), ls.write((obj, done) => {
+	// Optional client capability (RPL-6780), same opt-in shape as resolveDeleteKeys:
+	// a client that sets `emitCombineSequence = true` gets a per-record arrival counter
+	// (`__leo_seq__`) on every record combine() emits, so it can order a record against
+	// one from a different natural-key group. Every client that does not set it keeps
+	// today's records unchanged.
+	let combineOpts = { emitSequence: client.emitCombineSequence === true };
+
+	ls.pipe(stream, validateData, checkforDelete, combine(tableNks, combineOpts), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {
