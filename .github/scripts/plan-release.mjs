@@ -105,6 +105,19 @@ function gitOrNull(args, opts = {}) {
   }
 }
 
+// For a git command used purely as a predicate — `cat-file -e` exits 0 and prints
+// NOTHING on success, so gitOrNull returns "" and `!""` is true, inverting the
+// answer. Test the exit status instead. (Commands that print on success, like
+// `rev-parse --verify`, are safe to test through gitOrNull.)
+function gitOk(args, opts = {}) {
+  try {
+    git(args, opts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function currentBranchName() {
   return gitOrNull(['rev-parse', '--abbrev-ref', 'HEAD']) || 'HEAD';
 }
@@ -204,7 +217,7 @@ function readEventBefore() {
     const event = JSON.parse(readFileSync(EVENT_PATH, 'utf8'));
     const before = event.before;
     if (!before || /^0+$/.test(before)) return null;
-    if (!gitOrNull(['cat-file', '-e', before])) return null; // not fetched / unborn
+    if (!gitOk(['cat-file', '-e', before])) return null; // not fetched / unborn
     return before;
   } catch {
     return null;
@@ -352,12 +365,17 @@ const resolved = packages.map((pkg) => {
     candidate = increment(npmMax, bump);
 
     const ceiling = VERSION_CEILINGS[pkg.name];
-    if (ceiling !== undefined && parseVersion(candidate).major > ceiling) {
-      // A bump (usually a BREAKING CHANGE commit) would cross out of the
-      // ceiling — e.g. into leo-connector-common's reserved v5 line. Exclude
-      // the package from this release entirely rather than silently
-      // publishing into territory that's off-limits for now.
-      blockedReason = `${candidate} would exceed the temporary v${ceiling} ceiling for ${pkg.name}`;
+    next = maxVersion(candidate, pkg.version);
+
+    if (ceiling !== undefined && parseVersion(next).major > ceiling) {
+      // Guard the version that would actually be published, not just the bump
+      // candidate. Two ways to cross the ceiling: the bump itself (usually a
+      // BREAKING CHANGE commit), or a package.json already parked above it from
+      // a stray manual bump — maxVersion carries that higher value straight into
+      // the publish matrix, so checking `candidate` alone would wave it through.
+      // Either way, exclude the package from this release rather than silently
+      // publish into territory that's off-limits for now.
+      blockedReason = `${next} would exceed the temporary v${ceiling} ceiling for ${pkg.name}`;
       log(`plan-release: ${pkg.name} — ${blockedReason}; excluding from this release`);
       included = false;
       bump = null;
@@ -365,7 +383,6 @@ const resolved = packages.map((pkg) => {
       next = pkg.version;
       alreadySet = true;
     } else {
-      next = maxVersion(candidate, pkg.version);
       alreadySet = compareVersions(pkg.version, candidate) >= 0;
     }
   }
