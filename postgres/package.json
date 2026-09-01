@@ -1,10 +1,11 @@
 {
 	"name": "leo-connector-postgres",
-	"version": "4.0.24-rc",
+	"version": "4.1.0",
 	"description": "A Postgres database connector for use with Leo Platform",
 	"repository": {
 		"type": "git",
-		"url": "git://github.com/LeoPlatform/connectors.git"
+		"url": "git+https://github.com/LeoPlatform/connectors.git",
+		"directory": "postgres"
 	},
 	"main": "index.js",
 	"scripts": {
