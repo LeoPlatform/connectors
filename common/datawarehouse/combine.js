@@ -27,7 +27,7 @@ module.exports = function(tableIds, opts) {
 		emitSequence: false
 	}, opts || {});
 	let dateFormat = opts.dateFormat;
-	// Opt-in (RPL-6780). When on, every record carries the batch-global arrival counter
+	// Opt-in. When on, every record carries the batch-global arrival counter
 	// it was assigned here, so a consumer can compare the relative order of two records
 	// that combine() placed in *different* natural-key groups — which is the one thing
 	// combineRecords' last-event-wins cannot do, because it only ever sees one group.
@@ -143,7 +143,7 @@ function combine(file) {
 			if (lastObj && id === lastId) {
 				// Collapse same-natural-key records in arrival order. A delete is a
 				// soft close, so the row's data must survive the collapse — see
-				// combine-records.js (RPL-5795).
+				// combine-records.js.
 				lastObj = combineRecords(lastObj, data);
 			} else {
 				if (lastObj) {

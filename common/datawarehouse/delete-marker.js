@@ -15,10 +15,10 @@
  *     a value that is distinct per deleted id and cannot collide with a real row —
  *     hence the `_del_` prefix. Distinctness is the part that matters: the old code
  *     always wrote this under a column literally named `id`, so for a table whose
- *     natural key is something else (`f_shipping_label_package`, nk `package_id`)
+ *     natural key is named something else
  *     the natural-key column was left undefined on every marker. Every delete in
  *     the batch therefore hashed to the same combine group and all but one were
- *     silently dropped — data loss, not just misordering (RPL-6780).
+ *     silently dropped — data loss, not just misordering.
  *
  * Extracted from load.js's checkforDelete so it can be unit-tested without leo-sdk,
  * the same reason combine-records.js was split out of combine.js.

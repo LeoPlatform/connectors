@@ -12,10 +12,10 @@ const merge = require("lodash/merge");
  *
  *   - insert/update then delete -> the delete wins, but the accumulated data is kept,
  *     so the row is created-then-soft-closed rather than written as a bare tombstone.
- *     (Previously the insert's data was discarded and a sparse row written — RPL-5795.)
+ *     (Previously the insert's data was discarded and a sparse row written.)
  *   - delete then insert/update -> the later write wins and REACTIVATES the entity; the
  *     delete intent is dropped. Loading data after a delete undeletes the row, per
- *     ES-2516 ("clear the deleted flag when loading data" — facts set `_deleted = false`
+ *     loading data clears the deleted flag — facts set `_deleted = false`
  *     on load; the merge layer applies it).
  *   - lone / leading delete with no data -> stays a bare tombstone (an ordinary
  *     cross-batch delete of a row that already exists in the target) — unchanged.
@@ -35,7 +35,7 @@ function combineRecords(lastObj, data) {
 		// The collapsed record now represents the DELETE, so it must carry the delete's
 		// arrival sequence, not the earlier write's — otherwise a consumer comparing this
 		// record against another group's record would order it as of the wrong event
-		// (RPL-6780). Only present when combine() was constructed with emitSequence.
+		// Only present when combine() was constructed with emitSequence.
 		if (data.__leo_seq__ !== undefined) {
 			lastObj.__leo_seq__ = data.__leo_seq__;
 		}
@@ -43,7 +43,7 @@ function combineRecords(lastObj, data) {
 	}
 	if (lastObj.__leo_delete__) {
 		// Earlier event was a delete, later event is a write: the write wins and
-		// reactivates the entity (ES-2516). Drop the delete and keep the later record.
+		// reactivates the entity. Drop the delete and keep the later record.
 		return data;
 	}
 	return merge(lastObj, data);

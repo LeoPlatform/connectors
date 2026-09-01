@@ -53,7 +53,7 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 					// Resolve the table's natural key so that column is actually populated —
 					// writing it under a hardcoded `id` leaves the real key undefined for any
 					// table whose natural key is named something else, collapsing every delete
-					// in the batch into one group (RPL-6780). See delete-marker.js.
+					// in the batch into one group. See delete-marker.js.
 					let table = transform.parseTable({ type: entity.type, entity: entity.name });
 					let nks = (table && tableNks[table]) || [];
 					let nk = nks.length === 1 ? nks[0] : null;
@@ -199,7 +199,7 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	});
 
 	let usedTables = {};
-	// Optional client capability (RPL-6780), same opt-in shape as resolveDeleteKeys:
+	// Optional client capability, same opt-in shape as resolveDeleteKeys:
 	// a client that sets `emitCombineSequence = true` gets a per-record arrival counter
 	// (`__leo_seq__`) on every record combine() emits, so it can order a record against
 	// one from a different natural-key group. Every client that does not set it keeps

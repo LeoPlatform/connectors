@@ -25,7 +25,7 @@ describe("combine collapse (same-batch soft-delete ordering)", () => {
 		const out = collapse([insert(), del()]);
 		expect(out.__leo_delete__).to.equal("id");
 		expect(out.__leo_delete_id__).to.equal("abc");
-		expect(out.status).to.equal("open"); // data must NOT be discarded (was RPL-5795)
+		expect(out.status).to.equal("open"); // data must NOT be discarded
 		expect(out.amount).to.equal(10);
 		expect(out.id).to.equal("abc");
 	});
@@ -38,14 +38,14 @@ describe("combine collapse (same-batch soft-delete ordering)", () => {
 		expect(out.status).to.equal("open");
 	});
 
-	it("delete then insert: the later write reactivates (delete dropped), data present — ES-2516", () => {
+	it("delete then insert: the later write reactivates (delete dropped), data present", () => {
 		const out = collapse([del(), insert({ amount: 99 })]);
 		expect(out.__leo_delete__).to.equal(undefined); // reactivated: no delete intent
 		expect(out.status).to.equal("open");
 		expect(out.amount).to.equal(99);
 	});
 
-	it("insert, delete, then insert: ends as a fresh active row (last event is a write) — ES-2516", () => {
+	it("insert, delete, then insert: ends as a fresh active row (last event is a write)", () => {
 		const out = collapse([insert(), del(), insert({ amount: 7 })]);
 		expect(out.__leo_delete__).to.equal(undefined); // last event wins → active
 		expect(out.amount).to.equal(7);
