@@ -113,8 +113,10 @@ module.exports = function(tableIds, opts) {
 
 		// Default line: `{32-char md5(nk)}-{9-digit arrival counter}{json}` — the fold keeps the
 		// last row per key by arrival. Ordered mode inserts a fixed-width order key between them:
-		// `{md5(nk)}-{ORDER_KEY_WIDTH-char order key}-{arrival}{json}` — the fold then keeps the
-		// row with the highest order value, and the arrival counter only breaks ties.
+		// `{md5(nk)}-{ORDER_KEY_WIDTH-char order key}-{arrival}{json}` — same-key rows then fold
+		// in ascending byte order of the encoded key (only fixed-width text such as an RStreams
+		// eid orders correctly), with the arrival counter breaking ties. The fold merges field by
+		// field: the newest row's values win, and a field it leaves out keeps an older row's value.
 		let arrival = ("00000000" + count).slice(-9);
 		let sortPrefix = stream.ordered
 			? `${id.digest('hex')}-${encodeOrderKey(values[orderFields[table]])}-${arrival}`

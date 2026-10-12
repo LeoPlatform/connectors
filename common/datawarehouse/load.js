@@ -40,8 +40,11 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 				tableNks[t].push(f);
 			}
 			// Opt-in fold ordering (PMT-4302): a field flagged `combineOrder` makes the in-batch
-			// fold keep the row with the highest value of this field per natural key, instead of
-			// the last row by arrival. Used by current-state tables fed from sharded producers,
+			// fold sort each natural key's rows in ascending byte order of this field's text
+			// before merging, instead of arrival order. Only fixed-width text such as an RStreams
+			// eid orders correctly: values compare as text, so on a number column 9 beats 10. The
+			// merge is field by field — the newest row's values win, and a field it leaves out
+			// keeps an older row's value. Used by current-state tables fed from sharded producers,
 			// where arrival order is not chronological; every table without the flag keeps the
 			// existing arrival-order fold. Field-level, like `nk`/`sk`/`scd`, and carried in the
 			// shared dw_fields entry so every loader that reads the schema folds the same way.
