@@ -1,0 +1,137 @@
+name: Release
+
+# Filename is load-bearing: npm Trusted Publishing is configured per-package
+# on npmjs.com to accept publishes ONLY from LeoPlatform/connectors running
+# this exact workflow file. Do not rename this file.
+#
+# - push to master: publishes clean conventional-commit semver to `latest`.
+# - workflow_dispatch on any branch: publishes `x.y.z-rc.<run_id>` to `rc`
+#   (kept out of the `latest` channel). This is how release candidates get
+#   published from feature branches.
+
+on:
+  push:
+    branches: [master, fix/rpl-5795-combine-soft-delete-ordering]
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Comma-separated package dirs/names to restrict to (empty = all changed packages)'
+        required: false
+        default: ''
+      default-bump:
+        description: 'Bump to use for packages with changes but no conventional-commit type'
+        required: false
+        type: choice
+        options: [patch, minor, none]
+        default: patch
+      force:
+        description: 'Release listed/all packages even with no detected changes'
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: 'Resolve versions and pack, but do not push, tag, or publish'
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never cancel a run mid-publish
+
+jobs:
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commits the version bump and pushes release tags
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      release-sha: ${{ steps.plan.outputs.release-sha }}
+      has-releases: ${{ steps.plan.outputs.has-releases }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # merge-base + tag lookups need full history and tags
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Resolve packages, versions, and commit the bump
+        id: plan
+        env:
+          PACKAGES: ${{ inputs.packages }}
+          DEFAULT_BUMP: ${{ inputs.default-bump || 'patch' }}
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
+          DRY_RUN: ${{ inputs.dry-run && 'true' || 'false' }}
+        run: node .github/scripts/plan-release.mjs
+
+  publish:
+    name: Publish ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.has-releases == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm Trusted Publishing (OIDC) — no NPM_TOKEN
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.release-sha }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm to a Trusted-Publishing-capable version
+        run: npm install -g npm@latest
+
+      - name: Set publish version
+        id: version
+        working-directory: ${{ matrix.dir }}
+        run: |
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            PUBLISH_VERSION="${{ matrix.version }}"
+          else
+            PUBLISH_VERSION="${{ matrix.version }}-rc.${{ github.run_id }}"
+          fi
+          # Re-applies the resolved version regardless of what plan committed —
+          # this job never depends on the plan job's commit having landed.
+          npm version "$PUBLISH_VERSION" --no-git-tag-version --allow-same-version
+          echo "publish-version=$PUBLISH_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already published
+        id: guard
+        run: |
+          if npm view "${{ matrix.name }}@${{ steps.version.outputs.publish-version }}" version >/dev/null 2>&1; then
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.name }}@${{ steps.version.outputs.publish-version }} is already on npm, skipping"
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        if: steps.guard.outputs.already-published == 'false'
+        working-directory: ${{ matrix.dir }}
+        run: npm pack
+
+      - name: Upload tarball
+        if: steps.guard.outputs.already-published == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.name }}-${{ steps.version.outputs.publish-version }}
+          path: ${{ matrix.dir }}/*.tgz
+          if-no-files-found: error
+
+      - name: Publish
+        if: steps.guard.outputs.already-published == 'false' && !inputs.dry-run
+        working-directory: ${{ matrix.dir }}
+        run: npm publish --tag "${{ matrix.distTag }}" --access public --provenance ./*.tgz

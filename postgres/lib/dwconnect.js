@@ -44,7 +44,11 @@ module.exports = function(config, columnConfig) {
 
 	let deleteFlushCount = config.deleteFlushCount || 1000;
 
-	function deletesSetup(qualifiedTable, schema, field, value, where = '') {
+	// `defer: true` turns the handler into a pure collector: `add` never flushes, so every close
+	// waits for an explicit `flush`. `flush` takes an optional queryClient so a deferred close can
+	// run on a transaction's connection instead of the pool — a pool-connection close issued while
+	// that transaction holds the table's locks would wait on it and hang the load.
+	function deletesSetup(qualifiedTable, schema, field, value, where = '', defer = false) {
 		let colLookup = {};
 		schema.map(col => {
 			colLookup[col.column_name] = true;
@@ -55,10 +59,18 @@ module.exports = function(config, columnConfig) {
 			where = `and ${where}`;
 		}
 
-		function tryFlushDelete(done, force = false) {
-			if (force || toDeleteCount >= deleteFlushCount) {
-				let deleteTasks = Object.keys(toDelete).map(col => {
-					return deleteDone => client.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
+		function tryFlushDelete(done, force = false, queryClient = client) {
+			if (force || (!defer && toDeleteCount >= deleteFlushCount)) {
+				// A deferred handler accumulates without bound, so a forced flush chunks each
+				// column's ids at deleteFlushCount — one unbounded IN list can exceed Redshift's
+				// 16 MB statement cap and fail the load on every retry.
+				let deleteTasks = [];
+				Object.keys(toDelete).forEach(col => {
+					let ids = toDelete[col];
+					for (let i = 0; i < ids.length; i += deleteFlushCount) {
+						let chunk = ids.slice(i, i + deleteFlushCount);
+						deleteTasks.push(deleteDone => queryClient.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${chunk.join(',')}) ${where}`, deleteDone));
+					}
 				});
 				async.parallelLimit(deleteTasks, 1, (err) => {
 					if (!err) {
@@ -87,8 +99,8 @@ module.exports = function(config, columnConfig) {
 					done();
 				}
 			},
-			flush: (callback) => {
-				tryFlushDelete(callback, true);
+			flush: (callback, queryClient) => {
+				tryFlushDelete(callback, true, queryClient);
 			},
 		};
 	}
@@ -377,6 +389,12 @@ module.exports = function(config, columnConfig) {
 
 		let tasks = [];
 		let deleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`);
+		// Markers keyed by the staged column ('id') carry the row's folded data into staging, so
+		// their close must run AFTER the merge inserts that row — on the merge's own connection,
+		// inside its transaction — or a row created and deleted in one batch lands open (D3,
+		// PR #249). Markers on any other column (a parent FK) must keep closing BEFORE the merge,
+		// as the batch may also write replacement rows under the same value.
+		let deferredDeleteHandler = deletesSetup(qualifiedTable, schema[qualifiedTable], columnConfig._enddate, dwClient.auditdate, `${columnConfig._current} = true`, true);
 
 		let sortKey;
 		let sortKeyType;
@@ -426,8 +444,10 @@ module.exports = function(config, columnConfig) {
 				if (obj.__leo_delete__) {
 					if (obj.__leo_delete__ === 'id') {
 						push(obj);
+						deferredDeleteHandler.add(obj, done);
+					} else {
+						deleteHandler.add(obj, done);
 					}
-					deleteHandler.add(obj, done);
 				} else {
 					done(null, obj);
 				}
@@ -550,6 +570,10 @@ module.exports = function(config, columnConfig) {
 											`, done);
 							});
 
+							// Inside the transaction, after the insert/update: the staged ('id'-keyed)
+							// deletes close the rows the merge just wrote (D3, PR #249).
+							tasks.push(done => deferredDeleteHandler.flush(done, connection));
+
 							async.series(tasks, err => {
 								if (!err) {
 									connection.query(`commit`, e => {
@@ -654,6 +678,10 @@ module.exports = function(config, columnConfig) {
 											  SELECT ${fields.map(column => `${column}`).join(`, `)}
 											  FROM   ${qualifiedStagingTable}; `, done);
 						});
+
+						// Inside the transaction, after the insert: the staged ('id'-keyed) deletes
+						// close the rows the merge just wrote (D3, PR #249).
+						tasks.push(done => deferredDeleteHandler.flush(done, connection));
 
 						async.series(tasks, err => {
 							if (!err) {
