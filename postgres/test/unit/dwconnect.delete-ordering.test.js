@@ -160,17 +160,20 @@ describe('importDimension delete ordering (D3, PR #249)', () => {
 		assert.equal(fake.staged.length, 1);
 	});
 
-	it('deferral beats the mid-batch flush threshold: many staged deletes close once, after the insert', async () => {
+	it('deferral beats the mid-batch flush threshold: staged deletes close after the insert, chunked at deleteFlushCount', async () => {
 		const fake = await runImportDimension({ ...bypassConfig, deleteFlushCount: 2 }, [
 			{ id: 1, __leo_delete__: 'id', __leo_delete_id__: 1 },
 			{ id: 2, __leo_delete__: 'id', __leo_delete_id__: 2 },
 			{ id: 3, __leo_delete__: 'id', __leo_delete_id__: 3 },
 		]);
 		const closes = fake.log.filter(isClose);
-		assert.equal(closes.length, 1, 'staged deletes must not flush mid-batch even past deleteFlushCount');
-		assert.equal(closes[0].via, 'txn');
-		assert.match(closes[0].sql, /where id in \('1','2','3'\)/i);
-		assert.ok(idx(fake.log, isClose) > idx(fake.log, isInsert));
+		assert.equal(closes.length, 2, 'the forced flush must chunk ids at deleteFlushCount, never one unbounded IN list');
+		assert.match(closes[0].sql, /where id in \('1','2'\)/i);
+		assert.match(closes[1].sql, /where id in \('3'\)/i);
+		const log = fake.log;
+		closes.forEach(c => assert.equal(c.via, 'txn'));
+		assert.ok(log.indexOf(closes[0]) > idx(log, isInsert), 'first chunk after the merge insert');
+		assert.ok(log.indexOf(closes[1]) < idx(log, isCommit), 'last chunk before commit');
 	});
 
 	it('SCD path gets the same ordering: staged-delete close after the merge, before commit, on the transaction', async () => {

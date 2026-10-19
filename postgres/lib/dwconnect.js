@@ -61,8 +61,16 @@ module.exports = function(config, columnConfig) {
 
 		function tryFlushDelete(done, force = false, queryClient = client) {
 			if (force || (!defer && toDeleteCount >= deleteFlushCount)) {
-				let deleteTasks = Object.keys(toDelete).map(col => {
-					return deleteDone => queryClient.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${toDelete[col].join(',')}) ${where}`, deleteDone);
+				// A deferred handler accumulates without bound, so a forced flush chunks each
+				// column's ids at deleteFlushCount — one unbounded IN list can exceed Redshift's
+				// 16 MB statement cap and fail the load on every retry.
+				let deleteTasks = [];
+				Object.keys(toDelete).forEach(col => {
+					let ids = toDelete[col];
+					for (let i = 0; i < ids.length; i += deleteFlushCount) {
+						let chunk = ids.slice(i, i + deleteFlushCount);
+						deleteTasks.push(deleteDone => queryClient.query(`update ${qualifiedTable} set ${field} = ${value}, ${columnConfig._auditdate} = ${dwClient.auditdate} where ${col} in (${chunk.join(',')}) ${where}`, deleteDone));
+					}
 				});
 				async.parallelLimit(deleteTasks, 1, (err) => {
 					if (!err) {
