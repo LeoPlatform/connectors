@@ -9,9 +9,21 @@ const transform = require("./transform.js");
 const async = require("async");
 const crypto = require("crypto");
 
+// A pipeline directory nothing has written to for this long belongs to a run that has ended: Lambda stops an
+// invocation after at most 15 minutes.
+const STALE_DIR_MS = 15 * 60 * 1000;
+
 module.exports = function(tableIds, opts) {
 	let streams = {};
 	let count = 0;
+
+	// Each pipeline buffers its tables in its own directory. A warm Lambda container can still be running an earlier
+	// invocation's pipeline when the next one starts, and with fixed per-table paths the two overwrote, sorted and
+	// unlinked each other's files (ES-5648).
+	let root = process.env.LEO_DW_TMP_DIR || "/tmp/leo_dw";
+	removeStaleDirs(root);
+	let dir = path.join(root, crypto.randomBytes(8).toString("hex"));
+	fs.mkdirSync(dir, { recursive: true });
 
 	opts = Object.assign({
 		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' ')
@@ -33,7 +45,7 @@ module.exports = function(tableIds, opts) {
 
 		let stream = streams[table];
 		if (!stream) {
-			let unsortedFile = `/tmp/leo_dw_${table}`;
+			let unsortedFile = path.join(dir, table);
 			stream = streams[table] = {
 				table: table,
 				fields: {},
@@ -57,6 +69,17 @@ module.exports = function(tableIds, opts) {
 		let tasks = [];
 		let tables = {};
 
+		// Remove this pipeline's directory once every table's sort and merge has finished, whether or not it succeeded.
+		let remaining = Object.keys(streams).length;
+		let finished = () => {
+			if (--remaining === 0) {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		};
+		if (remaining === 0) {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+
 		Object.keys(streams).forEach((t) => {
 			tasks.push((done) => {
 				let table = streams[t];
@@ -67,7 +90,7 @@ module.exports = function(tableIds, opts) {
 					tables[t] = {
 						table: t,
 						fields: Object.keys(streams[t].fields),
-						stream: combine(table.unsortedFile)
+						stream: combine(table.unsortedFile, finished)
 					};
 					done();
 				});
@@ -84,7 +107,7 @@ module.exports = function(tableIds, opts) {
 
 
 
-function combine(file) {
+function combine(file, finished) {
 	let pass = new PassThrough({
 		objectMode: true
 	});
@@ -97,6 +120,7 @@ function combine(file) {
 		}
 	}, function(error) {
 		if (error) {
+			finished();
 			pass.emit("error", error);
 			pass.end();
 			return;
@@ -141,12 +165,40 @@ function combine(file) {
 			}
 		}), pass, (err) => {
 			if (err) {
+				finished();
 				pass.emit('error', err);
 			} else {
 				console.timeEnd("Merged File " + sortedFile);
 				fs.unlinkSync(sortedFile);
+				finished();
 			}
 		});
 	});
 	return pass;
+}
+
+// Removes pipeline directories under root that nothing has written to for STALE_DIR_MS: ones left by a run that
+// crashed, or by an earlier process in this container.
+function removeStaleDirs(root) {
+	let names;
+	try {
+		names = fs.readdirSync(root);
+	} catch (err) {
+		return; // no pipeline has run here yet
+	}
+	let cutoff = Date.now() - STALE_DIR_MS;
+	names.forEach(name => {
+		let dir = path.join(root, name);
+		try {
+			let lastWrite = fs.readdirSync(dir).reduce(
+				(latest, file) => Math.max(latest, fs.statSync(path.join(dir, file)).mtimeMs),
+				fs.statSync(dir).mtimeMs
+			);
+			if (lastWrite < cutoff) {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		} catch (err) {
+			// Its pipeline removed it, or a file in it, while we looked.
+		}
+	});
 }
