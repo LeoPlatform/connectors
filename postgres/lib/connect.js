@@ -65,7 +65,7 @@ function create (pool, parentCache) {
 						}
 
 						reject('NO_SCHEMA_FOUND');
-					});
+					}, reject);
 				}
 			});
 		},
@@ -78,7 +78,8 @@ function create (pool, parentCache) {
 
 				client.query(`SELECT table_name, column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = '${tableSchema}' order by ordinal_position asc`, (err, result) => {
 					if (err) {
-						throw err;
+						// A no-op when the cached schema was already returned above.
+						return reject(err);
 					}
 
 					let schema = {};

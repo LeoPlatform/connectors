@@ -684,17 +684,7 @@ module.exports = function(config, columnConfig) {
 			callback(null);
 		} else {
 			let unions = {};
-			let isDate = {
-				d_date: true,
-				d_datetime: true,
-				d_time: true,
-				date: true,
-				datetime: true,
-				dim_date: true,
-				dim_datetime: true,
-				dim_time: true,
-				time: true,
-			};
+			let isDate = DATE_DIMENSIONS;
 			Object.keys(usedTables).map(table => {
 				Object.keys(tableConfig[table].structure).map(column => {
 					let field = tableConfig[table].structure[column];
@@ -868,9 +858,11 @@ module.exports = function(config, columnConfig) {
 							}
 							Object.keys(structures[table].structure).forEach(f => {
 								let field = structures[table].structure[f];
+								// Date and time dimensions are stored in <dim>_date / <dim>_time columns, never a bare <dim>.
+								let storedAsDateKeys = columnConfig.useSurrogateDateKeys && DATE_DIMENSIONS[field.dimension];
 								if (!(f in fieldLookup)) {
 									missingFields[f] = structures[table].structure[f];
-								} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
+								} else if (field.dimension && !storedAsDateKeys && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 									let missingDim = columnConfig.dimColumnTransform(f, field);
 									missingFields[missingDim] = {
 										type: (config.hashedSurrogateKeys) ? 'bigint' : 'integer',
@@ -1041,10 +1033,10 @@ module.exports = function(config, columnConfig) {
 		queries.map(q => {
 			tasks.push(done => client.query(q, err => done(err)));
 		});
-		return new Promise(resolve => {
+		return new Promise((resolve, reject) => {
 			async.series(tasks, err => {
 				if (err) {
-					throw err;
+					return reject(err);
 				}
 
 				resolve();
@@ -1085,12 +1077,12 @@ module.exports = function(config, columnConfig) {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
 				}
-			} else if (field.dimension === 'd_time' || field.dimension === 'time' || field.dimension === 'dim_date') {
+			} else if (field.dimension === 'd_time' || field.dimension === 'time' || field.dimension === 'dim_time') {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(key, field)} ${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'}`);
 			}
 			fields.push(`"${key}" ${field.type}`);
 		});
@@ -1299,6 +1291,20 @@ module.exports = function(config, columnConfig) {
 	};
 
 	return client;
+};
+
+// Dimension types whose links are stored as surrogate date/time keys (<dim>_date, <dim>_time) when
+// useSurrogateDateKeys is on, rather than in a <dim> column.
+const DATE_DIMENSIONS = {
+	d_date: true,
+	d_datetime: true,
+	d_time: true,
+	date: true,
+	datetime: true,
+	dim_date: true,
+	dim_datetime: true,
+	dim_time: true,
+	time: true,
 };
 
 // The column that one of updateTable's field definitions adds: `"key" type` or `name type`.
