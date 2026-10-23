@@ -26,9 +26,9 @@
 		"pg-pool": "^3.6.1"
 	},
 	"devDependencies": {
-		"@dsco/layer-leo": "2.1.29",
 		"chai": "^4.2.0",
 		"eslint": "^5.13.0",
+		"leo-sdk": "7.1.18",
 		"mocha": "^5.2.0",
 		"sinon": "^7.2.3"
 	},

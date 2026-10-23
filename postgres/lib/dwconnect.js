@@ -135,6 +135,9 @@ module.exports = function(config, columnConfig) {
 
 		// Add the new table to in memory schema // Prevents locking on schema table
 		let schema = client.getSchemaCache();
+		if (typeof schema[qualifiedTable] === 'undefined') {
+			throw new Error(`${qualifiedTable} not found in schema`);
+		}
 		schema[qualifiedStagingTable] = schema[qualifiedTable];
 
 		let tasks = [];
