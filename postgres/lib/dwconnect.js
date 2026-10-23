@@ -684,17 +684,7 @@ module.exports = function(config, columnConfig) {
 			callback(null);
 		} else {
 			let unions = {};
-			let isDate = {
-				d_date: true,
-				d_datetime: true,
-				d_time: true,
-				date: true,
-				datetime: true,
-				dim_date: true,
-				dim_datetime: true,
-				dim_time: true,
-				time: true,
-			};
+			let isDate = DATE_DIMENSIONS;
 			Object.keys(usedTables).map(table => {
 				Object.keys(tableConfig[table].structure).map(column => {
 					let field = tableConfig[table].structure[column];
@@ -852,7 +842,7 @@ module.exports = function(config, columnConfig) {
 		let tasks = [];
 		let tableResults = {};
 
-		return new Promise(resolve => {
+		return new Promise((resolve, reject) => {
 			client.describeTables().then(() => {
 				Object.keys(structures).forEach(table => {
 					tableResults[table] = 'Unmodified';
@@ -868,9 +858,11 @@ module.exports = function(config, columnConfig) {
 							}
 							Object.keys(structures[table].structure).forEach(f => {
 								let field = structures[table].structure[f];
+								// Date and time dimensions are stored in <dim>_date / <dim>_time columns, never a bare <dim>.
+								let storedAsDateKeys = columnConfig.useSurrogateDateKeys && DATE_DIMENSIONS[field.dimension];
 								if (!(f in fieldLookup)) {
 									missingFields[f] = structures[table].structure[f];
-								} else if (field.dimension && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
+								} else if (field.dimension && !storedAsDateKeys && !(columnConfig.dimColumnTransform(f, field) in fieldLookup)) {
 									let missingDim = columnConfig.dimColumnTransform(f, field);
 									missingFields[missingDim] = {
 										type: (config.hashedSurrogateKeys) ? 'bigint' : 'integer',
@@ -879,10 +871,10 @@ module.exports = function(config, columnConfig) {
 							});
 							if (Object.keys(missingFields).length) {
 								tableResults[table] = 'Modified';
-								client.updateTable(table, missingFields).then(() => {
+								client.updateTable(table, missingFields, fieldLookup).then(() => {
 									// success updating table. Move to the next one.
 									done();
-								});
+								}, done);
 							} else {
 								done();
 							}
@@ -894,11 +886,9 @@ module.exports = function(config, columnConfig) {
 									tableResults[table] = 'Created';
 									logger.info('table created');
 									done();
-								}).catch(err => {
-									throw err;
-								});
+								}, done);
 							} else {
-								throw err;
+								done(err);
 							}
 						});
 					});
@@ -906,12 +896,12 @@ module.exports = function(config, columnConfig) {
 
 				async.parallelLimit(tasks, 20, (err) => {
 					if (err) {
-						throw err;
+						return reject(err);
 					}
 
 					resolve(tableResults);
 				});
-			});
+			}).catch(reject);
 		});
 	};
 
@@ -1043,17 +1033,19 @@ module.exports = function(config, columnConfig) {
 		queries.map(q => {
 			tasks.push(done => client.query(q, err => done(err)));
 		});
-		return new Promise(resolve => {
+		return new Promise((resolve, reject) => {
 			async.series(tasks, err => {
 				if (err) {
-					throw err;
+					return reject(err);
 				}
 
 				resolve();
 			});
 		});
 	};
-	client.updateTable = async function(table, definition) {
+	// existingColumns is the table's current columns, keyed by name. Columns already there are skipped: on Redshift
+	// each column is a separate ALTER, so a run that stops part-way leaves some committed, and re-adding those fails.
+	client.updateTable = async function(table, definition, existingColumns = {}) {
 		let fields = [];
 		let queries = [];
 		Object.keys(definition).forEach(key => {
@@ -1085,18 +1077,26 @@ module.exports = function(config, columnConfig) {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_date integer`);
 				}
-			} else if (field.dimension === 'd_time' || field.dimension === 'time' || field.dimension === 'dim_date') {
+			} else if (field.dimension === 'd_time' || field.dimension === 'time' || field.dimension === 'dim_time') {
 				if (columnConfig.useSurrogateDateKeys) {
 					fields.push(`${columnConfig.dimColumnTransform(key, field)}_time integer`);
 				}
 			} else if (field.dimension) {
-				fields.push(`${columnConfig.dimColumnTransform(key, field)} integer`);
+				fields.push(`${columnConfig.dimColumnTransform(key, field)} ${(config.hashedSurrogateKeys) ? 'bigint' : 'integer'}`);
 			}
 			fields.push(`"${key}" ${field.type}`);
 		});
-		let sqls = [`alter table  ${table} 
+		fields = fields.filter(field => {
+			let column = addedColumnName(field);
+			if (column in existingColumns) {
+				logger.info(`Column ${table}.${column} already exists, not adding it`);
+				return false;
+			}
+			return true;
+		});
+		let sqls = fields.length ? [`alter table  ${table} 
 				add column ${fields.join(',\n add column ')}
-	`];
+	`] : [];
 
 		// redshift doesn't support multi 'add column' in one query
 		if (config.version === 'redshift') {
@@ -1107,12 +1107,19 @@ module.exports = function(config, columnConfig) {
 			sqls.push(q);
 		});
 
-		return new Promise(resolve => {
+		return new Promise((resolve, reject) => {
 			async.eachSeries(sqls, function(sql, done) {
-				client.query(sql, err => done(err));
+				client.query(sql, err => {
+					if (err && isDuplicateColumnError(err)) {
+						// Another run added the column after we read the table's columns.
+						logger.info(`${err.message}, continuing: ${sql}`);
+						return done();
+					}
+					done(err);
+				});
 			}, err => {
 				if (err) {
-					throw err;
+					return reject(err);
 				}
 
 				resolve();
@@ -1285,3 +1292,29 @@ module.exports = function(config, columnConfig) {
 
 	return client;
 };
+
+// Dimension types whose links are stored as surrogate date/time keys (<dim>_date, <dim>_time) when
+// useSurrogateDateKeys is on, rather than in a <dim> column.
+const DATE_DIMENSIONS = {
+	d_date: true,
+	d_datetime: true,
+	d_time: true,
+	date: true,
+	datetime: true,
+	dim_date: true,
+	dim_datetime: true,
+	dim_time: true,
+	time: true,
+};
+
+// The column that one of updateTable's field definitions adds: `"key" type` or `name type`.
+function addedColumnName(field) {
+	let match = field.match(/^"([^"]+)"|^(\S+)/);
+	return match[1] || match[2];
+}
+
+// Postgres reports adding a column that already exists as SQLSTATE 42701 (duplicate_column). The message check also
+// covers Redshift, which reported it with this message in prod on 2026-08-27.
+function isDuplicateColumnError(err) {
+	return err.code === '42701' || /^column ".+" of relation ".+" already exists$/.test(err.message);
+}
