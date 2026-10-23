@@ -21,13 +21,21 @@ const MINUTE = 60 * 1000;
 
 describe("combine temp files", function() {
 	let root;
+	let exit;
 
 	beforeEach(function() {
 		root = fs.mkdtempSync(path.join(os.tmpdir(), "leo-dw-test-"));
 		process.env.LEO_DW_TMP_DIR = root;
+		// combine.js calls process.exit() (code 0) on a line it can't parse, which is what two pipelines sharing a
+		// file produce. Make that fail the test instead of ending the run as if it passed.
+		exit = process.exit;
+		process.exit = code => {
+			throw new Error(`combine.js called process.exit(${code === undefined ? "" : code})`);
+		};
 	});
 
 	afterEach(function() {
+		process.exit = exit;
 		delete process.env.LEO_DW_TMP_DIR;
 		fs.rmSync(root, { recursive: true, force: true });
 	});
@@ -73,6 +81,48 @@ describe("combine temp files", function() {
 
 	it("removes its directory once every table is merged", async function() {
 		await start([record("1", "a"), record("2", "b")]).end();
+
+		expect(await eventually(() => fs.readdirSync(root).length === 0)).to.equal(true);
+	});
+
+	it("keeps a live pipeline's directory however old its files look, and it merges every row", async function() {
+		// A failed run's pipeline resumes in the next invocation; after a frozen container its files look stale.
+		const live = combine(tableIds);
+		for (let i = 0; i < 5000; i++) {
+			live.write(record(String(i), "live"));
+		}
+		const tables = await new Promise((resolve, reject) => {
+			live.once("error", reject);
+			live.once("data", resolve);
+			live.end();
+		});
+		const [name] = fs.readdirSync(root);
+		const dir = path.join(root, name);
+		// Sorted and merging: the merge is held up by nobody reading the table's stream yet.
+		expect(await eventually(() => fs.readdirSync(dir).join() === `${TABLE}_sorted`)).to.equal(true);
+		const old = new Date(Date.now() - 20 * MINUTE);
+		fs.utimesSync(path.join(dir, `${TABLE}_sorted`), old, old);
+		fs.utimesSync(dir, old, old);
+
+		const next = combine(tableIds);
+
+		expect(fs.existsSync(dir)).to.equal(true);
+		const rows = await new Promise((resolve, reject) => {
+			const out = [];
+			tables[TABLE].stream.on("data", row => out.push(row)).on("error", reject).on("end", () => resolve(out));
+		});
+		expect(rows).to.have.length(5000);
+		// The live pipeline removes its own directory when its merge finishes; a missing file would throw here.
+		expect(await eventually(() => !fs.existsSync(dir))).to.equal(true);
+		next.end();
+	});
+
+	it("removes a pipeline's directory when it is torn down before it sorts", async function() {
+		const stream = combine(tableIds);
+		stream.on("error", () => {});
+		stream.write(record("1", "torn down"));
+
+		stream.destroy(new Error("upstream failed"));
 
 		expect(await eventually(() => fs.readdirSync(root).length === 0)).to.equal(true);
 	});

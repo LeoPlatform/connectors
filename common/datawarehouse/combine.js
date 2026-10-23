@@ -9,8 +9,12 @@ const transform = require("./transform.js");
 const async = require("async");
 const crypto = require("crypto");
 
-// A pipeline directory nothing has written to for this long belongs to a run that has ended: Lambda stops an
-// invocation after at most 15 minutes.
+// Directories of pipelines still alive in this process. The stale sweep never removes these: a failed run's
+// pipeline resumes in the next invocation after the container sat frozen, so its files can look old while it
+// still needs them (prod: merges of up to 8.7 min with no file change, containers idle up to 10.7 min).
+const liveDirs = new Set();
+// A directory no live pipeline here owns, untouched for this long, is left by a crashed run or an earlier
+// process. The age check is for hosts where other processes share /tmp.
 const STALE_DIR_MS = 15 * 60 * 1000;
 
 module.exports = function(tableIds, opts) {
@@ -24,13 +28,15 @@ module.exports = function(tableIds, opts) {
 	removeStaleDirs(root);
 	let dir = path.join(root, crypto.randomBytes(8).toString("hex"));
 	fs.mkdirSync(dir, { recursive: true });
+	liveDirs.add(dir);
+	let flushStarted = false;
 
 	opts = Object.assign({
 		dateFormat: d => d.toISOString().slice(0, 19).replace('T', ' ')
 	});
 	let dateFormat = opts.dateFormat;
 
-	return ls.through((obj, done) => {
+	let combiner = ls.through((obj, done) => {
 		count++;
 		if (count % 10000 == 0) {
 			console.log(count, obj.eid);
@@ -66,6 +72,7 @@ module.exports = function(tableIds, opts) {
 			done(null);
 		}
 	}, function(done) {
+		flushStarted = true;
 		let tasks = [];
 		let tables = {};
 
@@ -73,11 +80,11 @@ module.exports = function(tableIds, opts) {
 		let remaining = Object.keys(streams).length;
 		let finished = () => {
 			if (--remaining === 0) {
-				fs.rmSync(dir, { recursive: true, force: true });
+				removeDir(dir);
 			}
 		};
 		if (remaining === 0) {
-			fs.rmSync(dir, { recursive: true, force: true });
+			removeDir(dir);
 		}
 
 		Object.keys(streams).forEach((t) => {
@@ -103,6 +110,29 @@ module.exports = function(tableIds, opts) {
 			done(err);
 		});
 	});
+
+	// Torn down before it sorted anything (an upstream error destroys every stream in the pipe): nothing else will
+	// remove the directory, and it would stay live for the life of the process. Close the table files first, or a
+	// write still in flight recreates a file while the directory is being removed.
+	combiner.on("close", () => {
+		if (flushStarted) {
+			return;
+		}
+		let open = Object.keys(streams).map(t => streams[t].stream).filter(file => !file.closed);
+		let pending = open.length;
+		if (!pending) {
+			return removeDir(dir);
+		}
+		open.forEach(file => {
+			file.once("close", () => {
+				if (--pending === 0) {
+					removeDir(dir);
+				}
+			});
+			file.destroy();
+		});
+	});
+	return combiner;
 };
 
 
@@ -177,8 +207,18 @@ function combine(file, finished) {
 	return pass;
 }
 
-// Removes pipeline directories under root that nothing has written to for STALE_DIR_MS: ones left by a run that
-// crashed, or by an earlier process in this container.
+function removeDir(dir) {
+	liveDirs.delete(dir);
+	try {
+		fs.rmSync(dir, { recursive: true, force: true });
+	} catch (err) {
+		// Cleanup must never fail a run. No longer live, so the stale sweep removes it later.
+		console.log(`Could not remove ${dir}: ${err.message}`);
+	}
+}
+
+// Removes pipeline directories under root that no live pipeline in this process owns and that nothing has written
+// to for STALE_DIR_MS: ones left by a run that crashed, or by an earlier process in this container.
 function removeStaleDirs(root) {
 	let names;
 	try {
@@ -189,6 +229,9 @@ function removeStaleDirs(root) {
 	let cutoff = Date.now() - STALE_DIR_MS;
 	names.forEach(name => {
 		let dir = path.join(root, name);
+		if (liveDirs.has(dir)) {
+			return;
+		}
 		try {
 			let lastWrite = fs.readdirSync(dir).reduce(
 				(latest, file) => Math.max(latest, fs.statSync(path.join(dir, file)).mtimeMs),
