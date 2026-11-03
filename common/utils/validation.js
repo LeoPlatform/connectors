@@ -97,7 +97,7 @@ module.exports = {
 				return false;
 			}
 			return true;
-		} else if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
+		} else if (typeof value !== 'string' || !value.match(/^\-?\d{0,19}$/)) { // non-strings are invalid rather than throwing
 			logger.error('Invalid bigint', value);
 			return false;
 		} else if (value.length === maxSize.length) {

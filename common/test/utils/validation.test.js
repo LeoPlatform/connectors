@@ -30,6 +30,9 @@ describe('validation', () => {
 			assert.isFalse(validation.isValidBigint('8.5'));
 			assert.isTrue(validation.isValidBigint('123'));
 		});
+		it('returns false instead of throwing for non-string, non-number values', () => {
+			[null, true, {}, []].forEach(v => assert.isFalse(validation.isValidBigint(v, 'default'), JSON.stringify(v)));
+		});
 		it('passes through fieldDefault', () => {
 			assert.isTrue(validation.isValidBigint(null, null));
 		});
