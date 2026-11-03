@@ -66,6 +66,8 @@ module.exports = {
 			return true;
 		} else if (typeof value !== 'number') {
 			return false;
+		} else if (!Number.isInteger(value)) { // fractional, NaN and Infinity are not valid integers
+			return false;
 		} else if (value > 2147483647) { // above this, we're going into bigint territory
 			return false;
 		} else if (value < -2147483648) {
@@ -87,6 +89,13 @@ module.exports = {
 		const maxSize = '9223372036854775807';
 
 		if (value === fieldDefault) {
+			return true;
+		} else if (typeof value === 'number') {
+			// fractional, NaN and Infinity are not valid bigints; also enforce the 64-bit range
+			if (!Number.isInteger(value) || value >= 9223372036854775808 || value < -9223372036854775808) {
+				logger.error('Invalid bigint', value);
+				return false;
+			}
 			return true;
 		} else if (typeof value !== 'number' && !value.match(/^\-?\d{0,19}$/)) {
 			logger.error('Invalid bigint', value);
