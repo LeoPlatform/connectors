@@ -5,6 +5,8 @@ const leo = require('leo-sdk');
 const ls = leo.streams;
 const streams = require('leo-streams');
 const combine = require('./combine.js');
+const transform = require('./transform.js');
+const deleteMarkerData = require('./delete-marker.js');
 const async = require('async');
 const validate = require('./../utils/validation');
 let errorStream;
@@ -24,6 +26,7 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	let tableStatuses = {};
 	let tableSks = {};
 	let tableNks = {};
+	let tableOrderFields = {};
 	Object.keys(tableConfig).forEach(t => {
 		let config = tableConfig[t];
 		Object.keys(config.structure).forEach(f => {
@@ -36,6 +39,18 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 				}
 				tableNks[t].push(f);
 			}
+			// Opt-in fold ordering (PMT-4302): a field flagged `combineOrder` makes the in-batch
+			// fold sort each natural key's rows in ascending byte order of this field's text
+			// before merging, instead of arrival order. Only fixed-width text such as an RStreams
+			// eid orders correctly: values compare as text, so on a number column 9 beats 10. The
+			// merge is field by field — the newest row's values win, and a field it leaves out
+			// keeps an older row's value. Used by current-state tables fed from sharded producers,
+			// where arrival order is not chronological; every table without the flag keeps the
+			// existing arrival-order fold. Field-level, like `nk`/`sk`/`scd`, and carried in the
+			// shared dw_fields entry so every loader that reads the schema folds the same way.
+			if (field.combineOrder) {
+				tableOrderFields[t] = f;
+			}
 		});
 	});
 
@@ -47,17 +62,21 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 			ids.map(id => {
 				entities.map(entity => {
 					let field = entity.field || 'id';
+					// The marker's value under the natural-key column IS its combine group.
+					// Resolve the table's natural key so that column is actually populated —
+					// writing it under a hardcoded `id` leaves the real key undefined for any
+					// table whose natural key is named something else, collapsing every delete
+					// in the batch into one group. See delete-marker.js.
+					let table = transform.parseTable({ type: entity.type, entity: entity.name });
+					let nks = (table && tableNks[table]) || [];
+					let nk = nks.length === 1 ? nks[0] : null;
 					this.push(Object.assign({}, obj, {
 						payload: {
 							type: entity.type,
 							entity: entity.name,
 							command: 'delete',
 							field: field,
-							data: {
-								id: field === 'id' ? id : `_del_${id}`,
-								__leo_delete__: field,
-								__leo_delete_id__: id
-							}
+							data: deleteMarkerData(field, id, nk)
 						}
 					}));
 				});
@@ -193,7 +212,14 @@ module.exports = function(ID, source, client, tableConfig, stream, callback) {
 	});
 
 	let usedTables = {};
-	ls.pipe(stream, validateData, checkforDelete, combine(tableNks), ls.write((obj, done) => {
+	// Optional client capability, same opt-in shape as resolveDeleteKeys:
+	// a client that sets `emitCombineSequence = true` gets a per-record arrival counter
+	// (`__leo_seq__`) on every record combine() emits, so it can order a record against
+	// one from a different natural-key group. Every client that does not set it keeps
+	// today's records unchanged.
+	let combineOpts = { emitSequence: client.emitCombineSequence === true, orderFields: tableOrderFields };
+
+	ls.pipe(stream, validateData, checkforDelete, combine(tableNks, combineOpts), ls.write((obj, done) => {
 		let tasks = [];
 		Object.keys(obj).forEach(t => {
 			if (t in tableConfig) {

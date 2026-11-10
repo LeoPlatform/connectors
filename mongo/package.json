@@ -3,6 +3,11 @@
 	"version": "3.0.7",
 	"description": "",
 	"main": "index.js",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/LeoPlatform/connectors.git",
+		"directory": "mongo"
+	},
 	"scripts": {
 		"test": "mocha --recursive -w"
 	},
