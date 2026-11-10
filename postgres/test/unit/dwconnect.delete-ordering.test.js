@@ -52,8 +52,12 @@ Module._load = function(request, parent) {
 	}
 	return origLoad.apply(this, arguments);
 };
-const dwconnect = require('../../lib/dwconnect.js');
+const dwconnectPath = require.resolve('../../lib/dwconnect.js');
+const dwconnect = require(dwconnectPath);
 Module._load = origLoad;
+// This copy of dwconnect is bound to the fake connect.js/leo-sdk. Evict it so test files loaded
+// after this one get the real module rather than this stubbed one from require.cache.
+delete require.cache[dwconnectPath];
 
 // ---- fake client/connection
 function makeFakeClient() {
